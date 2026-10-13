@@ -6,6 +6,7 @@ The first version.
 
 ### New
 
+- **Sound in a recorded video, in step to the sample**: `createPlayer({ stepped: { fps: 60 } })` (and so `createSound({ stepped })` and `configure({ stepped })`) is a player with no sound card for a page that a recorder films one frame at a time. Its engine stands still until `await player.stepped.advance(seconds)` or `step()` says where the clock now is, then makes exactly the samples up to there, and `player.stepped.take()` hands them over. A scene's code does not change: `soundTime()`, `beat()`, a song's `position` and what a scope or a meter reads are all the frame being drawn, a note asked for in a frame starts on that frame's first sample, n frames are `round(n × sampleRate / fps)` samples with nothing drifting over ten minutes at 60, 30 or 29.97 frames a second, and two recordings of one scene are the same numbers. Tests in `scripts/test-stepped.mjs`; the contract in `docs/commands.md`.
 - `playSound("coin")`: fourteen ready-made game sounds (coin, jump, laser, shoot, explosion, hit, powerup, blip, click, zap, bounce, pop, win, lose), each with `{ volume, pitch, pan }`.
 - `playNote("C4")`, `playNote(["C4", "E4", "G4"], 1, 0.5)`: notes and chords by name or number, with a length and a loudness.
 - `playNotes("C4 E4 G4 - C5:2", 0.25, { repeat: true })`: a tune, kept in time by the sound engine itself.

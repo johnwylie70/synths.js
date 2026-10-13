@@ -23,7 +23,7 @@ native app) plays it. It describes command format **1**.
 
 ```
 your program ── functions ──▶ commands ── transport ──▶ player ──▶ engine (audio thread) ──▶ sound
-               (createSound)   (plain data)  (send)     (createPlayer, createOfflinePlayer)
+               (createSound)   (plain data)  (send)     (createPlayer, createOfflinePlayer, createSteppedPlayer)
 ```
 
 - Every command is plain data: objects, lists, numbers, text, `true`, `false` and `null`. It survives
@@ -741,8 +741,66 @@ every field of its `sound` option to the player, so `sound: { fallbackBuffer: 40
 
 `createOfflinePlayer({ sampleRate, wasm, start, microphone, save })` is a promise of a player with `send(batch)` and
 `render(seconds)`, which gives `{ left, right, sampleRate, wav() }` and carries on from where the last render
-ended. `microphone` is samples to use in a microphone's place (one channel, starting with the first frame). For a video's soundtrack: keep every batch a scene sent while it was recorded, send them to an offline
-player whose `start` is the scene's clock at the first frame, and render the length of the video.
+ended. `microphone` is samples to use in a microphone's place (one channel, starting with the first frame). For a
+video's soundtrack use the stepped player, below: it is this player moved one video frame at a time, so the scene
+can read the sound back as it is recorded.
+
+### The stepped player: sound for a video recorded a frame at a time
+
+`createPlayer({ stepped: { fps, sampleRate, start } })` (also `createSteppedPlayer`, and what `createSound` and
+`configure` make when given `stepped`) is for a host that records a page as a video by moving the page's clock one
+frame at a time: every frame exactly 1/fps after the last, however long it took to draw and encode. Sound played
+by the sound card in real time cannot stay with such pictures, and a scene that asks the song where it is would be
+told the real time, not the video's. So this player has no sound card. It takes the same batches, and its engine
+stands still until the host says where the clock is.
+
+| | |
+|---|---|
+| `fps` | the video's frames a second (60). Only `step()` uses it |
+| `sampleRate` | samples a second (48000) |
+| `start` | what the sender's clock reads at the first sample (0) |
+
+The player is what `createPlayer` gives, with `kind: "stepped"`, no `context` and no `node`, `state` going from
+`"loading"` to `"on"` with no `"waiting"` (no tap is needed), and `stepped`:
+
+| | |
+|---|---|
+| `await stepped.advance(seconds)` | the clock now reads `seconds`: make the sound up to there. It gives the samples made |
+| `await stepped.step(frames = 1)` | the same by counting frames: after n steps there are `round(n × sampleRate / fps)` samples |
+| `stepped.take()` | `{ left, right, sampleRate, length, wav() }`: what was made since the last take, and no longer kept |
+| `stepped.onAdvance(fn)` | `fn(left, right, sampleRate)` for each stretch as it is made; it gives back a function that stops it |
+| `stepped.startAt(seconds)` | the clock reads `seconds` at the point the sound has reached (for a clock that was already running) |
+| `stepped.time`, `.samples`, `.frame` | seconds made, samples made, frames stepped |
+| `stepped.keep = false` | do not keep samples for `take()` (they still go to `onAdvance`) |
+
+THE CLOCK is the sender's, as everywhere: a command's `t`, a batch's `now` and the `seconds` given to `advance` are
+read on one clock, which in a page is `performance.now() / 1000`, the clock the recorder is stepping. A command
+lands on the sample of `round((t - start) × sampleRate)`, or of the batch's `now` when it names no time, and never
+before the point the sound has reached. Nothing is carried out before the first `advance` or `step`, so `startAt`
+may still be said after a scene has begun asking for things.
+
+THE ORDER, for each video frame: the host moves the clock to the frame's time (and runs what timers fall due),
+calls `advance` with that time and waits for it, then lets the frame be drawn. The sound up to the frame exists
+before the frame is drawn, so `read()`, `songPosition()`, a synth's `samples()`, `level()` and `notes()` are that
+frame's. What the frame asks for is written at that time and so starts on the frame's first sample. The samples
+`advance` made are the frame before's; when the recording ends the host calls `advance` once more, with the time
+after the last frame, for the last frame's.
+
+`advance` first has every `createSound()` on the page send what it has written (they batch by the microtask), then
+waits for anything still being read on the way (a song's file read through a host's `read`, a sample being
+fetched or decoded, MIDI's file), then renders. So how long a file took to arrive never moves a note, and two
+recordings of one scene give the same samples. Calls are carried out one at a time, in the order they were made.
+
+There is no microphone (a `mic` command is answered as it is offline: "unavailable"), `pause()` and `resume()` on
+the player do nothing (a recording's frames go on whether the page is seen or not), and a `buffer` command is
+answered with `{ frames: sampleRate / fps, delay: 0, thread: "stepped" }`. If the engine cannot be loaded the
+player says so once, is `"failed"`, and `advance` still counts the samples, as silence, so a recording's sound is
+the right length.
+
+Checked in node (`scripts/test-stepped.mjs`): at 60, 30 and 29.97 frames a second the stepped samples are the
+offline player's own, none different; ten minutes at 60, 30, 29.97, 24, 25, 50 and 59.94 frames a second, at 48000
+and 44100 samples, are `round(frames × sampleRate / fps)` samples exactly with every step within one sample of the
+next; a note asked for in frame N begins on sample `round(N × sampleRate / fps)`.
 
 Measured in Playwright's browsers on 2026-10-13: in Chromium the worklet loads from a Blob everywhere, including
 a sandboxed frame with no origin and a policy that allows no fetch. In WebKit a frame with no origin refuses a
