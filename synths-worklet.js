@@ -174,9 +174,17 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
     constructor(options) {
       super()
       this.core = null
+      this.over = false
       this.port.onmessage = (m) => {
         const core = this.core
         if (!core) return
+        if (m.data.close) {
+          // The player is finished with: let the browser take this processor away.
+          this.core = null
+          this.over = true
+          core.close()
+          return
+        }
         if (m.data.ops) {
           core.delta = core.time - currentFrame
           core.exec(m.data.ops)
@@ -194,7 +202,8 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
     process(inputs, outputs) {
       const core = this.core
       const out = outputs[0]
-      if (!core || !out || !out[0]) return true
+      if (!core) return !this.over
+      if (!out || !out[0]) return true
       core.delta = core.time - currentFrame
       core.render(out[0], out[1], out[0].length)
       return true

@@ -608,9 +608,17 @@ function registerSynths(makeCore) {
     constructor(options) {
       super()
       this.core = null
+      this.over = false
       this.port.onmessage = (m) => {
         const core = this.core
         if (!core) return
+        if (m.data.close) {
+          // The player is finished with: let the browser take this processor away.
+          this.core = null
+          this.over = true
+          core.close()
+          return
+        }
         if (m.data.ops) {
           core.delta = core.time - currentFrame
           core.exec(m.data.ops)
@@ -628,7 +636,8 @@ function registerSynths(makeCore) {
     process(inputs, outputs) {
       const core = this.core
       const out = outputs[0]
-      if (!core || !out || !out[0]) return true
+      if (!core) return !this.over
+      if (!out || !out[0]) return true
       core.delta = core.time - currentFrame
       core.render(out[0], out[1], out[0].length)
       return true
@@ -833,7 +842,7 @@ function makeConductor(post, load) {
       const steps = (c.steps || []).map(([after, n, len, vel]) => [Math.max(0, after), n == null ? [rec.note] : notes(n), Math.max(0.001, len), vel == null ? 0.8 : clamp(vel, 0, 1)])
         .filter((s) => s[1].length).sort((a, b) => a[0] - b[0])
       const length = c.length > 0 ? c.length : steps.length ? steps[steps.length - 1][0] + steps[steps.length - 1][2] : 0
-      // 0 repeats for ever (Infinity does not survive the journey to the worklet's thread as JSON would have it).
+      // The last number is how many times round; 0 is for ever.
       ops.push(['tune', c.id, at, rec.part, steps, length, c.repeat === true ? 0 : c.repeat > 1 ? Math.floor(c.repeat) : 1])
     },
     stop(c) {
@@ -957,7 +966,7 @@ const KEPT_WHILE_LOADING = 10
  */
 export function createPlayer(options = {}) {
   const Context = globalThis.AudioContext || globalThis.webkitAudioContext
-  const latency = options.latency ?? 0.04
+  let latency = options.latency ?? 0.04
   let held = []
   let saidWaiting = false
   let offset = null
@@ -1079,6 +1088,7 @@ export function createPlayer(options = {}) {
     if (typeof removeEventListener === 'function') for (const g of GESTURES) removeEventListener(g, unlock, { capture: true })
     try { player.node?.disconnect() } catch (e) { /* already gone */ }
     if (player.node) player.node.onaudioprocess = null
+    if (port) port.postMessage({ close: true })
     if (core) core.close()
     if (!options.context) context.close?.().catch(() => {})
     player.state = 'closed'
@@ -1134,6 +1144,8 @@ export function createPlayer(options = {}) {
       }
       node.connect(destination)
       player.kind = 'fallback'
+      // It makes sound 1024 frames at a time, so it has to be asked a little further ahead to stay exact.
+      if (options.latency === undefined) latency = 0.08
     }
     engineReady = true
     conductor.begin()
