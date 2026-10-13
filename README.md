@@ -372,6 +372,99 @@ hum.play("E4", 2)
 
 There is nothing to wait for: play it straight away, and it sounds as soon as the file has arrived.
 
+`saveSound(kick, "kick.wav")` saves a sample, or a recording of your own, as a WAV file.
+
+## Your voice
+
+The microphone is a synth whose sound comes in instead of being made. Ask for it, give it a voice, and listen:
+
+```js
+const mic = useMicrophone()       // the browser asks whether the page may use the microphone
+mic.voice = "robot"               // robot, chipmunk, monster, cave, telephone, alien, whisper, or "none"
+mic.listen()                      // now you hear yourself, as a robot. mic.mute() stops it
+```
+
+**Wear headphones when you listen.** Through loudspeakers the microphone hears itself, and the sound goes round and round until it howls. That is why nothing is heard until you say `listen()`. Recording does not need it.
+
+| voice | |
+|---|---|
+| `robot` | a machine, ringing in a metal pipe |
+| `chipmunk` | small and squeaky: seven semitones higher |
+| `monster` | huge and deep: seven semitones lower, with a growl |
+| `cave` | far inside a cave: long echoes in a very big room |
+| `telephone` | down an old phone line |
+| `alien` | not from here: higher, with a slow metallic sweep |
+| `whisper` | hoarse and breathy, with no pitch at all |
+
+A voice is only a handful of settings, and you can turn them yourself once it is on. A microphone has every setting a synth has, and a few words of its own:
+
+```js
+mic.pitch = 7                     // semitones up or down, -12 to 12, without getting faster or slower
+mic.echo = 0.4                    // and reverb, chorus, distortion, crush, cutoff, pan, volume, as on a synth
+mic.ring = 1                      // multiply the voice by a wave: mic.ringSpeed = 50 is how fast (the robot)
+mic.comb = 0.5                    // ring like a pipe at one note: mic.combTone = 110. mic.flanger sweeps it
+mic.gain = 2                      // turn a quiet microphone up
+mic.gate = -40                    // quieter than this (in dB) counts as silence. It starts at -50; "off" for none
+```
+
+Choosing another voice first puts back what the last one changed, so pick the voice and then turn the dials. What you set before choosing any voice stays under all of them.
+
+The microphone is a synth to [dials.js](https://github.com/johnwylie70/dials.js) too: `select("voice", mic, "voice")`, `dial("pitch", mic, "pitch")`, `toggle("listen", mic, "listening")`, `scope(mic)`, `meter(mic)`. The scope and the meter show your voice even while it is muted.
+
+### Recording
+
+```js
+const take = recordSound(3)       // three seconds of the microphone, starting now
+take.onDone(() => take.play())    // when it is over, play it back
+```
+
+`recordSound` gives you the recording at once and does not wait: your program carries on, and the take fills up behind it. A take is a sample, so everything a sample does it does, even while it is still recording:
+
+```js
+take.play()                       // as you said it
+take.play("E4")                   // higher and faster: middle C is its own pitch
+take.reverse = true               // backwards
+take.loop = true                  // round and round while its note is held
+take.voice = "monster"            // any voice, afterwards
+take.done, take.seconds           // is it over, and how long it is
+await take.whenDone()             // or wait for it, in a program that can wait
+```
+
+- What is recorded is **your plain voice**, whether or not you are listening. The take is then given the voice the microphone has, so it plays back the way the microphone sounds, and you can change your mind afterwards: `take.voice = "none"` is you, and `take.soundLike(mic)` is the microphone as it is set now.
+- `startRecording()` records until `stopRecording()`. It stops by itself after 30 seconds; `startRecording({ max: 60 })` gives it longer, up to 120.
+- One recording is made at a time: starting another ends the one before, which keeps what it had.
+- `recordSound(3, { effects: true })` records the voice after its effects instead of before. That only works while you are listening.
+
+### Recording what you play
+
+```js
+const tune = recordOutput(10)     // everything that is played for the next ten seconds, in stereo
+playNotes("C4 E4 G4 C5", 0.25)
+saveSound(tune, "my-tune.wav")    // saved as soon as it is over
+```
+
+`lead.record(4)` records one synth alone. `saveSound` gives a WAV file: in a browser it is downloaded. It also gives a promise of the file's bytes, and `saveSound(take, { download: false })` gives the bytes alone.
+
+### With no microphone
+
+A computer with no microphone, a person who says no, a page that is not allowed to ask: none of these stops your program. Every function still works, the console says once why there is no microphone and what to do about it, and a recording is simply empty and done straight away (`take.seconds` is 0). `mic.state` is `"on"`, or says why not: `"refused"`, `"none"`, `"busy"` or `"unavailable"`. `await mic.whenReady()` is `true` or `false`.
+
+A page has to be served over `https` or from `localhost` to be given a microphone, and a page inside a frame needs `allow="microphone"` on the frame.
+
+### The voice effects on a synth
+
+The pitch shifter, the ring modulator and the comb are not only for voices. Every synth has them, under names that do not clash with its own `pitch` and `ring`:
+
+```js
+lead.pitchShift = 12              // an octave up, with the same length
+lead.ringMod = 0.6                // bell-like and strange: lead.ringSpeed = 300
+lead.comb = 0.5                   // a metal pipe: lead.combTone, lead.combFeedback
+lead.flanger = 0.6                // the comb, sweeping: lead.flangerRate
+lead.voice = "robot"              // or a whole voice at once
+```
+
+Eight synths can use the pitch shifter or the comb at once.
+
 ## When things start
 
 Everything that makes a sound takes one of these:
@@ -436,7 +529,7 @@ function update(dt) {
 
 ## The Python spellings
 
-Every function has its Python spelling too, so a program comes across from one language to the other with little more than its syntax changed: `play_sound`, `play_note`, `play_notes`, `play_arp`, `start_arp`, `make_synth`, `load_sample`, `play_song`, `stop_sound`, `set_volume`, `mute_sound`, `set_effects`, `set_tempo`, `sound_time`, `on_midi_note`, `on_midi_control`, `send_midi_note`, `midi_devices`, `lead.play_from_midi()`. Settings too: `lead.vibrato_rate = 6`.
+Every function has its Python spelling too, so a program comes across from one language to the other with little more than its syntax changed: `play_sound`, `play_note`, `play_notes`, `play_arp`, `start_arp`, `make_synth`, `load_sample`, `play_song`, `stop_sound`, `set_volume`, `mute_sound`, `set_effects`, `set_tempo`, `sound_time`, `on_midi_note`, `on_midi_control`, `send_midi_note`, `midi_devices`, `lead.play_from_midi()`, `use_microphone`, `record_sound`, `start_recording`, `record_output`, `save_sound`, `take.on_done(...)`, `take.sound_like(mic)`. Settings too: `lead.vibrato_rate = 6`.
 
 ## Mistakes
 
@@ -446,9 +539,10 @@ A mistake is said in plain words, with what was probably meant:
 playSound("lazer"): there is no sound called "lazer". Did you mean "laser"? The sounds are: coin, jump, laser, …
 makeSynth(): there is no setting called "cutof". Did you mean "cutoff"?
 "H4" is not a note. Write a note as a name like "C4", "F#3" or "Bb5", or as a number, where 60 is middle C
+"robt" is not a voice. Did you mean "robot"? The voices are: robot, chipmunk, monster, cave, telephone, alien, whisper, and "none"
 ```
 
-Things that are not your mistake do not stop your program. They are said once in the console and the rest carries on: sound that is waiting for a tap, a sample whose file is missing, more synths than there is room for (32 at once; `remove()` gives a place back), more notes than there are voices (64; the oldest note makes way), a browser with no MIDI.
+Things that are not your mistake do not stop your program. They are said once in the console and the rest carries on: sound that is waiting for a tap, a sample whose file is missing, more synths than there is room for (32 at once; `remove()` gives a place back), more notes than there are voices (64; the oldest note makes way), a browser with no MIDI, no microphone.
 
 ## For apps that show scenes
 
@@ -479,6 +573,7 @@ port.onmessage = (m) => player.send(m.data)
 - **Reading back.** `player.read(id)` gives what a synth is doing now, `{ samples, level, notes }` (no id: all the sound), for scopes, meters and lit keys. It never waits: the audio thread posts it about 40 times a second while something is reading. A `sound` transport may have a `read(id)` of its own, and a synth's `samples()`, `level()` and `notes()` use it.
 - **Several scenes on a page** share one player and one sound card without being told to: every `createSound()` that is not given a `sound` joins it, in a scope of its own, so each still stops, mutes and pauses alone.
 - **MIDI** goes the same way. Its functions write a `midi` command into the same batches; a desk beside the player carries it out, plays a synth from a keyboard without the program in between, and hands back what was received as plain data: `player.onMidi((events) => port.postMessage({ midi: events }))` on the page and `sound.receiveMidi(events)` where the program is. A `midi` option, shaped like `sound`, is the devices themselves for an app whose browser has no MIDI (an iPad app, with CoreMIDI behind it). The code is `synths-midi.js`, fetched the first time MIDI is used. [docs/midi.md](docs/midi.md) is the contract.
+- **The microphone** is the player's, and is asked for when the first `mic` command arrives. What the player says back (the microphone is on or is not, a recording is over, a file is saved) is plain data: `player.onSoundEvents((events) => port.postMessage({ sound: events }), scope)` and `sound.receiveSoundEvents(events)`. A `microphone` option gives the player a stream, or frames pushed by the app, where the page cannot ask the browser (a sandboxed frame, a native app that owns the audio session), and `save` takes the files `saveSound` makes. `createOfflinePlayer({ microphone: samples })` takes sound in a microphone's place, which is how the tests listen. [docs/microphone.md](docs/microphone.md) is the contract.
 - **Pausing.** `sound.pause()` and `sound.resume()` on what `createSound` gave, for a scene that is paused or out of view, and `sound.close()` when it is over. (`player.pause()` silences everyone who shares the player.) `player.state` is `"loading"`, `"waiting"` (for a tap), `"on"` or `"failed"`.
 
 ## Tests
@@ -486,10 +581,11 @@ port.onmessage = (m) => player.send(m.data)
 ```bash
 node scripts/test-node.mjs
 node scripts/test-midi.mjs
+node scripts/test-voice.mjs
 PLAYWRIGHT=/path/to/node_modules/playwright node scripts/test-browser.mjs
 ```
 
-The first needs only node: it renders commands with the real engine and measures the sound. The second is MIDI, with a pretend device: the bytes, and the whole path to the engine and back. The third drives Chromium and WebKit with [Playwright](https://playwright.dev) and listens to what the audio worklet puts out.
+The first needs only node: it renders commands with the real engine and measures the sound. The second is MIDI, with a pretend device: the bytes, and the whole path to the engine and back. The third is the microphone, recording and the voices, with sound given in a microphone's place. The fourth drives Chromium and WebKit with [Playwright](https://playwright.dev) and listens to what the audio worklet puts out.
 
 The engine is built in [synths-core](https://github.com/johnwylie70/synths-core) and copied here by `node scripts/sync-engine.mjs`, which also writes the files made from it. The built engine is part of this repository, so nothing here needs Rust.
 

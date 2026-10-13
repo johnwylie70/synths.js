@@ -16,6 +16,7 @@ native app) plays it. It describes command format **1**.
 - [Writing a sender](#writing-a-sender)
 - [Being a host](#being-a-host)
 - [MIDI](#midi)
+- [The microphone, recording and saving](#the-microphone-recording-and-saving)
 - [What is not here yet](#what-is-not-here-yet)
 
 ## The shape of it
@@ -156,6 +157,13 @@ Change settings. Notes already sounding change too.
 `glide`, optional, is the seconds a number takes to slide to its new value. A setting whose scope is `all`
 (the shared effects) may be given here or in `master`; it changes for every synth.
 
+`voice`, optional, puts a voice changer on the synth before `set` is applied: `{ op: "set", id: "s1", voice:
+"robot" }`. The voices are in `synths-names.json` under `voices`, each a list of settings, and `"none"` takes one
+off. The rule, which a sender that mirrors settings must follow too: the first voice put on a synth remembers
+what every setting named by any voice was; each voice after that puts those back and then applies its own; and
+`"none"` puts them back and forgets them. A setting of the whole engine (the echo's time, the reverb's size) is
+touched only if this voice or the one before names it. `synth` takes `voice` as well.
+
 ### `macro`
 
 Give a synth a step macro: a list of steps that each of its notes plays through, `macro.rate` (the setting
@@ -279,6 +287,60 @@ To play it, make a synth whose `sample` setting is the sample's id:
 ```
 
 `{ op: "unsample", id: "w1" }` forgets a recording. There is room for 1024.
+
+A `sample` command with no `url`, `bytes` or `pcm` changes one that is already there: `{ op: "sample", id: "w1",
+loop: true }` sets its loop (`false` takes it away) and `note` the note it is at. For a recording still being
+made, the loop is put on when it is over.
+
+### `mic`
+
+The microphone: see [The microphone, recording and saving](#the-microphone-recording-and-saving).
+
+```js
+{ op: "mic", id: "m1", set: { micGate: -50 } }      // open it: this is when the person is asked
+{ op: "mic", id: "m1", listen: true }               // hear it; false to stop hearing it
+{ op: "mic", id: "m1", do: "close" }                // let it go
+```
+
+| field | |
+|---|---|
+| `id` | the microphone, which from then on is a synth by that id: `set`, `voice`, `note` and reading back all work on it |
+| `set`, `voice` | optional: settings and a voice, as in [`set`](#set) |
+| `listen` | optional: whether it is heard. It is not, to begin with |
+| `raw` | optional, on the command that opens it: `false` asks the browser for its phone-call processing (echo cancelling, noise removal, automatic level) |
+| `do` | `"close"` lets the microphone go |
+
+### `record`
+
+Record into a sample id, which is from then on a sample like one that was loaded.
+
+```js
+{ op: "record", id: "w3", from: "mic", len: 3 }                  // three seconds of the microphone
+{ op: "record", id: "w4", from: "output", max: 60 }              // everything played, until stopped or for 60 seconds
+{ op: "record", id: "w5", from: "synth", synth: "s1", len: 2 }   // one synth
+{ op: "record", do: "stop" }                                     // end this sender's recording; with an id, that one
+```
+
+| field | |
+|---|---|
+| `id` | the sample to record into: an id of the sender's choosing, as for `sample` |
+| `from` | `"mic"` (the default), `"output"` or `"synth"` with `synth` |
+| `len` | seconds. Without it the recording runs until it is stopped, or for `max` seconds (30), or 120 at the very most |
+| `effects` | with `from: "mic"`: record the microphone after its voice and effects. This needs it to be listened to; otherwise, and by default, the plain microphone is recorded, after its gain and gate |
+| `loop` | as for `sample`, put on when the recording is over |
+
+The microphone and a synth are recorded in one channel, the output in two. `t` is when it starts, on the exact
+sample. One recording is made at a time: another one starting ends the first, which keeps what it has.
+
+### `save`
+
+```js
+{ op: "save", id: "w3", name: "hello.wav", ask: 7 }
+```
+
+Read a sample out of the engine as a 16-bit WAV file (a recording, or any loaded sample). The player downloads
+it, or hands it to its `save` option; `download: false` does neither. The file comes back as plain data with
+`ask`, the sender's own number for this request. A recording that is still being made is saved when it is over.
 
 ### `tune`
 
@@ -480,14 +542,16 @@ player to itself. On each: `pause()`, `resume()` and `close()`.
 | `context`, `destination` | an `AudioContext` and a node of your own to play into |
 | `fallback` | `false` to refuse running the engine on the page's thread when there is no AudioWorklet; `"always"` to insist on it |
 | `onState` | called with `"waiting"`, `"on"` or `"failed"` |
+| `microphone` | where the microphone comes from when it is not the browser's to ask for: see [microphone.md](microphone.md). `false` for none |
+| `save` | called with `{ name, bytes, type }` for a file `saveSound` made, in place of a download |
 
 It returns `send(batch)`, `read(id)` (see [Reading back](#reading-back)), `state`, `kind` (`"worklet"` or `"fallback"`), `ready` (a promise for sound being on),
 `pause()`, `resume()`, `unlock()` (call it from a tap of your own), `ask()` (a promise of `{ voices, time }`),
 `context`, `node` and `close()`.
 
-`createOfflinePlayer({ sampleRate, wasm, start })` is a promise of a player with `send(batch)` and
+`createOfflinePlayer({ sampleRate, wasm, start, microphone, save })` is a promise of a player with `send(batch)` and
 `render(seconds)`, which gives `{ left, right, sampleRate, wav() }` and carries on from where the last render
-ended. For a video's soundtrack: keep every batch a scene sent while it was recorded, send them to an offline
+ended. `microphone` is samples to use in a microphone's place (one channel, starting with the first frame). For a video's soundtrack: keep every batch a scene sent while it was recorded, send them to an offline
 player whose `start` is the scene's clock at the first frame, and render the length of the video.
 
 Measured in Playwright's browsers on 2026-10-13: in Chromium the worklet loads from a Blob everywhere, including
@@ -529,6 +593,33 @@ back what was received through `player.onMidi(listener, scope)`: lists of plain 
 thing besides [reading back](#reading-back) that comes from a player. A player without it passes `midi` over like
 any command it does not know. The `midi` option of `createPlayer` is a host's own way to the devices, for a
 browser that has no MIDI. All of it is in [midi.md](midi.md).
+
+## The microphone, recording and saving
+
+The microphone is where the player is, so the player opens it, on the first `mic` command and not before; how a
+host supplies one where the browser cannot is in [microphone.md](microphone.md). From then on the microphone is a
+synth by its id whose sound comes in instead of being made: it has a part of the engine, so `set` and `voice`
+work on it, and so does [reading back](#reading-back) (which, while it is not listened to, shows it as it comes
+in). A microphone has no filter to begin with, so that it passes untouched.
+
+The library's own microphone has a few words of its own, which it turns into the usual ones before it writes a
+command (`synths-names.json`, under `microphone.names`): `pitch` is `pitchShift`, `ring` is `ringMod`, `gain` is
+`micGain`, `gate` is `micGate`. A sender in another language does the same.
+
+Three things come back from a player besides what is read, all through `player.onSoundEvents(listener, scope)`,
+as lists of plain objects for the sender of that scope:
+
+```js
+{ type: "microphone", state: "on" }                              // or "asking", "refused", "none", "busy", "unavailable", "off"; with `message` when there is none
+{ type: "recorded", id: "w3", frames: 144000, seconds: 3, rate: 48000, full: false }
+{ type: "saved", id: "w3", ask: 7, name: "hello.wav", seconds: 3, bytes: <Uint8Array: the WAV file> }
+```
+
+A host carries them to where the program is and gives them to `sound.receiveSoundEvents(events)`; a transport
+that has `onSoundEvents(listener, scope)` beside its `send` is asked by the library itself. With no microphone a
+`record` from it is answered at once with `frames: 0`, the reason is said once in the console, and every other
+command is carried out as usual. While the person is still being asked, a `record` from the microphone waits for
+the answer and begins then. `full` is true for a recording that ran out of room.
 
 ## What is not here yet
 
