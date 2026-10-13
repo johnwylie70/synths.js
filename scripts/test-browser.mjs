@@ -203,6 +203,37 @@ async function withSound(name, browser) {
   say(JSON.stringify(got.first.other) === '[0,[]]' && JSON.stringify(got.first.out) === '[[69,72],true]' && JSON.stringify(got.after[0]) === '[]' && got.after[1] === 0 && got.after[2] < got.first.level[0] * 0.8, name, 'another synth reads silent, soundOutput() reads everything, and after noteOff the keys are dark, the wave is flat and the level is falling', got)
   say(got.cost < 100, name, `reading never waits for the audio thread: 10000 reads take ${got.cost.toFixed(1)} ms`, got.cost)
 
+  // --- several scenes on a page share one player
+  await fresh(page)
+  got = await page.evaluate(async () => {
+    const { createSound } = await import('/synths.js')
+    const a = createSound(), b = createSound(), c = createSound()
+    const low = a.makeSynth(T.CLICK), high = b.makeSynth(T.CLICK)
+    c.makeSynth(T.CLICK)
+    a.flush(); b.flush(); c.flush()
+    await T.on(() => a.player)
+    low.start('A3'); high.start('A5')
+    high.notes(); low.notes()
+    await T.wait(300)
+    const one = a.player === b.player && b.player === c.player
+    const notes = [low.notes(), high.notes()]
+    a.stopSound()
+    await T.wait(300)
+    const after = [low.notes(), high.notes()]
+    b.pause(); a.pause(); c.pause()
+    await T.wait(200)
+    const rested = a.player.context.state
+    b.resume()
+    await T.wait(200)
+    const woke = [b.player.context.state, (await T.listen(b.player, 200)).peak > 0.1]
+    a.close(); b.close()
+    const still = c.player.state
+    c.close()
+    return { one, notes, after, rested, woke, still, end: a.player.state }
+  })
+  say(got.one && JSON.stringify([got.notes, got.after]) === '[[[57],[81]],[[],[81]]]' && got.rested === 'suspended' && JSON.stringify(got.woke) === '["running",true]' && got.still === 'on' && got.end === 'closed', name,
+    'three createSound() on a page share one player and one sound card: each stops alone, the sound card rests when all are paused, and the player closes when the last one does', got)
+
   // --- an arpeggio in the worklet
   await fresh(page)
   got = await page.evaluate(async () => {

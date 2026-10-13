@@ -327,7 +327,8 @@ port.onmessage = (m) => player.send(m.data)
 - **The engine runs on the audio thread**, in an AudioWorklet. Where there is none (a page not served over https or from localhost has none), the same engine runs on the page's thread through a ScriptProcessorNode: the same sound, which may crackle when the page is busy. The console says so once. `fallback: false` refuses it.
 - **Offline.** `createOfflinePlayer()` is the same player with no sound card: send it the same batches and `render(seconds)` gives the samples, and `wav()` a WAV file. It works in node too. `renderSound((s) => { s.playNote("C4") }, { seconds: 1 })` does it in one line. This is how a recorded video gets its soundtrack, and how the tests listen.
 - **Reading back.** `player.read(id)` gives what a synth is doing now, `{ samples, level, notes }` (no id: all the sound), for scopes, meters and lit keys. It never waits: the audio thread posts it about 40 times a second while something is reading. A `sound` transport may have a `read(id)` of its own, and a synth's `samples()`, `level()` and `notes()` use it.
-- **Pausing.** `player.pause()` and `player.resume()`, for a scene that is paused or out of view; `player.close()` when it is over. `player.state` is `"loading"`, `"waiting"` (for a tap), `"on"` or `"failed"`.
+- **Several scenes on a page** share one player and one sound card without being told to: every `createSound()` that is not given a `sound` joins it, in a scope of its own, so each still stops, mutes and pauses alone.
+- **Pausing.** `sound.pause()` and `sound.resume()` on what `createSound` gave, for a scene that is paused or out of view, and `sound.close()` when it is over. (`player.pause()` silences everyone who shares the player.) `player.state` is `"loading"`, `"waiting"` (for a tap), `"on"` or `"failed"`.
 
 ## Tests
 

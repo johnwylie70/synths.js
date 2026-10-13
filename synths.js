@@ -851,13 +851,50 @@ function makeConductor(post, load) {
   let nextSlot = 0
   let uses = 0
   let handle = 0x80000000
-  let volume = 1, muted = false
+  let volume = 1, muted = false, paused = false
   let ops = []
   let transfer = []
   /** Samples still being read: the offline player waits for these before it renders. */
   const loading = new Set()
 
   const event = (at, type, part, a, x, y, z, b) => ops.push(['e', at, type, part, a >>> 0, x, y || 0, z || 0, b || 0])
+
+  /**
+   * SCOPES. Several senders can share one player without knowing of each other (the scenes on one page): each
+   * names a scope on its batches. A scope has its own ids, its own volume, mute and pause, and "stop everything"
+   * stops only what is its own. The scope with no name is the player itself: its volume is the volume of all.
+   * A scope's volume is made by turning each of its synths' parts down, since the engine has one master volume.
+   */
+  const scopes = new Map()
+  let scope = null
+  let prefix = ''
+  const VOLUME = id('volume')
+  function enter(name) {
+    name = name || ''
+    prefix = name ? name + '\u0001' : ''
+    scope = scopes.get(name)
+    if (!scope) scopes.set(name, scope = { name, gain: 1, muted: false, paused: false, synths: new Set(), samples: new Set(), tunes: new Set() })
+  }
+  const heard = (sc) => (sc.name === '' ? 1 : sc.muted || sc.paused ? 0 : sc.gain)
+  // What a part is really set to for a synth's setting: its volume is turned by its scope's.
+  const real = (rec, pid, value) => (pid === VOLUME ? clamp(value * heard(rec.scope), 0, 2) : value)
+  function record(sid, patch, note, macro) {
+    const rec = { patch, part: -1, used: 0, note, macro, scope }
+    synths.set(sid, rec)
+    scope.synths.add(sid)
+    return rec
+  }
+  const slotFor = (sample) => slotOf(prefix + sample)
+  // A scope's volume has changed: turn its parts.
+  function turn(sc, at) {
+    for (const sid of sc.synths) {
+      const rec = synths.get(sid)
+      if (!rec || rec.part < 0) continue
+      const want = real(rec, VOLUME, rec.patch.has(VOLUME) ? rec.patch.get(VOLUME) : 1)
+      parts[rec.part].values.set(VOLUME, want)
+      event(at, PARAM, rec.part, VOLUME, want, 0.02)
+    }
+  }
 
   // Give the note with a handle an arpeggio (or change the one it has, or with no offsets take it away): the
   // engine steps one voice through the offsets, in semitones, so many times a second.
@@ -888,7 +925,7 @@ function makeConductor(post, load) {
   function dress(rec, at) {
     const part = parts[rec.part]
     for (const [pid, , , , , def] of partParams) {
-      const want = rec.patch.has(pid) ? rec.patch.get(pid) : def
+      const want = real(rec, pid, rec.patch.has(pid) ? rec.patch.get(pid) : def)
       if ((part.values.has(pid) ? part.values.get(pid) : def) !== want) {
         part.values.set(pid, want)
         event(at, PARAM, rec.part, pid, want, 0)
@@ -922,8 +959,7 @@ function makeConductor(post, load) {
   function synthFor(sid, at) {
     let rec = synths.get(sid)
     if (!rec) {
-      rec = { patch: patchOf(PRESETS.keys, '', false, plain()), part: -1, used: 0, note: 60, macro: null }
-      synths.set(sid, rec)
+      rec = record(sid, patchOf(PRESETS.keys, '', false, plain()), 60, null)
     }
     seat(rec, at)
     rec.used = ++uses
@@ -934,27 +970,27 @@ function makeConductor(post, load) {
   const notes = (n) => (Array.isArray(n) ? n : [n]).map(note).filter((v) => v !== null)
 
   function setAll(rec, given, at, glide) {
-    const changed = patchOf(given, '', false, new Map(), slotOf)
+    const changed = patchOf(given, '', false, new Map(), slotFor)
     for (const [pid, value] of changed) {
       if (pid >= 200) { if (pid !== MASTER) event(at, PARAM, 0, pid, value, glide); continue }
       if (!rec) continue
       rec.patch.set(pid, value)
       if (rec.part >= 0) {
-        parts[rec.part].values.set(pid, value)
-        event(at, PARAM, rec.part, pid, value, glide)
+        parts[rec.part].values.set(pid, real(rec, pid, value))
+        event(at, PARAM, rec.part, pid, real(rec, pid, value), glide)
       }
     }
   }
 
   // setVolume(1) is the engine's master volume at 0.5: loud enough for one voice, with room for many.
-  const master = (at) => event(at, PARAM, 0, MASTER, muted ? 0 : clamp(volume * 0.5, 0, 2), 0)
+  const master = (at) => event(at, PARAM, 0, MASTER, muted || paused ? 0 : clamp(volume * 0.5, 0, 2), 0)
 
   const does = {
     synth(c, at) {
       let rec = synths.get(c.id)
-      if (!rec) synths.set(c.id, rec = { patch: null, part: -1, used: ++uses, note: 60, macro: null })
+      if (!rec) { rec = record(c.id, null, 60, null); rec.used = ++uses }
       const preset = c.preset == null ? null : PRESETS[c.preset] || PRESETS.keys
-      rec.patch = patchOf(c.set, '', false, patchOf(preset, '', false, plain()), slotOf)
+      rec.patch = patchOf(c.set, '', false, patchOf(preset, '', false, plain()), slotFor)
       rec.note = (preset && preset.note) || 60
       rec.macro = macroOf(c.macro !== undefined ? c.macro : preset && preset.macro, false)
       for (const [pid, value] of rec.patch) if (pid >= 200) { rec.patch.delete(pid); if (pid !== MASTER) event(at, PARAM, 0, pid, value, 0) }
@@ -1002,8 +1038,8 @@ function makeConductor(post, load) {
     sound(c, at) {
       const sound = SOUNDS[c.name]
       if (!sound) return
-      const sid = 'sound:' + c.name
-      if (!synths.has(sid)) synths.set(sid, { patch: patchOf(sound.patch, '', false, plain()), part: -1, used: 0, note: 60, macro: macroOf(sound.patch.macro, false) })
+      const sid = prefix + 'sound:' + c.name
+      if (!synths.has(sid)) record(sid, patchOf(sound.patch, '', false, plain()), 60, macroOf(sound.patch.macro, false))
       const rec = synthFor(sid, at)
       for (const [after, n, len, vel, slideTo, slideTime] of sound.notes) {
         const h = autoHandle()
@@ -1017,6 +1053,7 @@ function makeConductor(post, load) {
     },
     sample(c) {
       const slot = slotOf(c.id)
+      scope.samples.add(c.id)
       const send = ({ pcm, channels, rate }) => {
         const base = c.note == null ? 60 : note(c.note) ?? 60
         const frames = Math.floor(pcm.length / channels)
@@ -1042,17 +1079,43 @@ function makeConductor(post, load) {
         .filter((s) => s[1].length).sort((a, b) => a[0] - b[0])
       const length = c.length > 0 ? c.length : steps.length ? steps[steps.length - 1][0] + steps[steps.length - 1][2] : 0
       // The last number is how many times round; 0 is for ever.
+      scope.tunes.add(c.id)
       ops.push(['tune', c.id, at, rec.part, steps, length, c.repeat === true ? 0 : c.repeat > 1 ? Math.floor(c.repeat) : 1])
     },
     stop(c) {
       if (c.id != null) ops.push(['stopTune', c.id])
-      else ops.push(['stop'])
+      else if (scope.name === '') ops.push(['stop'])
+      else {
+        // Everything of this scope, and nothing of anyone else's.
+        for (const sid of scope.synths) if (synths.get(sid)?.part >= 0) ops.push(['stopPart', synths.get(sid).part, 1])
+        for (const tune of scope.tunes) ops.push(['stopTune', tune])
+        scope.tunes.clear()
+      }
     },
     master(c, at) {
-      if (c.volume != null && Number.isFinite(+c.volume)) volume = Math.max(0, +c.volume)
-      if (c.mute != null) muted = !!c.mute
-      if (c.volume != null || c.mute != null) master(at)
       if (c.set) setAll(null, c.set, at, 0)
+      if (c.volume == null && c.mute == null && c.pause == null) return
+      if (scope.name === '') {
+        if (c.volume != null && Number.isFinite(+c.volume)) volume = Math.max(0, +c.volume)
+        if (c.mute != null) muted = !!c.mute
+        if (c.pause != null) paused = !!c.pause
+        return master(at)
+      }
+      if (c.volume != null && Number.isFinite(+c.volume)) scope.gain = clamp(+c.volume, 0, 4)
+      if (c.mute != null) scope.muted = !!c.mute
+      if (c.pause != null) scope.paused = !!c.pause
+      turn(scope, at)
+    },
+    // The sender is finished: everything of its scope is stopped and forgotten, and its places are free again.
+    close() {
+      for (const sid of scope.synths) {
+        const rec = synths.get(sid)
+        if (rec && rec.part >= 0) { ops.push(['stopPart', rec.part, 1]); parts[rec.part].owner = null }
+        synths.delete(sid)
+      }
+      for (const tune of scope.tunes) ops.push(['stopTune', tune])
+      for (const sample of scope.samples) does.unsample({ id: sample })
+      scopes.delete(scope.name)
     },
     song() {
       tell('tracker songs are not ready yet in this version, so playSong plays nothing. The rest of your sound is not affected.')
@@ -1069,25 +1132,29 @@ function makeConductor(post, load) {
   }
 
   return {
-    /** Carry out one command at a time of the sound card, in seconds. */
-    run(command, at) {
+    /** Carry out one command at a time of the sound card, in seconds, for the sender whose scope is named. */
+    run(command, at, scopeName) {
       const how = command && does[command.op]
-      if (how) how(command, at)
+      if (!how) return
+      enter(scopeName)
+      // Inside a scope every id is the scope's own.
+      if (prefix && (command.id != null || command.synth != null)) command = { ...command, ...(command.id != null ? { id: prefix + command.id } : {}), ...(command.synth != null ? { synth: prefix + command.synth } : {}) }
+      how(command, at)
     },
     flush,
     /** Set the engine to how a new conductor expects to find it. */
-    begin() { master(null); flush() },
+    begin() { enter(''); master(null); flush() },
     loading,
     /** The engine's part a synth has now: 65535 for no id (everything), -1 for a synth with no part. */
-    partOf(sid) { return sid == null ? 0xffff : synths.get(sid)?.part ?? -1 },
+    partOf(sid, scopeName) { return sid == null ? 0xffff : synths.get((scopeName ? scopeName + '\u0001' : '') + sid)?.part ?? -1 },
     /** A setting of a synth as the commands so far have left it: [what it is, its value in the engine's units], or null. */
-    settingOf(sid, name) {
+    settingOf(sid, name, scopeName) {
       const entry = setting(name)
-      const rec = synths.get(sid)
+      const rec = synths.get((scopeName ? scopeName + '\u0001' : '') + sid)
       return entry && rec ? [entry, rec.patch.get(entry.id)] : null
     },
     /** How much everything is turned down or up after the parts are mixed. */
-    gain: () => (muted ? 0 : clamp(volume * 0.5, 0, 2)),
+    gain: () => (muted || paused ? 0 : clamp(volume * 0.5, 0, 2)),
   }
 }
 
@@ -1160,14 +1227,14 @@ function reading([source, samples, left, right, words], gain) {
  * when the program that made the synth is somewhere else (Python, a worker). It writes ordinary commands for that
  * id, and answers get() and describe() from what the commands so far have set, so it needs to be told nothing.
  */
-function makeTarget(id, run, conductor, read) {
+function makeTarget(id, run, conductor, read, scope) {
   const held = new Map()
   let handle = 0x7f000000
   const target = {
     id,
     set(name, value) { run({ op: 'set', id, set: typeof name === 'string' ? { [name]: value } : name }); return target },
-    get(name) { const now = conductor()?.settingOf(id, name); return now ? readSetting(now[0], now[1]) : undefined },
-    describe(name) { const now = conductor()?.settingOf(id, name); return now ? describeSetting(now[0], now[1]) : setting(name) ? describeSetting(setting(name)) : null },
+    get(name) { const now = conductor()?.settingOf(id, name, scope); return now ? readSetting(now[0], now[1]) : undefined },
+    describe(name) { const now = conductor()?.settingOf(id, name, scope); return now ? describeSetting(now[0], now[1]) : setting(name) ? describeSetting(setting(name)) : null },
     noteOn(note, velocity = 0.8) {
       const n = noteNumber(note)
       target.noteOff(n)
@@ -1182,9 +1249,9 @@ function makeTarget(id, run, conductor, read) {
       held.delete(n)
       return target
     },
-    samples: () => read(id).samples,
-    level: () => read(id).level,
-    notes: () => read(id).notes,
+    samples: () => read(id, scope).samples,
+    level: () => read(id, scope).level,
+    notes: () => read(id, scope).notes,
   }
   target.note_on = target.noteOn
   target.note_off = target.noteOff
@@ -1239,6 +1306,7 @@ export function createPlayer(options = {}) {
   let asks = 0
   let closed = false
   let paused = false
+  let resting = false
   let waitingSince = null
   const local = () => performance.now() / 1000
   const waiting = new Map()
@@ -1248,7 +1316,7 @@ export function createPlayer(options = {}) {
     ready: new Promise((yes) => { ready = yes }),
     send, unlock, close, read,
     /** A synth that exists by its id, as something controls can be tied to: set, get, describe, noteOn, noteOff, samples, level, notes. */
-    target: (id) => makeTarget(id, (c) => send({ synths: COMMANDS, cmds: [c] }), () => conductor, read),
+    target: (id, scope) => makeTarget(id, (c) => send({ synths: COMMANDS, scope, cmds: [c] }), () => conductor, read, scope),
     /** Silence, with everything kept as it is: for a scene that is paused or out of view. */
     pause() { paused = true; player.context?.suspend?.() },
     resume() { paused = false; unlock() },
@@ -1277,7 +1345,7 @@ export function createPlayer(options = {}) {
   // BROWSERS KEEP A PAGE SILENT until the person has touched it. Every touch asks again; the first one that the
   // browser accepts turns the sound on, and what was held back for it is played then.
   function unlock() {
-    if (!closed && !paused && context.state !== 'running') context.resume?.().catch(() => {})
+    if (!closed && !paused && !resting && context.state !== 'running') context.resume?.().catch(() => {})
   }
   const GESTURES = ['pointerdown', 'mousedown', 'touchend', 'keydown']
   if (typeof addEventListener === 'function') for (const g of GESTURES) addEventListener(g, unlock, { capture: true, passive: true })
@@ -1300,30 +1368,45 @@ export function createPlayer(options = {}) {
     const now = context.currentTime + latency
     const waited = held
     held = []
-    for (const { c, asked, ahead } of waited) {
+    for (const { c, asked, ahead, scope } of waited) {
       const still = ahead - (here - asked)
       if (ONE_SHOTS.has(c.op) && still < -patience) continue
-      conductor.run(c, now + Math.max(0, still))
+      conductor.run(c, now + Math.max(0, still), scope)
     }
     conductor.flush()
     ready()
   }
 
+  // Senders that share this player each pause for themselves (a scene out of view). When every one of them is
+  // paused the sound card is let rest; the first to come back wakes it.
+  const pausedScopes = new Map()
+  function pauses(batch) {
+    const name = batch.scope || ''
+    for (const c of batch.cmds) {
+      if (c && c.op === 'master' && c.pause != null) pausedScopes.set(name, !!c.pause)
+      else if (c && c.op === 'close') pausedScopes.delete(name)
+      else if (!pausedScopes.has(name)) pausedScopes.set(name, false)
+    }
+    const all = pausedScopes.size > 0 && [...pausedScopes.values()].every(Boolean)
+    if (all && !resting) { resting = true; context.suspend?.() } else if (!all && resting) { resting = false; unlock() }
+  }
+
   function send(batch) {
     if (closed || player.state === 'failed' || !batch || !Array.isArray(batch.cmds)) return
+    pauses(batch)
     if (!live()) {
       // Not able to play yet: everything is kept in order, with when it was asked for (see settle).
       const at = local()
       if (held.length > 1000) held = held.filter((h) => !ONE_SHOTS.has(h.c.op) || h.ahead - (at - h.asked) > -KEPT_WHILE_LOADING)
       for (const c of batch.cmds) {
         if (!c) continue
-        if (c.op === 'stop') held = held.filter((h) => !(ONE_SHOTS.has(h.c.op) || h.c.op === 'tune' || h.c.op === 'song') || (c.id != null && h.c.id !== c.id))
+        if (c.op === 'stop') held = held.filter((h) => h.scope !== batch.scope || !(ONE_SHOTS.has(h.c.op) || h.c.op === 'tune' || h.c.op === 'song') || (c.id != null && h.c.id !== c.id))
         const ahead = typeof c.t === 'number' && typeof batch.now === 'number' ? c.t - batch.now : 0
-        if (c.op !== 'stop' || c.id == null) held.push({ c, asked: at, ahead })
+        if (c.op !== 'stop' || c.id == null) held.push({ c, asked: at, ahead, scope: batch.scope })
       }
       if (!saidWaiting && batch.cmds.some((c) => c && (ONE_SHOTS.has(c.op) || c.op === 'tune' || c.op === 'song'))) {
         saidWaiting = true
-        setTimeout(() => { if (!closed && !paused && context.state !== 'running' && player.state !== 'failed') tell('sound is waiting for a tap, a click or a key press. Browsers keep a page silent until the person using it has touched it.', 'info') }, 400)
+        setTimeout(() => { if (!closed && !paused && !resting && context.state !== 'running' && player.state !== 'failed') tell('sound is waiting for a tap, a click or a key press. Browsers keep a page silent until the person using it has touched it.', 'info') }, 400)
       }
       return
     }
@@ -1344,7 +1427,7 @@ export function createPlayer(options = {}) {
       let at = current + latency
       if (typeof c.t === 'number' && offset !== null) at = c.t + offset + latency
       if (at < current - TOO_LATE && ONE_SHOTS.has(c.op)) continue
-      conductor.run(c, at)
+      conductor.run(c, at, batch.scope)
     }
     conductor.flush()
   }
@@ -1355,8 +1438,8 @@ export function createPlayer(options = {}) {
   const tapped = new Map()
   const watched = new Map()
   let watchSaid = 0
-  function read(id) {
-    const part = conductor ? conductor.partOf(id) : -1
+  function read(id, scope) {
+    const part = conductor ? conductor.partOf(id, scope) : -1
     if (part < 0 || closed) return NOTHING
     if (core) { const now = core.taps([part], 1024)[0]; return now ? reading(now, conductor.gain()) : NOTHING }
     if (!port) return NOTHING
@@ -1488,7 +1571,7 @@ export async function createOfflinePlayer(options = {}) {
   return {
     send(batch) {
       if (!batch || !Array.isArray(batch.cmds)) return
-      for (const c of batch.cmds) if (c) conductor.run(c, (typeof c.t === 'number' ? c.t : typeof batch.now === 'number' ? batch.now : start) - start)
+      for (const c of batch.cmds) if (c) conductor.run(c, (typeof c.t === 'number' ? c.t : typeof batch.now === 'number' ? batch.now : start) - start, batch.scope)
       conductor.flush()
     },
     async render(seconds) {
@@ -1502,10 +1585,10 @@ export async function createOfflinePlayer(options = {}) {
     get time() { return core.time / sampleRate },
     voices: () => core.voices(),
     /** A synth that exists by its id, as something controls can be tied to (see createPlayer). What it plays starts where rendering has reached. */
-    target(id) { return makeTarget(id, (c) => { conductor.run(c, core.time / sampleRate); conductor.flush() }, () => conductor, (i) => this.read(i)) },
+    target(id, scope) { return makeTarget(id, (c) => { conductor.run(c, core.time / sampleRate, scope); conductor.flush() }, () => conductor, (i, sc) => this.read(i, sc), scope) },
     /** What a synth (or, with no id, everything) is doing at the point rendering has reached: { samples, level, notes }. */
-    read(id) {
-      const part = conductor.partOf(id)
+    read(id, scope) {
+      const part = conductor.partOf(id, scope)
       const now = part < 0 ? null : core.taps([part], 1024)[0]
       return now ? reading(now, conductor.gain()) : NOTHING
     },
@@ -1558,11 +1641,15 @@ function choices(args, names) {
  *   `batch: 'manual'` sends nothing until flush() is called (once a frame, say); otherwise a batch goes at the end of each turn.
  *   The rest are createPlayer's, for the player this makes when there is no `sound`.
  */
+let shared = null
+
 export function createSound(options = {}) {
   const clock = options.clock || (() => performance.now() / 1000)
   const prefix = options.ids || ''
   let transport = options.sound || null
   let player = null
+  let scope = options.scope || ''
+  let mine = null
   let cmds = []
   let waiting = false
   let ids = 0
@@ -1575,8 +1662,21 @@ export function createSound(options = {}) {
   function flush() {
     waiting = false
     if (!cmds.length || closed) return
-    if (!transport) transport = player = createPlayer(options)
+    if (!transport) {
+      // ONE PLAYER FOR THE PAGE. Every createSound() on a page that is not given a transport, or an AudioContext
+      // of its own, shares one player (the options of the first make it), each in a scope of its own: so ten
+      // scenes on a page are one sound card and one engine, and each still stops, mutes and pauses alone.
+      if (options.context || options.destination || options.share === false) transport = player = createPlayer(options)
+      else {
+        if (!shared || shared.player.state === 'closed' || shared.player.state === 'failed') shared = { player: createPlayer(options), users: 0, made: 0 }
+        shared.users++
+        mine = shared
+        scope = options.scope || 'page' + ++shared.made
+        transport = player = shared.player
+      }
+    }
     const batch = { synths: COMMANDS, now: clock(), cmds }
+    if (scope) batch.scope = scope
     cmds = []
     transport.send(batch)
   }
@@ -1802,11 +1902,11 @@ export function createSound(options = {}) {
     note_on(note, velocity) { return this.noteOn(note, velocity) }
     note_off(note) { return this.noteOff(note) }
     /** The wave this synth is making now, numbers from -1 to 1: a scope draws it. */
-    samples() { return (transport?.read?.(this._id) || NOTHING).samples }
+    samples() { return (transport?.read?.(this._id, scope) || NOTHING).samples }
     /** How loud this synth is now, [left, right], each from 0 to 1: a meter shows it. */
-    level() { return (transport?.read?.(this._id) || NOTHING).level }
+    level() { return (transport?.read?.(this._id, scope) || NOTHING).level }
     /** The notes this synth is sounding now, as numbers: a keyboard lights them. */
-    notes() { return (transport?.read?.(this._id) || NOTHING).notes }
+    notes() { return (transport?.read?.(this._id, scope) || NOTHING).notes }
 
     /** Change several settings at once: lead.set({ cutoff: 800, resonance: 0.4 }), and { glide: seconds } to slide there. Or one: lead.set("cutoff", 800). */
     set(given, o = {}) {
@@ -1913,9 +2013,9 @@ export function createSound(options = {}) {
   /** Everything that is sounding, as a target for a scope, a meter and dials for the volume and the shared effects. */
   let volumeNow = 1
   const output = {
-    samples: () => (transport?.read?.() || NOTHING).samples,
-    level: () => (transport?.read?.() || NOTHING).level,
-    notes: () => (transport?.read?.() || NOTHING).notes,
+    samples: () => (transport?.read?.(undefined, scope) || NOTHING).samples,
+    level: () => (transport?.read?.(undefined, scope) || NOTHING).level,
+    notes: () => (transport?.read?.(undefined, scope) || NOTHING).notes,
     describe(name) {
       if (key(name) === 'volume') return { name: 'volume', kind: 'float', min: 0, max: 2, default: 1, unit: 'gain' }
       const entry = setting(name)
@@ -1986,6 +2086,9 @@ export function createSound(options = {}) {
     /** The sound clock now, in seconds: the time that { at } is read against. */
     soundTime() { return clock() },
     soundNames, synthNames, settingNames,
+    /** Silence for this program alone, with everything kept as it is (a scene that is out of view), and back again. */
+    pause() { command({ op: 'master', pause: true, t: clock() }); flush() },
+    resume() { command({ op: 'master', pause: false, t: clock() }); flush() },
     /** Send what has been asked for so far (for `batch: 'manual'`). */
     flush,
     /** The player this made for itself, once a sound has been asked for (null with a `sound` transport). */
@@ -1993,10 +2096,10 @@ export function createSound(options = {}) {
     /** Stop everything and let go of the sound card. */
     close() {
       if (closed) return
-      cmds = [{ op: 'stop', t: clock() }]
+      cmds = [{ op: 'stop', t: clock() }, { op: 'close', t: clock() }]
       if (transport) flush()
       closed = true
-      player?.close()
+      if (mine) { if (--mine.users <= 0) { mine.player.close(); if (shared === mine) shared = null } } else player?.close()
     },
   }
   // The Python spellings.

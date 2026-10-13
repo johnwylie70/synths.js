@@ -436,6 +436,44 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
   say(same([far.samples().length, far.level(), far.notes()], [0, [0, 0], []]), 'a synth whose commands go somewhere that cannot be read gives nothing, without a fuss', [far.samples().length, far.level(), far.notes()])
 }
 
+// --- several programs on one player, each in a scope of its own
+{
+  const player = await createOfflinePlayer()
+  const a = createSound({ sound: player, clock: () => 0, scope: 'a' })
+  const b = createSound({ sound: player, clock: () => 0, scope: 'b' })
+  const low = a.makeSynth(CLICK), high = b.makeSynth(CLICK)          // both are "s1" to their own program
+  low.start('A3')
+  high.start('A5')
+  a.flush(); b.flush()
+  const hz = (r) => crossings(r.left, 0.02, 0.18) / 0.16
+  const both = await player.render(0.2)
+  say(same([low.notes(), high.notes(), a.soundOutput().notes()], [[57], [81], [57, 81]]) && player.voices() === 2, 'two programs with the same ids share a player without meeting: each synth reads its own note', [low.notes(), high.notes()])
+  a.setVolume(0.5)
+  a.flush()
+  await player.render(1.5)            // a meter falls slowly: give it time to come down to the new level
+  const quieter = [low.level()[0], high.level()[0]]
+  a.stopSound()
+  a.flush()
+  const one = await player.render(0.2)
+  say(Math.abs(hz(one) - 880) < 8 && same(low.notes(), []) && same(high.notes(), [81]), 'stopSound() in one stops only its own: the other plays on', [hz(one), low.notes(), high.notes()])
+  b.pause()
+  const silent = await player.render(0.2)
+  b.resume()
+  const back = await player.render(0.2)
+  say(peak(silent.left.slice(4800)) === 0 && Math.abs(hz(back) - 880) < 8, 'pause() silences one program with its notes kept, and resume() brings them back', [peak(silent.left.slice(2000)), hz(back)])
+  low.start('A3', { at: player.time })
+  a.flush()
+  await player.render(0.1)
+  b.close()
+  const left = await player.render(0.2)
+  say(Math.abs(hz(left) - 220) < 8 && player.voices() === 1 && Math.abs(quieter[0] / quieter[1] - 0.5) < 0.1, 'close() ends one program and leaves the other, and setVolume(0.5) in one had halved only its own', [hz(left), player.voices(), quieter])
+  const said = await saying(async () => {
+    for (let i = 0; i < 40; i++) { const c = createSound({ sound: player, clock: () => 0, scope: 'c' + i }); c.makeSynth(CLICK).play('C4', 0.01); c.close() }
+    await player.render(0.1)
+  })
+  say(said.length === 0, '40 programs that come and go leave their places free (nothing is said about running out)', said)
+}
+
 // --- songs are not ready, and say so
 {
   const said = await saying(async () => {

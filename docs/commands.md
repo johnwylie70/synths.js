@@ -46,6 +46,12 @@ Commands travel in batches. A transport is one function, `send(batch)`:
 }
 ```
 
+`scope`, optional, is text that names the sender when several share one player (the scenes on one page, say:
+`{ synths: 1, scope: "scene2", now, cmds }`). A scope has its own ids, so two senders may both have an `"s1"`; its
+own volume, mute and pause; and `stop` with no id stops only what is its own. With no `scope` a sender is the
+player itself: its volume is the volume of everything. The effects every synth shares, and the one song, are
+shared by every scope.
+
 A batch is carried out in order. Send one as often as suits: synths.js sends one at the end of each turn of the
 page's event loop; a Python scene sends one per frame.
 
@@ -309,6 +315,18 @@ Things that are for all the sound.
 { op: "master", set: { echoTime: 0.3, reverbSize: 0.8 } }  // settings whose scope is "all"
 ```
 
+`{ op: "master", pause: true }` silences the sender's own sound with everything kept as it is (a scene that is
+out of view), and `pause: false` brings it back. When every scope of a player is paused, the sound card rests.
+
+### `close`
+
+```js
+{ op: "close" }
+```
+
+The sender is finished: everything of its scope is stopped and forgotten (synths, tunes, samples), and its parts
+are free for others.
+
 ### `free`
 
 ```js
@@ -387,6 +405,11 @@ import { createPlayer } from "synths.js"
 const player = createPlayer({ wasm: engineBytes, latency: 0.06 })
 port.onmessage = (m) => player.send(m.data)
 ```
+
+Every `createSound()` on one page that is given no `sound` (and no `context` or `destination` of its own)
+shares one player, each in a scope it makes up, so a page of ten scenes has one sound card and one engine. The
+first one's options make the player; the player closes when the last one closes. `share: false` gives one a
+player to itself. On each: `pause()`, `resume()` and `close()`.
 
 `createPlayer(options)`:
 
