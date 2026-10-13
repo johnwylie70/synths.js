@@ -65,7 +65,7 @@ const COMMANDS = 1
 // The engine's parameter table, written here by scripts/sync-engine.mjs from the engine itself. Do not edit by hand.
 // Each row: id, name, kind (f float, i whole number, b on or off, c a choice), least, most, default, unit, the choices.
 /* PARAMS:BEGIN */
-const ENGINE = {"abi":1,"version":"0.0.0","parts":64,"voices":64,"samples":1024,"events":["note_on","note_off","all_notes_off","param","pitch_bend","voice_pitch","voice_freq","voice_volume","voice_pan","voice_position","voice_kill","macro_tick","arp","arp_more","song"]}
+const ENGINE = {"abi":1,"version":"0.0.0","parts":64,"voices":64,"samples":1024,"events":["note_on","note_off","all_notes_off","param","pitch_bend","voice_pitch","voice_freq","voice_volume","voice_pan","voice_position","voice_kill","macro_tick","arp","arp_more","song","record"]}
 const PARAMS = [
   [0,"volume","f",0,2,1,"gain"],
   [1,"pan","f",-1,1,0,"pan"],
@@ -152,6 +152,12 @@ const PARAMS = [
   [103,"lfo2.cutoff","f",-96,96,0,"semitones"],
   [104,"lfo2.amp","f",0,1,0,""],
   [105,"lfo2.pan","f",0,1,0,""],
+  [106,"fx.pitch","f",-12,12,0,"semitones"],
+  [107,"fx.ring","f",0,1,0,""],
+  [108,"fx.ring_freq","f",1,5000,30,"hz"],
+  [109,"fx.ring_wave","c",0,1,0,"",["sine","noise"]],
+  [110,"fx.comb","f",0,1,0,""],
+  [111,"fx.comb_freq","f",50,5000,200,"hz"],
   [112,"fx.drive","f",0,1,0,""],
   [113,"fx.bits","f",1,16,16,"bits"],
   [114,"fx.downsample","i",1,64,1,""],
@@ -160,6 +166,9 @@ const PARAMS = [
   [117,"send.chorus","f",0,1,0,"gain"],
   [120,"macro.rate","f",1,1000,50,"hz"],
   [121,"macro.sync","b",0,1,0,""],
+  [122,"fx.comb_feedback","f",-0.97,0.97,0.7,""],
+  [123,"fx.comb_rate","f",0.01,10,0.3,"hz"],
+  [124,"fx.comb_depth","f",0,1,0,""],
   [200,"master.volume","f",0,2,0.35,"gain"],
   [201,"master.limiter","b",0,1,1,""],
   [202,"delay.time","f",0.001,2,0.3,"seconds"],
@@ -171,6 +180,11 @@ const PARAMS = [
   [212,"chorus.rate","f",0.05,10,0.8,"hz"],
   [213,"chorus.depth","f",0,1,0.5,""],
   [216,"voices","i",1,64,64,"voices"],
+  [217,"input.part","i",0,63,31,"part"],
+  [218,"input.gain","f",0,8,1,"gain"],
+  [219,"input.monitor","b",0,1,1,""],
+  [220,"input.gate","f",-100,0,-100,"db"],
+  [221,"input.gate_release","f",0.005,2,0.15,"seconds"],
 ]
 /* PARAMS:END */
 

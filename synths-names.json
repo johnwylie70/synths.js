@@ -22,7 +22,8 @@
    "macro_tick",
    "arp",
    "arp_more",
-   "song"
+   "song",
+   "record"
   ]
  },
  "settings": [
@@ -939,6 +940,70 @@
    "scope": "synth"
   },
   {
+   "id": 106,
+   "name": "fx.pitch",
+   "kind": "float",
+   "min": -12,
+   "max": 12,
+   "default": 0,
+   "unit": "semitones",
+   "scope": "synth"
+  },
+  {
+   "id": 107,
+   "name": "fx.ring",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 0,
+   "unit": "",
+   "scope": "synth"
+  },
+  {
+   "id": 108,
+   "name": "fx.ring_freq",
+   "kind": "float",
+   "min": 1,
+   "max": 5000,
+   "default": 30,
+   "unit": "hz",
+   "scope": "synth"
+  },
+  {
+   "id": 109,
+   "name": "fx.ring_wave",
+   "kind": "choice",
+   "min": 0,
+   "max": 1,
+   "default": 0,
+   "unit": "",
+   "choices": [
+    "sine",
+    "noise"
+   ],
+   "scope": "synth"
+  },
+  {
+   "id": 110,
+   "name": "fx.comb",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 0,
+   "unit": "",
+   "scope": "synth"
+  },
+  {
+   "id": 111,
+   "name": "fx.comb_freq",
+   "kind": "float",
+   "min": 50,
+   "max": 5000,
+   "default": 200,
+   "unit": "hz",
+   "scope": "synth"
+  },
+  {
    "id": 112,
    "name": "fx.drive",
    "kind": "float",
@@ -1012,6 +1077,36 @@
    "id": 121,
    "name": "macro.sync",
    "kind": "bool",
+   "min": 0,
+   "max": 1,
+   "default": 0,
+   "unit": "",
+   "scope": "synth"
+  },
+  {
+   "id": 122,
+   "name": "fx.comb_feedback",
+   "kind": "float",
+   "min": -0.97,
+   "max": 0.97,
+   "default": 0.7,
+   "unit": "",
+   "scope": "synth"
+  },
+  {
+   "id": 123,
+   "name": "fx.comb_rate",
+   "kind": "float",
+   "min": 0.01,
+   "max": 10,
+   "default": 0.3,
+   "unit": "hz",
+   "scope": "synth"
+  },
+  {
+   "id": 124,
+   "name": "fx.comb_depth",
+   "kind": "float",
    "min": 0,
    "max": 1,
    "default": 0,
@@ -1126,6 +1221,56 @@
    "max": 64,
    "default": 64,
    "unit": "voices",
+   "scope": "all"
+  },
+  {
+   "id": 217,
+   "name": "input.part",
+   "kind": "int",
+   "min": 0,
+   "max": 63,
+   "default": 31,
+   "unit": "part",
+   "scope": "all"
+  },
+  {
+   "id": 218,
+   "name": "input.gain",
+   "kind": "float",
+   "min": 0,
+   "max": 8,
+   "default": 1,
+   "unit": "gain",
+   "scope": "all"
+  },
+  {
+   "id": 219,
+   "name": "input.monitor",
+   "kind": "bool",
+   "min": 0,
+   "max": 1,
+   "default": 1,
+   "unit": "",
+   "scope": "all"
+  },
+  {
+   "id": 220,
+   "name": "input.gate",
+   "kind": "float",
+   "min": -100,
+   "max": 0,
+   "default": -100,
+   "unit": "db",
+   "scope": "all"
+  },
+  {
+   "id": 221,
+   "name": "input.gate_release",
+   "kind": "float",
+   "min": 0.005,
+   "max": 2,
+   "default": 0.15,
+   "unit": "seconds",
    "scope": "all"
   }
  ],
