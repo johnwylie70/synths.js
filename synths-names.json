@@ -2337,5 +2337,73 @@
   "pulse": 3,
   "square": 3,
   "noise": 4
+ },
+ "midi": {
+  "types": [
+   "noteOff",
+   "noteOn",
+   "notePressure",
+   "control",
+   "program",
+   "pressure",
+   "bend",
+   "sysex",
+   "timeCode",
+   "songPosition",
+   "songSelect",
+   "tuneRequest",
+   "clock",
+   "start",
+   "continue",
+   "stop",
+   "sensing",
+   "reset",
+   "other",
+   "devices",
+   "tempo",
+   "learned",
+   "set"
+  ],
+  "does": [
+   "devices",
+   "listen",
+   "input",
+   "output",
+   "send",
+   "play",
+   "through",
+   "map",
+   "learn",
+   "unmap",
+   "clock",
+   "stop"
+  ],
+  "functions": [
+   "onMidi",
+   "onMidiNote",
+   "onMidiNoteOff",
+   "onMidiControl",
+   "onMidiDevices",
+   "useMidiHooks",
+   "sendMidi",
+   "sendMidiNote",
+   "sendMidiNoteOff",
+   "sendMidiControl",
+   "sendMidiBend",
+   "sendMidiProgram",
+   "sendMidiClock",
+   "midiDevices",
+   "useMidiInput",
+   "useMidiOutput",
+   "receiveMidi",
+   "stopMidi"
+  ],
+  "synthFunctions": [
+   "playFromMidi",
+   "sendToMidi",
+   "mapMidi",
+   "learn",
+   "unmapMidi"
+  ]
  }
 }

@@ -9,10 +9,11 @@
     ".": "./synths.js",
     "./synths.js": "./synths.js",
     "./synths-worklet.js": "./synths-worklet.js",
+    "./synths-midi.js": "./synths-midi.js",
     "./synths_core.wasm": "./synths_core.wasm",
     "./synths-names.json": "./synths-names.json"
   },
-  "files": ["synths.js", "synths-worklet.js", "synths_core.wasm", "synths-names.json", "docs/", "README.md", "CHANGELOG.md", "LICENSE"],
+  "files": ["synths.js", "synths-midi.js", "synths-worklet.js", "synths_core.wasm", "synths-names.json", "docs/", "README.md", "CHANGELOG.md", "LICENSE"],
   "engines": {
     "node": ">=20"
   },
