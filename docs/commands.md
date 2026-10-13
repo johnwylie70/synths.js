@@ -442,7 +442,7 @@ another replaces it.
 | `repeat` | `false` to play it once (`true`) |
 | `vol` | 0 to 2 (1) |
 | `raw` | `true`: a sample played faster than it was recorded is left harsh, as old trackers left it; `false`: it is smoothed. Missing: the engine chooses (raw for a MOD or XM as it is, smooth for the engine's own songs) |
-| `patches` | what the song's instruments that are synths by name are: for each name a ready-made synth's name, or settings (with `preset` and `macro` if wanted). For a name not given here, the player uses what the song itself says under the instrument's `synth` key (`{ preset, set, macro }`); failing that, a name that is a ready-made synth's is that synth; and one that nothing says plays as `keys`, and the console says so |
+| `patches` | what the song's instruments that are synths by name are: for each name a ready-made synth's name, or settings (with `preset` and `macro` if wanted). For a name not given here, the player uses what the song itself says under the instrument's `synth` key: `{ preset, set, macro }`, a ready-made synth's name, settings on top of it and a [step macro](#macro) (missing: the preset's), any of which may be left out, exactly as the [`synth`](#synth) command takes them. `replace` reads it again; failing that, a name that is a ready-made synth's is that synth; and one that nothing says plays as `keys`, and the console says so |
 | `name` | optional: what to call it in a message |
 
 Steering, each on the exact sample of its `t`:

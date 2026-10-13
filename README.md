@@ -234,6 +234,7 @@ Every setting is a plain property, and reads back what you set: `lead.cutoff = 8
 | `sub`, `noise` | a wave an octave below, and hiss (each 0 to 1) |
 | `vibrato`, `vibratoRate`, `vibratoDelay` | a wobble of pitch: how far (semitones), how fast, how long before it begins |
 | `tremolo`, `wobble`, `wobbleRate` | a wobble of loudness, and of the filter |
+| `pwm`, `pwmRate` | the pulse wave's width moving in and out (0 to 1: how far) and how fast, in Hz: the thick, shifting sound of a `"pulse"` or `"square"` wave. It does nothing to the other waves. `pwmRate` and `wobbleRate` are one speed under two names: the slow wobbler does both, and `autopan` too, so the vibrato keeps its own speed |
 | `pitchSweep`, `pitchSweepDecay` | each note begins that many semitones off and falls into place: a drum's thump, a laser |
 | `echo`, `reverb`, `chorus` | how much of the synth goes to each effect (0 to 1) |
 | `distortion`, `crush` | grit (0 to 1), and the bits each sample keeps (16 is clean, 4 is an old games console) |
@@ -514,7 +515,7 @@ song.replace(edited)                       // an edited song in its place, as it
 
 `replace` takes the song's bytes, its JSON as text, or the song itself as an object. When the edited song has the same shape (as many channels, no fewer instruments and samples) nothing stops: it keeps its place and plays the new notes from the next row.
 
-In a song of synths' own, an instrument can be a synth instead of a recording, called by a name. A song can say itself what the synth is (`"synth": { "preset": "bell", "set": { "decay": 1.4 } }` on the instrument), and then nothing more is needed. A name that is a ready-made synth's (`"bass"`, `"chipKick"`) plays as that; any other name is told what it is, and what you say here comes before what the song says:
+In a song of synths' own, an instrument can be a synth instead of a recording, called by a name. A song can say itself what the synth is, on the instrument, and then nothing more is needed: `"synth": { "preset": "chip", "set": { "decay": 0.16 }, "macro": [{ "wave": "noise", "pitch": 24 }, { "wave": "pulse" }] }` is a ready-made synth to start from, the settings changed from it and a step macro, each of which may be left out. It is what `makeSynth("chip", { decay: 0.16, macro: [...] })` would be given. A name that is a ready-made synth's (`"bass"`, `"chipKick"`) plays as that; any other name is told what it is, and what you say here comes before what the song says:
 
 ```js
 playSong("songs/night_drive.json", { patches: { tune: "bell", wobble: { preset: "bass", cutoff: 300, wobble: 12 } } })

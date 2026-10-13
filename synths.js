@@ -212,6 +212,8 @@ const ALIASES = {
   pitchSweep: 'mod_env.pitch', pitchSweepAttack: 'mod_env.attack', pitchSweepDecay: 'mod_env.decay',
   vibrato: 'lfo1.pitch', vibratoRate: 'lfo1.rate', vibratoDelay: 'lfo1.delay', tremolo: 'lfo1.amp',
   wobble: 'lfo2.cutoff', wobbleRate: 'lfo2.rate', autopan: 'lfo2.pan',
+  // Pulse-width modulation is on the slow LFO, which runs free and is not the vibrato's: so pwmRate is wobbleRate by another name.
+  pwm: 'lfo2.pulse_width', pwmRate: 'lfo2.rate',
   distortion: 'fx.drive', drive: 'fx.drive', crush: 'fx.bits', bits: 'fx.bits', downsample: 'fx.downsample',
   // The voice effects, which every synth has: a pitch shifter, a ring modulator and a comb (which sweeps as a flanger).
   pitchShift: 'fx.pitch', ringMod: 'fx.ring', ringSpeed: 'fx.ring_freq', ringWave: 'fx.ring_wave',

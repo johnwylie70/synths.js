@@ -1463,6 +1463,14 @@
    "setting": "lfo2.pan",
    "scale": 1
   },
+  "pwm": {
+   "setting": "lfo2.pulse_width",
+   "scale": 1
+  },
+  "pwmRate": {
+   "setting": "lfo2.rate",
+   "scale": 1
+  },
   "distortion": {
    "setting": "fx.drive",
    "scale": 1

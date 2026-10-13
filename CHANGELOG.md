@@ -33,6 +33,7 @@ The first version.
 - Three more examples: Voice changer, Sampler, Record a tune.
 - Songs, for an editor: `song.mute(channel)`, `song.solo(channel)`, `song.loopPattern()`, and `song.replace(edited)` to put an edited song in the place of the one playing without stopping it. A song can say itself what its synth instruments are (`synth: { preset, set }`), and can carry its recordings inside itself.
 - `lead.set({ cutoff: 4000 }, { glide: 2 })` also understands `slide`.
+- Two more settings by a friendly name: `pwm` and `pwmRate`, the pulse wave's width moving in and out and how fast (the same slow wobbler as `wobble`, so `pwmRate` is `wobbleRate`).
 - For apps, MIDI travels as the sound does: a `midi` command in the same batches ([docs/midi.md](docs/midi.md)), carried out beside the player, with what is received handed back as plain data (`player.onMidi`, `sound.receiveMidi`, `sound.useMidiHooks(scene)`), and a `midi` option for an app that reaches the devices its own way.
 - Every function in its Python spelling too (`play_sound`, `make_synth`).
 - Mistakes said in plain words, with "Did you mean".

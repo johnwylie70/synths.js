@@ -636,6 +636,51 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
     say(rms(again.left) > rms(whole.left) * 0.3 && player.target('song:tune').get('decay') === 1.4, 'and the first one put back is heard again, on the same synths', rms(again.left))
   })
   say(said.length === 0, 'and nothing is said in the console about that either', said)
+
+  // What the tracker editor saves: a preset, settings and a step macro, all three inside the instrument's `synth`.
+  // And a recording carried inside the song itself, so that it is one file.
+  said = await saying(async () => {
+    const tone = toWav(Float32Array.from({ length: 4800 }, (_, i) => 0.8 * Math.sin(2 * Math.PI * 440 * i / 48000)), null, 48000)
+    const one = {
+      format: 'synths-song', version: 1, speed: 6, tempo: 125, channels: 2, order: [0],
+      patterns: [{ rows: 16, events: [{ row: 0, ch: 0, note: 'C-4', ins: 1 }, { row: 8, ch: 1, note: 'C-4', ins: 2 }] }],
+      instruments: [
+        { name: 'snare', patch: 'my snare', synth: { preset: 'chip', set: { decay: 0.3, sustain: 0, 'noise.type': 'lfsr' }, macro: [{ wave: 'noise', pitch: 24 }, { wave: 'noise', pitch: 24 }, { wave: 'pulse', pitch: 0 }] } },
+        { name: 'tone', sample: 0 },
+      ],
+      samples: [{ name: 'tone', data: Buffer.from(tone).toString('base64') }],
+    }
+    const { player, song, go } = await start(new TextEncoder().encode(JSON.stringify(one)))
+    const r = await go(1.4)
+    // Two fiftieths of a second of noise, then a pulse at middle C: many crossings of zero, then about 262 a second.
+    const noisy = crossings(r.left, 0.002, 0.038) / 0.036, pitched = crossings(r.left, 0.08, 0.18) / 0.1
+    const snare = player.target('song:my snare')
+    say(snare.get('decay') === 0.3 && snare.get('wave') === 'pulse' && noisy > 1500 && Math.abs(pitched - 262) < 15, `a song instrument's own synth is a preset, settings and a step macro together: the snare is ${Math.round(noisy)} crossings a second of noise, then a pulse at ${Math.round(pitched)} Hz`, [noisy, pitched, snare.get('decay')])
+    const sampled = crossings(r.left, 1.0, 1.05) / 0.05
+    say(peak(r.left.slice(0.96 * SR, 1.05 * SR)) > 0.05 && Math.abs(sampled - 440) < 25, `and a recording carried inside the song as base64 plays, with no file beside it (${Math.round(sampled)} Hz)`, [peak(r.left.slice(0.96 * SR, 1.05 * SR)), sampled])
+    // An edited song put in its place brings its macro with it: now a pulse from the first step.
+    one.instruments[0].synth.macro = [{ wave: 'pulse', pitch: 12 }]
+    song.replace(one)
+    song.seek(0, 0)
+    await go(0.3)
+    song.seek(0, 0)
+    const again = await go(0.3)
+    const now = crossings(again.left, 0.01, 0.11) / 0.1
+    say(Math.abs(now - 523) < 30, `song.replace reads the instrument's synth again, macro and all (the snare is now a pulse an octave up, ${Math.round(now)} Hz)`, now)
+  })
+  say(said.length === 0, 'with nothing said: no patches had to be given', said)
+
+  // pwm: the pulse wave's width moving, by a friendly name, on the slow LFO it shares with wobble.
+  {
+    const c = commands((s) => { const lead = s.makeSynth({ wave: 'square', pwm: 0.4 }); lead.pwmRate = 2; lead.pwm_rate = 3; say(lead.get('wobbleRate') === 3 && lead.get('pwm') === 0.4 && lead.describe('pwm').max === 1, 'pwm and pwmRate are settings by name; pwmRate is the same speed as wobbleRate', [lead.get('wobbleRate'), lead.describe('pwm')]) })
+    const d = describe()
+    const still = await renderSound((s) => { s.makeSynth({ ...CLICK, wave: 'square' }).play('A3', 1) }, { seconds: 1 })
+    const moving = await renderSound((s) => { s.makeSynth({ ...CLICK, wave: 'square', pwm: 0.4, pwmRate: 2 }).play('A3', 1) }, { seconds: 1 })
+    // An even square wave has no second harmonic; one whose width is moving has, most of the time.
+    const second = (a) => { let re = 0, im = 0; for (let i = 0; i < a.length; i++) { re += a[i] * Math.cos(2 * Math.PI * 440 * i / SR); im += a[i] * Math.sin(2 * Math.PI * 440 * i / SR) } return 2 * Math.hypot(re, im) / a.length }
+    const even = [second(still.left.slice(0.1 * SR, 0.2 * SR)), Math.max(second(moving.left.slice(0.1 * SR, 0.2 * SR)), second(moving.left.slice(0.3 * SR, 0.4 * SR)))]
+    say(d.names.pwm.setting === 'lfo2.pulse_width' && d.names.pwmRate.setting === 'lfo2.rate' && c.some((x) => x.set && x.set.pwm === 0.4) && even[0] < 0.005 && even[1] > 0.03, `and pwm moves the width of a square wave: its second harmonic goes from ${even[0].toFixed(4)} to ${even[1].toFixed(3)}`, even)
+  }
   said = await saying(async () => {
     const { song, go } = await start('songs/night_drive.json', { patches: { tune: 'bell' } })
     await go(0.5)
