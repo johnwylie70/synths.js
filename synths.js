@@ -2581,6 +2581,8 @@ export function createPlayer(options = {}) {
     state: 'loading', kind: null, context: null, node: null,
     ready: new Promise((yes) => { ready = yes }),
     send, unlock, close, read, songPosition,
+    /** How the sound is made, once it is: 'worklet', 'fallback' or 'host' (the same as `kind`). */
+    get how() { return player.kind },
     /**
      * How much sound is made at a time: setBuffer(4096), or "small", "medium", "large", "auto". On the page's thread
      * (the fallback) it is the buffer itself: bigger rides over a busier page and is heard later. On the audio thread

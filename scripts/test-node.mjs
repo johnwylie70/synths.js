@@ -798,6 +798,22 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
   const beep = song.channel(2), none = song.channel(7)
   say(beep.samples().length === 1024 && peak(beep.samples()) > 0.01 && beep.level()[0] > 0.01 && same(player.read('song:channel:2').notes.length > 0, true) && same([none.samples().length, none.level()], [0, [0, 0]]) && song.channel(0).level()[0] > 0.01 && song.channel(1).level()[0] > song.channel(0).level()[0] && peak(song.channel(0).samples()) === 0,
     'song.channel(n).level() is what is heard on a channel whichever kind of instrument plays it: the two channels that play synths read their own levels (the brighter the louder) and the one that plays a sample its own; a channel the song has not got reads nothing; a synth\'s wave and notes are read at the synth', [peak(beep.samples()), beep.level(), song.channel(0).level(), song.channel(1).level(), none.level()])
+  // A song of format version 2, with an arpeggio struck in sixteenths: each row of it is a note of its own.
+  {
+    const v2 = { format: 'synths-song', version: 2, speed: 6, tempo: 125, channels: 1, order: [0],
+      patterns: [{ rows: 16, events: [{ row: 0, ch: 0, note: 'C-4', ins: 1, arp: { chord: 'maj', rate: '1/16', order: 'up', octaves: 2, gate: 0.5 } }] }],
+      instruments: [{ name: 'blip', patch: 'blip', synth: { set: CLICK } }] }
+    const player = await createOfflinePlayer()
+    const s = createSound({ sound: player, clock: () => 0 })
+    s.playSong(new TextEncoder().encode(JSON.stringify(v2)), { repeat: false })
+    s.flush()
+    await new Promise((yes) => setTimeout(yes, 30))
+    const out = (await player.render(1)).left
+    const on = onsets(out)
+    const row = SR * 2.5 * 6 / 125
+    say(on.length >= 7 && on.slice(1, 7).every((f, i) => Math.abs(f - on[i] - row) <= 1) && describe().engine.events.includes('arp_style') && describe().engine.events.length >= 23,
+      'a song of format version 2 with a struck arpeggio plays through playSong: a new note on every row (a sixteenth), each held for half of it; the engine\'s events are described, arp_style and those after it among them', [on.slice(0, 8), row, describe().engine.events.length])
+  }
   // A song whose channels all play synths, as most chiptunes do, and one that changes instrument on a channel.
   {
     const chip = { format: 'synths-song', version: 1, speed: 6, tempo: 125, channels: 3, order: [0],
@@ -1334,16 +1350,41 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
   post({ type: 'recorded', slot: rec[1], frames: 4410, full: false, rate: 44100 })
   await new Promise((yes) => setTimeout(yes, 5))
   const started = got.ops.find((op) => op[0] === 'e' && op[2] === 15 && op[4] === 1)
+  // Everything else a program asks for reaches the host's core as its op: a recording, a tune kept by the core,
+  // a tempo, a buffer (which is the player's own and is not passed on), stopping, and a synth let go.
+  const before = got.ops.length
+  const drum = s.loadSample('thud.wav', { note: 'C3' })
+  const tune = lead.playNotes('C4 E4 G4', 0.25, { repeat: true })
+  s.setTempo(90)
+  s.setSoundBuffer('large')
+  s.flush()
+  await new Promise((yes) => setTimeout(yes, 20))
+  s.flush()
+  await new Promise((yes) => setTimeout(yes, 20))
+  const was = s.soundBuffer()
+  const other = s.makeSynth('bass')
+  other.play('C2', 0.2)
+  s.flush()
+  const otherPart = got.ops.filter((op) => op[0] === 'e' && op[2] === 1).pop()[3]
+  tune.stop()
+  other.remove()
+  s.flush()
+  const more = got.ops.slice(before)
+  const kinds = [...new Set(more.map((op) => op[0]))]
+  const sampled = more.find((op) => op[0] === 'sample'), tuned = more.find((op) => op[0] === 'tune'), tempoed = more.find((op) => op[0] === 'tempo'), stopped = more.find((op) => op[0] === 'stopPart')
   const read = player.read(lead._id)
   const place = player.songPosition()
   const asked = await player.ask()
   const buffer = player.buffer()
   player.close()
-  say(player.kind === 'host' && player.context === clock && player.node === null, 'a player given a core by its host starts with no Web Audio and no engine fetched, on the host\'s clock', player.kind)
+  say(player.kind === 'host' && player.how === 'host' && player.context === clock && player.node === null, 'a player given a core by its host starts with no Web Audio and no engine fetched, on the host\'s clock', player.kind)
   say(got.given.sampleRate === 44100 && typeof got.given.post === 'function' && states.includes('on') && on && on[0] === 'e' && Math.abs(on[1] - (100 + 0.04)) < 1e-9 && on[5] === 69 && Math.abs(on[6] - 0.7) < 1e-6 && off && Math.abs(off[1] - on[1] - 0.5) < 1e-9 && off[3] === part && off[4] === on[4] && params.length > 3 && params.every((op) => op[3] === part || op[3] === 0),
     'a note reaches the host\'s exec as the documented ops: ["e", seconds on the host\'s clock (now and the latency), 1 note_on, part, handle, note, velocity], its note_off the note\'s length later, after the params that set the part', [on, off, params.length])
   say(load && load[2] instanceof Uint8Array && load[4] === 32 && load[5] === 512 && started && rec && rec[3] === 1 && done && Math.abs(done.seconds - 0.1) < 1e-9 && done.frames === 4410 && player.node === null,
     'a song message from the core starts the song (a song event is sent back to exec) and a recorded message reaches the program that asked, with its length', [load && load.slice(3), started, rec, done && done.seconds])
+  say(sampled && sampled[2] instanceof Float32Array && sampled[2].length === 200 && sampled[3] === 2 && sampled[4] === 44100 && sampled[5] === 48 && tuned && tuned[3] === part && tuned[4].length === 3 && tuned[4][1][0] === 0.25 && same(tuned[4][1][1], [64]) && tuned[6] === 0
+    && tempoed && Math.abs(tempoed[2] - 60 / 90) < 1e-9 && more.some((op) => op[0] === 'stopTune' && op[1] === tuned[1]) && stopped && stopped[1] === otherPart && otherPart !== part && !kinds.includes('buffer') && was.thread === 'host' && was.setting === 4096,
+    'a sample (its frames, channels, rate and the note it is at), a tune (its steps, for the core to play), a tempo, stopping the tune and remove() each reach the host as the documented op; a buffer command is the player\'s own and no op; no engine was asked for', [kinds, sampled && sampled.slice(3), tuned && tuned.slice(4), tempoed, stopped, was])
   say(read.samples.length === 1024 && Math.abs(read.level[0] - 0.5 * 0.5) < 1e-6 && same(read.notes, [60]) && place.state === 'playing' && place.row === 7 && place.tempo === 125 && asked.voices === 3 && buffer.thread === 'host' && got.closed === true,
     'read(), songPosition() and ask() are answered by the host\'s core, soundBuffer() says the thread is the host\'s, and close() closes the core', [read.level, read.notes, place, asked, buffer])
 }
