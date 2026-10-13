@@ -1477,8 +1477,10 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
       // Something that is not a sample here is saved as a file with no sound in it, so whoever asked is still answered.
       if (slot === undefined) return say(mine.scope, { type: 'saved', id: mine.id, ask: mine.ask, name: mine.name, seconds: 0, bytes: pcmWav(new Float32Array(0), 1, 48000) })
       const go = () => { saves.set(++asked, mine); ops.push(['sampleRead', slot, asked]) }
-      // A sample that is still being fetched is saved when it has arrived.
-      if (loading.size) Promise.allSettled([...loading]).then(() => { go(); flush() })
+      // A recording that is still being made is saved when it is over, and a sample still being fetched when it has arrived.
+      const making = recordings.get(slot)
+      if (making) (making.then = making.then || []).push(go)
+      else if (loading.size) Promise.allSettled([...loading]).then(() => { go(); flush() })
       else go()
     },
     macro(c, at) {
@@ -1755,7 +1757,9 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
       const mine = recordings.get(m.slot)
       if (!mine) return null
       recordings.delete(m.slot)
-      if (mine.loop && m.frames) { ops.push(['sampleConfig', m.slot, null, ...mine.loop]); flush() }
+      if (mine.loop && m.frames) ops.push(['sampleConfig', m.slot, null, ...mine.loop])
+      for (const go of mine.then || []) go()
+      flush()
       if (m.full && mine.open) tell(`a recording reached its longest, ${Math.round(m.frames / m.rate)} seconds, and stopped by itself. For a longer one say how long: startRecording({ max: 60 }), up to ${LONGEST_RECORDING}.`, 'info')
       return [mine.scope, { type: 'recorded', id: mine.id, frames: m.frames, seconds: m.frames / m.rate, rate: m.rate, full: !!m.full }]
     },
@@ -2012,19 +2016,24 @@ function resampler() {
 function micSide(hooks) {
   let state = 'off', message, turn = 0, asking = null
   let waiting = []
-  const say = (to) => hooks.emit(to, [{ type: 'microphone', state, ...(message ? { message } : {}) }])
+  // Every sender is told when the state changes; one that asks later is told how things stand, once.
+  const knows = new Set()
+  const say = (to) => { if (to == null) knows.clear(); knows.add(to || ''); hooks.emit(to, [{ type: 'microphone', state, ...(message ? { message } : {}) }]) }
   function settle(mine, now, why) {
     if (mine !== turn || state !== 'asking') return
     state = now
     message = why
     if (why) tell(why)
     say(null)
+    knows.add(asker)
     const kept = waiting
     waiting = []
     for (const [c, at, scope] of kept) if (take(c, scope)) hooks.run(c, at, scope)
   }
-  function open(c) {
+  let asker = ''
+  function open(c, scope) {
     if (state !== 'off') return
+    asker = scope || ''
     const mine = ++turn
     state = 'asking'
     message = undefined
@@ -2046,8 +2055,8 @@ function micSide(hooks) {
         for (const [w, , sc] of kept) hooks.emit(sc, [{ type: 'recorded', id: w.id, frames: 0, seconds: 0, full: false }])
         return true
       }
-      if (state === 'off') open(c)
-      else if (state !== 'asking') say(scope)
+      if (state === 'off') open(c, scope)
+      else if (state !== 'asking' && !knows.has(scope || '')) say(scope)
       if (c.listen && hooks.live) tell('the microphone is being listened to. Through loudspeakers that can howl, so headphones are best; mic.mute() stops it.', 'info')
     } else if (c.op === 'record' && c.do !== 'stop' && (c.from === 'mic' || c.from == null)) {
       if (state === 'asking') { waiting.push([c, at, scope]); return false }
@@ -2316,7 +2325,7 @@ export function createPlayer(options = {}) {
     if (player.state === 'failed') return
     pauses(batch)
     // The microphone is asked for as soon as a program wants it, even while the sound itself is waiting for a tap.
-    for (const c of batch.cmds) if (c && c.op === 'mic' && c.do !== 'close') mic.open(c)
+    for (const c of batch.cmds) if (c && c.op === 'mic' && c.do !== 'close') mic.open(c, batch.scope)
     if (!live()) {
       // Not able to play yet: everything is kept in order, with when it was asked for (see settle).
       const at = local()
@@ -3027,10 +3036,10 @@ export function createSound(options = {}) {
     /** A setting's name as this synth says it -> the name it has everywhere. (The microphone has words of its own.) */
     _name(name) { return name }
     // What set() was given, ready to send: a voice is put on, and the rest go by their names everywhere.
-    _given(given) {
+    _given(given, at) {
       const out = {}
       for (const [name, value] of Object.entries(given)) {
-        if (key(name) === 'voice') this.voice = value
+        if (key(name) === 'voice') this._wear(value, at)
         else out[this._name(name)] = value
       }
       return out
@@ -3043,12 +3052,13 @@ export function createSound(options = {}) {
      * Choosing another voice first puts back what the last one changed.
      */
     get voice() { return this._worn ? this._worn.voice : 'none' }
-    set voice(name) {
+    set voice(name) { this._wear(name, clock()) }
+    _wear(name, at) {
       const voice = voiceName(name)
       if (voice === null) throw new Error(`${shown(name)} is not a voice.${meant(String(name), Object.keys(VOICES))} The voices are: ${Object.keys(VOICES).join(', ')}, and "none"`)
       if (!this._worn) this._worn = { voice: 'none', under: null }
       wearVoice(this._worn, this._patch, voice, engineDefault)
-      command({ op: 'set', id: this._id, voice, t: clock() })
+      command({ op: 'set', id: this._id, voice, t: at })
     }
 
     /** Record what this synth plays into a sample: `const take = lead.record(4)`. On the microphone, it records the microphone. See recordSound. */
@@ -3111,10 +3121,11 @@ export function createSound(options = {}) {
     set(given, o = {}) {
       if (typeof given === 'string') return this.set({ [given]: o })
       if (!given || typeof given !== 'object') throw new Error(`set needs settings in braces, as in set({ cutoff: 800 }), not ${shown(given)}`)
-      given = this._given(given)
+      const at = when(o, 'set')
+      given = this._given(given, at)
       if (!Object.keys(given).length) return this
       patchOf(given, 'set', true, this._patch, () => 0)
-      const c = { op: 'set', id: this._id, set: sendable(given), t: when(o, 'set') }
+      const c = { op: 'set', id: this._id, set: sendable(given), t: at }
       if (o.glide !== undefined) c.glide = amount(o.glide, 'set: glide', 0, 60)
       command(c)
       return this
@@ -3246,7 +3257,7 @@ export function createSound(options = {}) {
       this._waiting = []
     }
     _name(name) { return micName(name) }
-    _given(given) {
+    _given(given, at) {
       const out = {}
       for (const [name, value] of Object.entries(given)) {
         const k = key(name)
@@ -3257,7 +3268,7 @@ export function createSound(options = {}) {
       // The microphone starts with no filter, so that it comes through untouched. Turning the cutoff asks for one.
       const names = Object.keys(out).map((n) => setting(micName(n))?.name)
       if ((names.includes('filter.cutoff') || names.includes('filter.resonance')) && !names.includes('filter.type') && this.get('filter') === 'off') out.filter = 'lowpass'
-      return super._given(out)
+      return super._given(out, at)
     }
     get(name) { return key(name) === 'listening' ? this._listening : super.get(name) }
     describe(name) { return key(name) === 'listening' ? { name: 'listening', kind: 'bool', min: 0, max: 1, default: false, unit: '' } : super.describe(name) }
