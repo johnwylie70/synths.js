@@ -1324,6 +1324,36 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
   })
   say(said.length === 0, 'and nothing is said in the console about any of that either', said)
 
+  // The corners: loudness layers faded into each other, recordings that go round, and an arpeggio on a map.
+  said = await saying(async () => {
+    const { s, settle, hear, player } = await studio()
+    const faded = s.loadSamples([{ file: 'soft-C4.wav', note: 'C4', loud: [0, 0.5] }, { file: 'hard-C4.wav', note: 'C4', loud: [0.5, 1] }], { crossfade: { loud: 0.2 } })
+    const looped = s.loadSamples({ C4: 'take1.wav' }, { loop: true })
+    const once = s.loadSamples({ C4: 'take1.wav' })
+    const piano = s.loadSamples(['p-C3.wav', 'p-C4.wav', 'p-C5.wav'])
+    await settle()
+    const fz = faded.zones().map((z) => [z.loud, z.crossfade.loud])
+    // Both recordings sound in the overlap and one alone outside it: 300 Hz and 500 Hz together cross zero unevenly.
+    const even = (a) => { const at = []; for (let i = SR * 0.05; i < SR * 0.3; i++) if (a[i - 1] < 0 && a[i] >= 0) at.push(i); const gaps = at.slice(1).map((f, i) => f - at[i]); return Math.max(...gaps) - Math.min(...gaps) <= 2 }
+    const layers = [even(await hear(faded, 'C4', 0.2)), even(await hear(faded, 'C4', 0.5)), even(await hear(faded, 'C4', 0.9))]
+    looped.play('C4', 0.45)
+    once.play('C4', 0.45)
+    s.flush()
+    const both = [player.read(looped._id), player.read(once._id)]
+    await player.render(0.4)
+    const after = [peak(player.read(looped._id).samples), peak(player.read(once._id).samples)]
+    await player.render(0.3)
+    piano.arp(['C3', 'C4', 'C5'], 0.7, { step: 'sixteenth', gate: 0.5 })
+    s.flush()
+    const out = (await player.render(0.8)).left
+    const steps = [0, 1, 2].map((k) => Math.round(cents(pitch(out, k * 6000 / SR + 0.005, k * 6000 / SR + 0.055), [48, 60, 72][k])))
+    say(fz[0][0][1] > 0.5 && fz[1][0][0] < 0.5 && fz[0][1][1] > 0 && fz[1][1][0] > 0 && same(layers, [true, false, true]),
+      'crossfade: { loud: 0.2 } makes the loudness layers overlap and fade: one recording alone below and above, both together in between', [fz, layers])
+    say(after[0] > 0.1 && after[1] === 0 && [0, 30, 60].every((want, k) => Math.abs(steps[k] - want) < 8) && both.length === 2,
+      '{ loop: true } has a recording go round for as long as its note lasts, where without it the recording ends; an arpeggio struck on an instrument of several recordings plays each step from the recording for its key', [after, steps])
+  })
+  say(said.length === 0, 'and nothing is said in the console about those', said)
+
   // The names of files.
   const read = [['piano-C2.wav', 36], ['piano-Fs2.wav', 42], ['F#2.wav', 42], ['Gb2.ogg', 42], ['60.wav', 60], ['kick_36.wav', 36], ['samples/soft-C4.wav', 60], ['bass-a2.wav', 45], ['Bb3.mp3', 58], ['take2-D4.wav', 62], ['C-1.wav', 0], ['loud.wav', null], ['piano.mp3', null]]
   const unread = thrown(() => createSound({ sound: { send() {} }, batch: 'manual' }).loadSamples(['piano-C2.wav', 'piano-loud.wav']))
