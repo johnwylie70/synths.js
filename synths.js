@@ -2662,7 +2662,10 @@ function choices(args, names) {
  *   `resolve` turns a sample's path into an address, and `read` reads its bytes for a host whose player cannot fetch it.
  *   `ids` begins every id this makes, for two scenes that share one player.
  *   `batch: 'manual'` sends nothing until flush() is called (once a frame, say); otherwise a batch goes at the end of each turn.
- *   The rest are createPlayer's, for the player this makes when there is no `sound`.
+ *   The rest are createPlayer's, for the player this makes when there is no `sound`: among them `microphone` (a
+ *   stream or pushed frames in place of the browser's microphone) and `save` (given the files saveSound makes).
+ *   What a player says back (a recording is over, a file is saved, the microphone is on or is not) reaches a
+ *   program whose player is elsewhere through receiveSoundEvents(events).
  */
 let shared = null
 
