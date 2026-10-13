@@ -338,15 +338,50 @@ it takes a part again.
 
 ### `song`
 
-A tracker song. **Not ready**: a player says once in the console that songs are not ready, and plays nothing.
-The command is fixed now so that senders can be written:
+A tracker song: a MOD or XM file, or a song in the engine's own JSON format (`synths-core/docs/song-format.md`).
+The engine plays it by itself, on parts 32 to 63 (one for each channel) and sample slots 512 and up, so it never
+meets the synths and samples of the other commands. There is one song at a time for the whole player: playing
+another replaces it.
 
 ```js
-{ op: "song", id: "g1", do: "play", url: "https://example.org/tune.mod", loop: true, vol: 1 }
-{ op: "song", id: "g1", do: "stop" }      // also "pause" and "resume"; with no id, every song
+{ op: "song", id: "g1", do: "play", url: "https://example.org/tune.mod", repeat: true, vol: 1,
+  patches: { "wobble": "bass", "pling": { preset: "pluck", echo: 0.4 } } }
 ```
 
-`bytes` may be given in place of `url`, as for a sample.
+| field | |
+|---|---|
+| `id` | the song, for steering it |
+| `do` | `"play"` with a `url` or `bytes`: load this song and start it. Without either: one of the actions below |
+| `url`, `bytes` | the song file: an address the player fetches, or its bytes (a typed array, or base64 text) |
+| `files` | optional, for a JSON song that names WAV files: `{ "the path as the song writes it": bytes }`. Without it the player fetches each one beside `url` |
+| `repeat` | `false` to play it once (`true`) |
+| `vol` | 0 to 2 (1) |
+| `patches` | what the song's instruments that are synths by name are: for each name a ready-made synth's name, or settings (with `preset` and `macro` if wanted). A name that is a ready-made synth's needs none; one that nothing says plays as `keys`, and the console says so |
+| `name` | optional: what to call it in a message |
+
+Steering, each on the exact sample of its `t`:
+
+```js
+{ op: "song", id: "g1", do: "pause" }               // hold it where it is; "resume" (or "play") carries on
+{ op: "song", id: "g1", do: "stop" }                // stop, and go back to the start
+{ op: "song", id: "g1", do: "seek", order: 2, row: 16 }
+{ op: "song", id: "g1", do: "volume", vol: 0.5 }
+{ op: "song", id: "g1", do: "repeat", repeat: false }
+```
+
+With no `id` an action is for whatever song is playing; with the `id` of a song that has been replaced it does
+nothing. Loading takes a moment (the file is fetched and read): the song starts when it is ready, and what was
+asked of it meanwhile is done then, in order. A file that cannot be fetched or read is said once in the console,
+in the engine's own words for a JSON song (it names the key that is wrong), and nothing plays. `stop` with no id
+(stop everything) stops the song too.
+
+A song's synths are synths of the sender's scope with the ids `song:<name>`, so `player.target("song:bass")`
+is a dial's target. They are freed when another song is loaded.
+
+Where the song is comes from the player, like the rest of [reading back](#reading-back):
+`player.songPosition()` gives `{ state: "none" | "stopped" | "playing" | "paused", order, pattern, row, tick,
+speed, tempo, rounds, rows, orders }`, never waiting (the first read asks; the answer follows in a moment). A
+transport may offer `songPosition()` beside `send`.
 
 ## What a player promises
 
@@ -464,4 +499,5 @@ worker) asks its host, however the host chooses to carry it: once a frame is ple
 
 ## What is not here yet
 
-- **Songs** (`song`): the replayer is being added to the engine.
+- A song that does not repeat leaves the notes it ends on sounding, as the engine has it: a held synth note
+  stays until `stop`.

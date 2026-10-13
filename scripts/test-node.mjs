@@ -474,14 +474,100 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
   say(said.length === 0, '40 programs that come and go leave their places free (nothing is said about running out)', said)
 }
 
-// --- songs are not ready, and say so
+// --- songs
 {
-  const said = await saying(async () => {
-    const r = await renderSound((s) => { const song = s.playSong('tune.mod'); s.playSong('other.xm'); song.stop(); s.playSound('coin') }, { seconds: 0.3 })
-    say(peak(r.left) > 0.1, 'playSong does not get in the way of other sound', peak(r.left))
+  const read = async (path) => readFile(join(ROOT, 'examples', path)).catch(() => null)
+  const start = async (file, o, more = {}) => {
+    const player = await createOfflinePlayer()
+    const s = createSound({ sound: player, clock: () => player.time, read, ...more })
+    const song = s.playSong(file, o)
+    await new Promise((yes) => setTimeout(yes, 30))
+    s.flush()
+    return { player, s, song, go: async (seconds) => { s.flush(); return player.render(seconds) } }
+  }
+  let said = await saying(async () => {
+    const { player, s, song, go } = await start('songs/night_drive.json', { patches: { tune: 'bell' } })
+    const first = await go(2)
+    const at = song.position
+    say(peak(first.left) > 0.2 && peak(first.left) < 0.9 && first.left.every(Number.isFinite) && at.state === 'playing' && at.order === 0 && at.row === 16 && at.speed === 6 && at.tempo === 125 && at.rows === 32 && at.orders === 4,
+      'playSong plays one of our own songs: after 2 seconds at 125 beats a minute it is on row 16 of its first pattern, and says so', [peak(first.left), at])
+    // The bass is the synth the song names: its part is one of ours, and reads its notes.
+    const bass = player.target('song:bass')
+    say(bass.get('wave') === 'saw' && player.read('song:tune').level[0] > 0 && player.target('song:tune').get('decay') === 1.4, 'its instruments that are synths by name are set up: "bass" is the ready-made bass, and "tune" is what the program said (a bell)', [bass.get('wave'), player.target('song:tune').get('decay')])
+    s.playSound('coin')
+    const over = await go(0.3)
+    say(peak(over.left) > 0.2 && song.position.row > 16, 'a game sound plays over the song', peak(over.left))
+    song.pause()
+    const paused = await go(0.5)
+    const held = song.position
+    song.resume()
+    const again = await go(0.5)
+    say(peak(paused.left.slice(12000)) < 0.05 && held.state === 'paused' && peak(again.left) > 0.1 && song.position.state === 'playing' && song.position.row > held.row, 'pause() holds it where it is, with only the last notes dying away, and resume() carries on from there', [peak(paused.left.slice(12000)), held, song.position])
+    song.seek(2, 8)
+    await go(0.05)
+    say(song.position.order === 2 && song.position.row === 8, 'seek(2, 8) goes to row 8 of the third place in the order', song.position)
+    const loud = await go(1)
+    song.volume = 0.25
+    await go(0.1)
+    const soft = await go(1)
+    const rms = (a) => Math.sqrt(a.reduce((sum, v) => sum + v * v, 0) / a.length)
+    say(rms(soft.left) < rms(loud.left) * 0.45 && rms(soft.left) > rms(loud.left) * 0.1, 'song.volume = 0.25 turns the whole song down, its synths with it', [rms(loud.left), rms(soft.left)])
+    song.stop()
+    const stopped = await go(0.5)
+    say(peak(stopped.left.slice(12000)) < 0.02 && song.position.state === 'stopped' && song.position.row === 0, 'stop() ends it and takes it back to the start', [peak(stopped.left.slice(12000)), song.position])
+    s.playSong('songs/night_drive.json', { repeat: false, volume: 0.5, patches: { tune: 'bell' } })
+    await new Promise((yes) => setTimeout(yes, 30))
+    await go(16)          // four patterns of 32 rows at 8 rows a second are 16 seconds
+    await go(0.5)
+    say(player.songPosition().state === 'stopped' && player.songPosition().rounds === 1, '{ repeat: false } plays the song once: after its 16 seconds it has stopped', player.songPosition())
+    s.playSong('songs/night_drive.json', { patches: { tune: 'bell' } })
+    await new Promise((yes) => setTimeout(yes, 30))
+    await go(0.5)
+    s.stopSound()
+    const quiet = await go(0.5)
+    say(peak(quiet.left.slice(12000)) < 0.02 && player.songPosition().state === 'stopped', 'stopSound() stops a song too', peak(quiet.left.slice(12000)))
   })
-  say(said.length === 1 && /tracker songs are not ready yet in this version, so playSong plays nothing/.test(said[0]), 'playSong says once that songs are not ready yet', said)
-  say(/playSong\(\) needs the name of a song file, as in playSong\("tune\.mod"\)/.test(thrown(() => createSound({ sound: { send() {} } }).playSong())), 'playSong with no file says what it needs', null)
+  say(said.length === 0, 'and nothing is said in the console about any of it', said)
+
+  // A song whose synth is not known plays it as keys and says how to name it; a file that is not a song says why.
+  said = await saying(async () => {
+    const { go } = await start('songs/night_drive.json')
+    const r = await go(1)
+    say(peak(r.left) > 0.2, 'a song with a synth nobody named still plays', peak(r.left))
+    const bad = await start(new TextEncoder().encode('{"format": "synths-song", "version": 1, "channels": 99}'))
+    const nothing = await bad.go(0.5)
+    const missing = await start('songs/nowhere.mod')
+    await missing.go(0.1)
+    bad.s.playSound('blip')
+    say(peak(nothing.left) === 0 && peak((await bad.go(0.2)).left) > 0.1, 'a song that cannot be read is silent, and the rest still plays', peak(nothing.left))
+  })
+  say(said.length === 3 && /has an instrument that is a synth called "tune", and was not told what that is, so it plays as "keys"\. Say what it is: playSong\(file, \{ patches: \{ "tune": "bass" \} \}\)/.test(said[0]) && /the song "given as bytes" could not be played: .*channels/.test(said[1]) && /playSong\("songs\/nowhere\.mod"\): the file could not be read \(it is not there\), so it will not play/.test(said[2]),
+    'the console says which synth to name, what the engine found wrong with a song (in its own words), and which file is missing', said)
+
+  // A MOD file, made here byte by byte: one pattern with one note, and one sample that is a square wave of 32 bytes.
+  {
+    const mod = new Uint8Array(1084 + 1024 + 64)
+    mod.set(new TextEncoder().encode('made in a test'), 0)
+    const sample = 20
+    mod[sample + 22] = 0; mod[sample + 23] = 32          // 32 words long
+    mod[sample + 25] = 64                                 // full volume
+    mod[sample + 28] = 0; mod[sample + 29] = 16           // looping: 16 words, one square wave
+    mod[950] = 1; mod[951] = 127                          // one place in the order
+    mod.set(new TextEncoder().encode('M.K.'), 1080)
+    mod.set([0x01, 0xac, 0x10, 0x00], 1084)               // row 0, channel 0: C-2 (period 428), sample 1
+    for (let i = 0; i < 64; i++) mod[1084 + 1024 + i] = (i % 32) < 16 ? 100 : 156    // +100, -100
+    const { song, go, player } = await start(mod)
+    const r = await go(1)
+    // Period 428 on a PAL Amiga is 8287 samples a second; 32 samples a wave is 259 Hz.
+    const hz = crossings(r.left, 0.2, 0.8) / 0.6
+    say(Math.abs(hz - 259) < 4 && peak(r.left) > 0.05 && song.position.state === 'playing' && song.position.tempo === 125 && player.songPosition().rows === 64, 'a .mod file given as bytes plays: its one note comes out at 259 Hz, as an Amiga would play it', [hz, peak(r.left), song.position])
+  }
+  const cmds = commands((s) => { const song = s.playSong('tune.xm', { repeat: false, volume: 0.8, patches: { lead: { preset: 'lead', cutoff: 900 } } }); song.seek(3); song.volume = 0.5; song.pause(); s.stopSong() }, { read: undefined })
+  say(same(cmds.map((c) => { const { t, ...rest } = c; return rest }), [{ op: 'song', id: 'g1', do: 'play', repeat: false, vol: 0.8, patches: { lead: { preset: 'lead', cutoff: 900 } }, name: 'tune.xm', url: 'tune.xm' },
+    { op: 'song', id: 'g1', do: 'seek', order: 3, row: 0 }, { op: 'song', id: 'g1', do: 'volume', vol: 0.5 }, { op: 'song', id: 'g1', do: 'pause' }, { op: 'song', do: 'stop' }]), 'a song is commands like everything else: play with its address, then seek, volume, pause and stop', cmds)
+  const s = createSound({ sound: { send() {} } })
+  say(/playSong\(\) needs the name of a song file, as in playSong\("tune\.mod"\)/.test(thrown(() => s.playSong())) && /playSong: the patch "x" names a synth called "bas", and there is none\. Did you mean "bass"\?/.test(thrown(() => s.playSong('a.mod', { patches: { x: 'bas' } }))) && /playSong: the patch "x": there is no setting called "cutof"\. Did you mean "cutoff"\?/.test(thrown(() => s.playSong('a.mod', { patches: { x: { cutof: 1 } } }))),
+    'playSong with no file, a patch that names no synth and a patch with a setting spelt wrongly each say so', thrown(() => s.playSong('a.mod', { patches: { x: { cutof: 1 } } })))
 }
 
 // --- the commands are the contract

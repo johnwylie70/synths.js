@@ -76,7 +76,7 @@ Put `synths.js`, `synths_core.wasm` and `synths-worklet.js` in a folder of your 
 </script>
 ```
 
-The page has to come from a web server (`npx serve`, or any other), because browsers do not let a page opened straight from disk import a module. With npm: `npm install synths.js`, then `import { playSound } from "synths.js"`.
+The page has to come from a web server (`npx serve`, or any other), because browsers do not let a page opened straight from disk import a module. (synths.js is not published to npm yet; when it is, `npm install synths.js` and `import { playSound } from "synths.js"` will do the same.)
 
 ### The first tap
 
@@ -197,7 +197,7 @@ A step is `{ wave, pitch, width, cutoff, volume }` with any of them left out: `w
 
 ## Dials, keyboards and scopes
 
-Every synth can be tied to the controls of [controls.js](https://github.com/johnwylie70/controls.js), with nothing in between:
+Every synth can be tied to the controls of [dials.js](https://github.com/johnwylie70/dials.js), with nothing in between:
 
 ```js
 const lead = makeSynth("lead")
@@ -264,11 +264,27 @@ stopSound()         // stop everything that is sounding or waiting to sound
 
 ## Songs
 
+A song is a whole piece of music in one file, played by the sound engine itself: a tracker's `.mod` or `.xm` file, or a song in synths' own format, which is text you can read and change.
+
 ```js
-playSong("tune.mod")
+const song = playSong("tune.mod")          // it goes round and round until it is stopped
+
+song.pause()
+song.resume()
+song.volume = 0.5
+song.seek(2)                               // jump to the third part of the song (and seek(2, 16): its row 16)
+song.stop()
 ```
 
-Tracker songs (`.mod`, `.xm`) are **not ready yet**. `playSong` is here so programs can be written for it: today it plays nothing and says so once in the console, and the rest of your sound is not affected.
+`playSong("tune.xm", { repeat: false })` plays it once, and `{ volume: 0.6 }` starts it quieter. One song plays at a time, and your own notes and game sounds play over it. `song.position` says where it is, for drawing: `{ state, order, pattern, row, tick, speed, tempo, rows, orders }`, where `state` is `"playing"`, `"paused"`, `"stopped"` or `"none"`.
+
+In a song of synths' own, an instrument can be a synth instead of a recording, called by a name. A name that is a ready-made synth's (`"bass"`, `"chipKick"`) plays as that; any other name is told what it is:
+
+```js
+playSong("songs/night_drive.json", { patches: { tune: "bell", wobble: { preset: "bass", cutoff: 300, wobble: 12 } } })
+```
+
+[`examples/songs/night_drive.json`](examples/songs/night_drive.json) is a short song written this way, and the format is described in [synths-core](https://github.com/johnwylie70/synths-core/blob/main/docs/song-format.md).
 
 ## With pictures.js
 
