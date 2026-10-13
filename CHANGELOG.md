@@ -46,5 +46,7 @@ The first version.
 
 ### Fixed
 
+- On a page with no audio worklet (one not served over https or from localhost, such as a development build opened on an iPad) the sound stuttered and clicked whenever the page was busy for more than about 20 ms. The fallback now makes 2048 frames at a time where it made 1024, which rides over 30 ms; a key is heard about 95 ms after it is pressed where it was 80. `fallbackBuffer` sets it (`4096` for a busier page, heard about 190 ms late), `"auto"` doubles it once if the page keeps being too busy, and `player.fallback` is `{ buffer, underruns, reason }`. The table of what was measured is in [docs/commands.md](docs/commands.md).
+- On the same fallback, a callback that came late (but in time) moved the notes inside its buffer by as much as it was late. The engine's clock now goes by the buffers' own grid, and scheduled notes are exact to the sample while the page is busy.
 - What was asked for while the engine was still loading (a repeating tune, `loopNotes`, a song) could stay silent for as long again as the page had been open: always on the fallback with no audio worklet, and now and then in WebKit. It now starts as soon as the engine is there.
 - A song that does not repeat lets its last notes go at its end.

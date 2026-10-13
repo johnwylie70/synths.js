@@ -571,9 +571,10 @@ player to itself. On each: `pause()`, `resume()` and `close()`.
 |---|---|
 | `wasm` | the engine: bytes, a `WebAssembly.Module`, an address, or a promise of one. Without it, `synths_core.wasm` beside `synths.js` is fetched |
 | `worklet` | how the worklet's module is loaded: `"blob"` (from text inside `synths.js`; nothing fetched), `"file"` (`synths-worklet.js` beside it), an address, or `"auto"` (the Blob, then the file) |
-| `latency` | seconds everything is played ahead (0.04) |
+| `latency` | seconds everything is played ahead (0.04; on the fallback, two of its buffers and 0.008) |
 | `context`, `destination` | an `AudioContext` and a node of your own to play into |
 | `fallback` | `false` to refuse running the engine on the page's thread when there is no AudioWorklet; `"always"` to insist on it |
+| `fallbackBuffer` | the frames the fallback makes at a time: a power of two from 256 to 16384, or `"auto"` (the default: 2048 at 44.1 and 48 kHz, doubled once if the page keeps being too busy). See below |
 | `onState` | called with `"waiting"`, `"on"` or `"failed"` |
 | `microphone` | where the microphone comes from when it is not the browser's to ask for: see [microphone.md](microphone.md). `false` for none |
 | `save` | called with `{ name, bytes, type }` for a file `saveSound` made, in place of a download |
@@ -581,6 +582,35 @@ player to itself. On each: `pause()`, `resume()` and `close()`.
 It returns `send(batch)`, `read(id)` (see [Reading back](#reading-back)), `state`, `kind` (`"worklet"` or `"fallback"`), `ready` (a promise for sound being on),
 `pause()`, `resume()`, `unlock()` (call it from a tap of your own), `ask()` (a promise of `{ voices, time }`),
 `context`, `node` and `close()`.
+
+**The fallback.** A page with no AudioWorklet (one not served over https or from localhost) runs the engine on
+the page's thread through a ScriptProcessorNode, and `kind` is `"fallback"`. The sound card plays one buffer while
+the page makes the next, so a page that is busy for longer than a buffer lasts is heard as a click, and a bigger
+buffer is heard later: everything is scheduled two buffers and 8 ms ahead (unless `latency` is given), which is
+how far the engine has already made the sound when a command arrives, so times stay exact to the sample.
+
+| `fallbackBuffer` | a key is heard after | rides over a page busy for |
+|---|---|---|
+| 1024 | 51 ms at 48 kHz, 54 at 44.1 | 10 ms |
+| 2048 (`"auto"`) | 93 ms, 101 | 30 ms |
+| 4096 | 179 ms, 194 | 60 ms |
+
+Measured in Playwright's Chromium and WebKit on 2026-10-13 at 44.1 kHz, the page kept busy four times a second
+for 2.5 seconds, counting the breaks in a steady sine (an under-run makes about two):
+
+| page busy for | 1024 frames, 80 ms ahead (as it was) | 2048 | 4096 |
+|---|---|---|---|
+| 10 ms | 0 | 0 | 0 |
+| 30 ms | 0 to 2 | 0 | 0 |
+| 60 ms | 18 to 19 | 1 to 4 | 0 |
+| 120 ms | 27 to 29 | 18 to 19 | 3 to 5 |
+
+`"auto"` doubles the buffer once, to 4096, after four under-runs within ten seconds, and never makes it smaller;
+a number is kept as it is. `player.fallback` is `{ buffer, underruns, reason }`, with `reason` `"insecure"` or
+`"worklet"` (it would not load). `player.node` on the fallback is a gain node that stays the same when the buffer
+changes. The engine itself is cheap (36 voices take 1 ms of a 43 ms buffer), so making the sound in a Worker would
+not help: the ScriptProcessorNode's callback would still wait for the page's thread. Hosts: pictures.js hands
+every field of its `sound` option to the player, so `sound: { fallbackBuffer: 4096 }` is enough there.
 
 `createOfflinePlayer({ sampleRate, wasm, start, microphone, save })` is a promise of a player with `send(batch)` and
 `render(seconds)`, which gives `{ left, right, sampleRate, wav() }` and carries on from where the last render

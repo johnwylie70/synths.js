@@ -61,8 +61,8 @@ differ (Chromium and WebKit; Firefox does not convert and does not need to, sinc
 for and a microphone are both at the device's rate). The library never asks for a rate, of the context or of the
 microphone. The worklet node has one input, mixed down to one channel; with nothing connected it costs nothing.
 
-**No worklet.** On the fallback (a ScriptProcessorNode on the page's thread) the input is carried too, 1024
-frames at a time, so it is about 20 milliseconds later each way. A page that has no worklet because it is not
+**No worklet.** On the fallback (a ScriptProcessorNode on the page's thread) the input is carried too, a buffer
+at a time (2048 frames unless `fallbackBuffer` says otherwise), so it is about 45 milliseconds later each way. A page that has no worklet because it is not
 served securely has no `getUserMedia` either, so this matters only to a host that supplies the microphone.
 
 ## The `microphone` option: a host's own microphone
