@@ -700,6 +700,26 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
     'playSong with no file, a patch that names no synth and a patch with a setting spelt wrongly each say so', thrown(() => s.playSong('a.mod', { patches: { x: { cutof: 1 } } })))
 }
 
+// --- a song's channels and instruments, read one at a time
+{
+  const doc = { format: 'synths-song', version: 1, speed: 6, tempo: 125, channels: 3, order: [0],
+    patterns: [{ rows: 16, events: [{ row: 0, ch: 0, note: 'A-3', ins: 1 }, { row: 0, ch: 1, note: 'A-3', ins: 2 }, { row: 0, ch: 2, note: 'A-4', ins: 3 }] }],
+    instruments: [{ name: 'dull', patch: 'lead', synth: { preset: 'chip', set: { filter: 'lowpass', cutoff: 200 } } }, { name: 'bright', patch: 'lead', synth: { preset: 'chip', set: { filter: 'lowpass', cutoff: 8000 } } }, { name: 'beep', sample: 0 }],
+    samples: [{ name: 'square', wave: [100, 100, 100, 100, -100, -100, -100, -100], loop: { start: 0, length: 8 } }] }
+  const player = await createOfflinePlayer()
+  const s = createSound({ sound: player, clock: () => 0 })
+  const song = s.playSong(new TextEncoder().encode(JSON.stringify(doc)))
+  s.flush()
+  await new Promise((yes) => setTimeout(yes, 30))
+  await player.render(0.3)
+  const one = player.target('song:ins:1'), two = player.target('song:ins:2')
+  say(one.get('cutoff') === 200 && two.get('cutoff') === 8000 && player.target('song:lead').get('cutoff') === 200 && player.target('song:lead#2').get('cutoff') === 8000 && one.level()[0] > 0 && two.level()[0] > one.level()[0],
+    'two instruments that give one name to synths that differ each keep their own: "song:ins:1" and "song:ins:2" read them by number, and the second is the brighter', [one.get('cutoff'), two.get('cutoff'), one.level(), two.level()])
+  const beep = song.channel(2), none = song.channel(7)
+  say(beep.samples().length === 1024 && peak(beep.samples()) > 0.01 && beep.level()[0] > 0.01 && same(player.read('song:channel:2').notes.length > 0, true) && same([none.samples().length, none.level()], [0, [0, 0]]) && peak(song.channel(0).samples()) === 0,
+    'song.channel(2) reads a channel that plays a sample (its wave and level); a channel the song has not got reads nothing, and one that plays a synth is read at the synth', [peak(beep.samples()), beep.level(), none.level()])
+}
+
 // --- the commands are the contract
 {
   const play = (s) => {

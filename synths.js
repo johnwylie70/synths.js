@@ -1733,18 +1733,28 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
     // A song put in the place of another keeps the synths its instruments already have.
     if (!m.replaced) dropSongSynths()
     enter(song.scope.name)
+    // Which synth each instrument plays, by the instrument's number: read as the id "song:ins:<number>".
+    song.instruments = new Map()
+    const taken = new Set()
     for (const [instrument, nameBytes, synthBytes] of m.patches) {
       const name = text(nameBytes)
+      let own = false
       let bound = song.patches[name]
       // With nothing said by the caller, the song's own word for it: { preset, set }.
       if (bound === undefined && synthBytes) {
+        own = true
         try { const own = JSON.parse(text(synthBytes)); if (own && typeof own === 'object') bound = { ...(typeof own.preset === 'string' ? { preset: own.preset } : {}), ...(own.set && typeof own.set === 'object' ? own.set : {}), ...(own.macro !== undefined ? { macro: own.macro } : {}) } } catch (e) { /* not ours to read */ }
       }
       if (bound === undefined && PRESETS[name]) bound = name
       if (bound === undefined) tell(`the song ${shown(song.name)} has an instrument that is a synth called ${shown(name)}, and was not told what that is, so it plays as "keys". Say what it is: playSong(file, { patches: { ${shown(name)}: "bass" } }).`)
       const settings = bound && typeof bound === 'object' ? bound : {}
       const preset = PRESETS[typeof bound === 'string' ? bound : settings.preset] || (settings.preset === undefined && typeof bound === 'object' ? null : PRESETS.keys)
-      const sid = prefix + 'song:' + name
+      // Two instruments may give the same name to synths of their own that differ: the first has the name, and
+      // each one after it a synth to itself, "song:<name>#<its number>".
+      let sid = prefix + 'song:' + name
+      if (own && taken.has(sid)) sid += '#' + instrument
+      taken.add(sid)
+      song.instruments.set(instrument, sid)
       const patch = patchOf(settings, '', false, patchOf(preset, '', false, plain()), slotFor)
       for (const pid of [...patch.keys()]) if (pid >= 200) patch.delete(pid)
       // A song's channels play at half volume, to leave room for one another; its synths do the same.
@@ -1766,17 +1776,22 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
       event(now, SONG, 0, 6, instrument, rec.part)
     }
     song.info = m.info
-    if (m.replaced) return
-    song.ready = true
     // The song's channels are the engine's parts from 32. Raw: a sample played fast is left harsh, as old trackers
     // left it; not raw: it is smoothed. With nothing said the engine chooses (raw for a .mod or .xm as it is).
+    // It is said again for a song put in another's place, in case reading it set those parts afresh.
     if (song.raw != null) for (let ch = 0; ch < Math.min(32, m.info[0]); ch++) event(now, PARAM, parts.length + ch, id('sample.antialias'), song.raw ? 0 : 1, 0)
+    if (m.replaced) return
+    song.ready = true
     if (song.repeat === false) event(now, SONG, 0, 4, 0, 0)
     if (song.vol != null) steer({ do: 'volume', vol: song.vol }, now)
     event(Math.max(now, song.at ?? now), SONG, 0, 1, 0, 0)
     for (const [c, at] of song.waiting) { if (typeof c === 'function') c(); else steer(c, Math.max(now, at ?? now)) }
     song.waiting = []
   }
+
+  // A synth by its id. The synth a song's instrument plays is also "song:ins:<the instrument's number>".
+  const songSynth = (sid) => { const m = song && song.instruments && typeof sid === 'string' && /^song:ins:(\d+)$/.exec(sid); return m ? song.instruments.get(+m[1]) : undefined }
+  const found = (sid, scopeName) => synths.get(songSynth(sid) ?? (scopeName ? scopeName + '\u0001' : '') + sid)
 
   function flush() {
     while (ops.length) {
@@ -1793,6 +1808,9 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
       const how = command && does[command.op]
       if (!how) return
       enter(scopeName)
+      // The synth of a song's instrument, by the instrument's number, is whichever synth that is.
+      const ofSong = songSynth(command.id)
+      if (ofSong !== undefined) { command = { ...command, id: ofSong }; return how(command, at) }
       // Inside a scope every id is the scope's own.
       if (prefix && (command.id != null || command.synth != null)) command = { ...command, ...(command.id != null ? { id: prefix + command.id } : {}), ...(command.synth != null ? { synth: prefix + command.synth } : {}) }
       how(command, at)
@@ -1826,15 +1844,18 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
      */
     partOf(sid, scopeName) {
       if (sid == null) return 0xffff
-      const rec = synths.get((scopeName ? scopeName + '\u0001' : '') + sid)
+      // A channel of the song is one of the engine's parts from 32 up: "song:channel:0" is the first.
+      const channel = typeof sid === 'string' && /^song:channel:(\d+)$/.exec(sid)
+      if (channel) return song && song.info && +channel[1] < Math.min(32, song.info[0]) ? parts.length + +channel[1] : -1
+      const rec = found(sid, scopeName)
       return !rec ? -1 : rec === mic && !rec.listen && rec.part >= 0 ? MIC_TAP : rec.part
     },
     /** Whether a synth is the microphone, whose settings have names of their own. */
-    isMic(sid, scopeName) { const rec = synths.get((scopeName ? scopeName + '\u0001' : '') + sid); return !!rec && rec === mic },
+    isMic(sid, scopeName) { const rec = found(sid, scopeName); return !!rec && rec === mic },
     /** A setting of a synth as the commands so far have left it: [what it is, its value in the engine's units], or null. */
     settingOf(sid, name, scopeName) {
       const entry = setting(name)
-      const rec = synths.get((scopeName ? scopeName + '\u0001' : '') + sid)
+      const rec = found(sid, scopeName)
       return entry && rec ? [entry, entry.part ? rec.patch.get(entry.id) : globals.get(entry.id)] : null
     },
     /** How much everything is turned down or up after the parts are mixed. */
@@ -3680,6 +3701,11 @@ export function createSound(options = {}) {
       },
       /** Where the song is: { state, order, pattern, row, tick, speed, tempo, rounds, rows, orders }, for drawing it. */
       get position() { return transport?.songPosition?.() || NO_SONG },
+      /** One channel of the song (the first is 0), for a meter or a scope of its own: song.channel(3).level(), .samples(), .notes(). */
+      channel(n) {
+        const read = () => transport?.read?.('song:channel:' + amount(n, 'channel', 0, 31), scope) || NOTHING
+        return { samples: () => read().samples, level: () => read().level, notes: () => read().notes }
+      },
     }
     song.loop_pattern = song.loopPattern
     return song

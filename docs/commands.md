@@ -475,6 +475,15 @@ in the engine's own words for a JSON song (it names the key that is wrong), and 
 A song's synths are synths of the sender's scope with the ids `song:<name>`, so `player.target("song:bass")`
 is a dial's target. They are freed when another song is loaded.
 
+Two more ids read a song, both additive:
+
+- `song:ins:<number>` is the synth that instrument (counted from 1) plays, whatever its name: for `read`,
+  `target`, `set`. When two instruments give the same patch name to synths of their own that differ (each with
+  its own `synth` in the song), the first has `song:<name>` and each later one `song:<name>#<its number>`.
+- `song:channel:<n>` (from 0) is a channel of the song, one of the engine's parts from 32 up, for
+  `player.read`: the wave, level and notes of what that channel plays from samples. Notes a channel plays on a
+  synth are read at that synth. A channel the song has not got reads as nothing.
+
 Where the song is comes from the player, like the rest of [reading back](#reading-back):
 `player.songPosition()` gives `{ state: "none" | "stopped" | "playing" | "paused", order, pattern, row, tick,
 speed, tempo, rounds, rows, orders }`, never waiting (the first read asks; the answer follows in a moment). A

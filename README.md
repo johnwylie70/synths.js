@@ -501,7 +501,7 @@ song.seek(2)                               // jump to the third part of the song
 song.stop()
 ```
 
-`playSong("tune.xm", { repeat: false })` plays it once, and `{ volume: 0.6 }` starts it quieter. One song plays at a time, and your own notes and game sounds play over it. `song.position` says where it is, for drawing: `{ state, order, pattern, row, tick, speed, tempo, rows, orders }`, where `state` is `"playing"`, `"paused"`, `"stopped"` or `"none"`.
+`playSong("tune.xm", { repeat: false })` plays it once, and `{ volume: 0.6 }` starts it quieter. One song plays at a time, and your own notes and game sounds play over it. `song.channel(0).level()` (and `.samples()`, `.notes()`) reads one channel for a meter of its own. `song.position` says where it is, for drawing: `{ state, order, pattern, row, tick, speed, tempo, rows, orders }`, where `state` is `"playing"`, `"paused"`, `"stopped"` or `"none"`.
 
 A song is made of channels, counted from 0, and of patterns played in an order:
 
