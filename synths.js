@@ -45,7 +45,14 @@
 
 export const version = '0.1.0'
 
-const BASE = new URL('./', import.meta.url)
+// Where this file is, for the engine and the worklet beside it. A copy imported from a Blob has no "beside":
+// it is given the engine as bytes, and the worklet comes from a Blob too, so nothing is looked for there.
+const BASE = (() => {
+  try { return new URL('./', import.meta.url) } catch (e) { /* a blob: address cannot be a base */ }
+  try { return new URL('./', document.baseURI) } catch (e) { return 'http://localhost/' }
+})()
+/** The engine's parts that synths are given. The rest (32 to 63) are a tracker song's, one for each channel. */
+const SYNTH_PARTS = 32
 /** The version of the command format: `synths` in every batch. */
 const COMMANDS = 1
 
@@ -289,6 +296,18 @@ function allSettings() {
   return settings
 }
 const setting = (name) => (typeof name === 'string' ? allSettings().get(key(name)) : undefined)
+
+/** What a setting is, for a control that takes its range from it; `now` is its value in the engine's units, if it is not the default. */
+function describeSetting(entry, now) {
+  const value = (now === undefined ? entry.def : now) / entry.scale
+  return { name: entry.name, kind: KINDS[entry.kind], min: entry.min / entry.scale, max: entry.max / entry.scale, default: entry.kind === 'c' ? entry.choices[value] : entry.kind === 'b' ? value === 1 : value,
+    unit: entry.scale === 12 ? 'octaves' : entry.unit, ...(entry.choices ? { choices: [...entry.choices] } : {}) }
+}
+/** A setting's value as a person reads it: a choice by name, a switch as true or false, a number in the friendly name's units. */
+function readSetting(entry, now) {
+  const value = (now === undefined ? entry.def : now) / entry.scale
+  return entry.kind === 'c' ? entry.choices[value] : entry.kind === 'b' ? value === 1 : value
+}
 
 /** The name in `names` nearest to `word`, when one is near enough to be what was meant. */
 function nearest(word, names) {
@@ -826,7 +845,7 @@ function makeConductor(post, load) {
   /** id -> { patch: Map of engine id -> value, part: its part or -1, used, note } */
   const synths = new Map()
   /** For each part: who has it, and what every parameter was last set to. */
-  const parts = Array.from({ length: ENGINE.parts }, () => ({ owner: null, values: new Map(), macro: null }))
+  const parts = Array.from({ length: Math.min(SYNTH_PARTS, ENGINE.parts) }, () => ({ owner: null, values: new Map(), macro: null }))
   const slots = new Map()
   const freeSlots = []
   let nextSlot = 0
@@ -890,7 +909,7 @@ function makeConductor(post, load) {
     if (index < 0) {
       let oldest = null
       for (const other of synths.values()) if (other.part >= 0 && (!oldest || other.used < oldest.used)) oldest = other
-      tell(`more than ${ENGINE.parts} synths are in use at once, which is all there is room for. The one played longest ago gave up its place. To free one yourself, call its remove().`)
+      tell(`more than ${parts.length} synths are in use at once, which is all there is room for. The one played longest ago gave up its place. To free one yourself, call its remove().`)
       index = oldest.part
       ops.push(['stopPart', index, 1])
       oldest.part = -1
@@ -1061,6 +1080,12 @@ function makeConductor(post, load) {
     loading,
     /** The engine's part a synth has now: 65535 for no id (everything), -1 for a synth with no part. */
     partOf(sid) { return sid == null ? 0xffff : synths.get(sid)?.part ?? -1 },
+    /** A setting of a synth as the commands so far have left it: [what it is, its value in the engine's units], or null. */
+    settingOf(sid, name) {
+      const entry = setting(name)
+      const rec = synths.get(sid)
+      return entry && rec ? [entry, rec.patch.get(entry.id)] : null
+    },
     /** How much everything is turned down or up after the parts are mixed. */
     gain: () => (muted ? 0 : clamp(volume * 0.5, 0, 2)),
   }
@@ -1130,6 +1155,42 @@ function reading([source, samples, left, right, words], gain) {
   return { samples, level: [Math.min(1, left * gain), Math.min(1, right * gain)], notes }
 }
 
+/**
+ * A TARGET for a synth that already exists by its id: the thing dials, a keyboard, a scope and a meter are tied to
+ * when the program that made the synth is somewhere else (Python, a worker). It writes ordinary commands for that
+ * id, and answers get() and describe() from what the commands so far have set, so it needs to be told nothing.
+ */
+function makeTarget(id, run, conductor, read) {
+  const held = new Map()
+  let handle = 0x7f000000
+  const target = {
+    id,
+    set(name, value) { run({ op: 'set', id, set: typeof name === 'string' ? { [name]: value } : name }); return target },
+    get(name) { const now = conductor()?.settingOf(id, name); return now ? readSetting(now[0], now[1]) : undefined },
+    describe(name) { const now = conductor()?.settingOf(id, name); return now ? describeSetting(now[0], now[1]) : setting(name) ? describeSetting(setting(name)) : null },
+    noteOn(note, velocity = 0.8) {
+      const n = noteNumber(note)
+      target.noteOff(n)
+      handle = handle >= 0x7ffffff0 ? 0x7f000000 : handle + 1
+      held.set(n, handle)
+      run({ op: 'note', id, note: [n], len: null, vel: velocity, h: handle })
+      return target
+    },
+    noteOff(note) {
+      const n = noteNumber(note)
+      if (held.has(n)) run({ op: 'off', id, h: held.get(n) })
+      held.delete(n)
+      return target
+    },
+    samples: () => read(id).samples,
+    level: () => read(id).level,
+    notes: () => read(id).notes,
+  }
+  target.note_on = target.noteOn
+  target.note_off = target.noteOff
+  return target
+}
+
 // --- the real-time player --------------------------------------------------------------------
 
 /** Commands that make a sound once. One that could not be played near the time it was asked for is dropped, never played late. */
@@ -1170,8 +1231,8 @@ export function createPlayer(options = {}) {
   let latency = options.latency ?? 0.04
   let held = []
   let saidWaiting = false
-  let offset = null
-  let lastBatch = 0
+  /** For each sender's clock (a batch may name its own): [how far it is from the sound card's, when that was last seen]. */
+  const clocks = new Map()
   let conductor = null
   let core = null          // the fallback's core, on this thread
   let port = null
@@ -1186,6 +1247,8 @@ export function createPlayer(options = {}) {
     state: 'loading', kind: null, context: null, node: null,
     ready: new Promise((yes) => { ready = yes }),
     send, unlock, close, read,
+    /** A synth that exists by its id, as something controls can be tied to: set, get, describe, noteOn, noteOff, samples, level, notes. */
+    target: (id) => makeTarget(id, (c) => send({ synths: COMMANDS, cmds: [c] }), () => conductor, read),
     /** Silence, with everything kept as it is: for a scene that is paused or out of view. */
     pause() { paused = true; player.context?.suspend?.() },
     resume() { paused = false; unlock() },
@@ -1223,7 +1286,7 @@ export function createPlayer(options = {}) {
 
   function settle() {
     if (closed || player.state === 'failed') return
-    offset = null
+    clocks.clear()
     if (!live()) {
       if (engineReady) state('waiting')
       return
@@ -1268,10 +1331,13 @@ export function createPlayer(options = {}) {
     // them; a batch that took longer is late by the rest, and `latency` is there to cover it. The difference is
     // let creep up half a millisecond a second, for two clocks that do not run at quite the same speed.
     const current = context.currentTime
+    let offset = null
     if (typeof batch.now === 'number') {
+      const name = batch.clock || ''
+      const known = clocks.get(name)
       const seen = current - batch.now
-      offset = offset === null ? seen : Math.min(seen, offset + 0.0005 * Math.max(0, current - lastBatch))
-      lastBatch = current
+      offset = known ? Math.min(seen, known[0] + 0.0005 * Math.max(0, current - known[1])) : seen
+      clocks.set(name, [offset, current])
     }
     for (const c of batch.cmds) {
       if (!c) continue
@@ -1435,6 +1501,8 @@ export async function createOfflinePlayer(options = {}) {
     },
     get time() { return core.time / sampleRate },
     voices: () => core.voices(),
+    /** A synth that exists by its id, as something controls can be tied to (see createPlayer). What it plays starts where rendering has reached. */
+    target(id) { return makeTarget(id, (c) => { conductor.run(c, core.time / sampleRate); conductor.flush() }, () => conductor, (i) => this.read(i)) },
     /** What a synth (or, with no id, everything) is doing at the point rendering has reached: { samples, level, notes }. */
     read(id) {
       const part = conductor.partOf(id)
@@ -1711,16 +1779,12 @@ export function createSound(options = {}) {
     get(name) {
       const entry = setting(name)
       if (!entry) throw new Error(`get: there is no setting called ${shown(name)}.${meant(String(name), namesToShow)}`)
-      const value = (this._patch.has(entry.id) ? this._patch.get(entry.id) : entry.def) / entry.scale
-      return entry.kind === 'c' ? entry.choices[value] : entry.kind === 'b' ? value === 1 : value
+      return readSetting(entry, this._patch.get(entry.id))
     }
     /** What a setting is: { name, min, max, default, unit, kind, choices }, for a control that takes its range from it. */
     describe(name) {
       const entry = setting(name)
-      if (!entry) return null
-      const def = (this._patch.has(entry.id) ? this._patch.get(entry.id) : entry.def) / entry.scale
-      return { name: entry.name, kind: KINDS[entry.kind], min: entry.min / entry.scale, max: entry.max / entry.scale, default: entry.kind === 'c' ? entry.choices[def] : def,
-        unit: entry.scale === 12 ? 'octaves' : entry.unit, ...(entry.choices ? { choices: [...entry.choices] } : {}) }
+      return entry ? describeSetting(entry, this._patch.get(entry.id)) : null
     }
     /** A key goes down, and comes up: what a keyboard plays. The note stays until its noteOff. */
     noteOn(note, velocity = 0.8) {

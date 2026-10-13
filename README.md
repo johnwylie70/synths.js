@@ -298,7 +298,7 @@ makeSynth(): there is no setting called "cutof". Did you mean "cutoff"?
 "H4" is not a note. Write a note as a name like "C4", "F#3" or "Bb5", or as a number, where 60 is middle C
 ```
 
-Things that are not your mistake do not stop your program. They are said once in the console and the rest carries on: sound that is waiting for a tap, a sample whose file is missing, more synths than there is room for (64 at once; `remove()` gives a place back), more notes than there are voices (64; the oldest note makes way).
+Things that are not your mistake do not stop your program. They are said once in the console and the rest carries on: sound that is waiting for a tap, a sample whose file is missing, more synths than there is room for (32 at once; `remove()` gives a place back), more notes than there are voices (64; the oldest note makes way).
 
 ## For apps that show scenes
 

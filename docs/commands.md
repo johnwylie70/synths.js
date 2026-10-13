@@ -68,6 +68,10 @@ still come out with exactly the spacing their `t`s have. A sender in a slow plac
 sent only when the frame ends, a round trip to another computer) should ask its host for a larger `latency`, or
 schedule a little ahead itself.
 
+Two senders with different clocks may share one player: each puts a name of its own in `clock` on its batches
+(`{ synths: 1, clock: "py", now, cmds }`), and the player lines each name up separately. A batch with no `clock`
+is on the one clock that has no name.
+
 A single note or sound effect that is more than 0.25 seconds overdue when it arrives is dropped, not played late.
 
 The offline player has no sound card to line up with: the sample at the start of its output is the sender's time
@@ -80,7 +84,8 @@ The sender names things. An id is text or a number, and is the sender's to choos
 that share a player must not share ids: give each a prefix (`createSound({ ids: "a:" })`). Ids beginning
 `sound:` are the player's own.
 
-- A **synth** id names an instrument. The player gives it one of the engine's 64 parts when it is first used.
+- A **synth** id names an instrument. The player gives it one of the engine's parts (there are 32 for synths)
+  when it is first used.
   Sending `synth` again with the same id replaces its settings.
 - A **sample** id names a recording. It may be used in a synth's settings before the recording has arrived.
 - A **note handle** `h` is a whole number from 1 to 2147483647 that names one sounding note of one synth, for
@@ -330,7 +335,8 @@ The command is fixed now so that senders can be written:
 - **Order.** Commands with the same time happen in the order they were sent, so a `synth` and the first `note`
   for it can be sent together.
 - **Exactness.** A note starts on the sample its time names. A change of setting takes hold within 16 samples.
-- **Room.** The engine has 64 parts and 64 voices. A 65th synth takes the part of the one played longest ago,
+- **Room.** The engine has 64 voices and 64 parts, of which synths are given the first 32 (the rest are a song's
+  channels). A 33rd synth takes the part of the one played longest ago,
   which takes one back the same way if it is played again; the console says so once. A note past 64 voices takes
   the place of the oldest. Nothing a sender does can make the output louder than full volume or anything but numbers.
 - **Leniency.** Anything not understood is passed over without a word; see [The shape of it](#the-shape-of-it).
@@ -422,6 +428,12 @@ player.read()         // the same for all the sound together
 notes sounding, as whole numbers. A read never waits: it gives the latest the audio thread has posted (about 40
 times a second, beginning a moment after the first read of that synth, and stopping when nothing has read for a
 second and a half). Before anything has arrived, and for a synth that has no part, it gives empty lists and zeros.
+
+`player.target(id)` is a synth that exists by its id, as an object for controls on the player's side to be tied
+to when the program that made it is elsewhere: `set(name, value)`, `get(name)`, `describe(name)` (`{ name, kind,
+min, max, default, unit, choices }`), `noteOn(note, velocity)`, `noteOff(note)`, `samples()`, `level()`,
+`notes()`. It writes ordinary commands for that id, and answers `get` and `describe` from the commands the player
+has carried out, so it is told nothing. The sender is not told what a dial changed.
 
 A transport may offer the same as `read(id)` beside its `send(batch)`; the library's synths use it for
 `samples()`, `level()` and `notes()`, and give nothing when it is not there. A sender in another place (Python, a

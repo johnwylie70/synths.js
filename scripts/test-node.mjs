@@ -294,9 +294,9 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
       all.forEach((synth, i) => synth.play(60 + (i % 12), 0.1, { at: i * 0.01 }))
       all[0].play('A4', 0.1, { at: 1 })          // the first one lost its place long ago, and takes one back
     }, { seconds: 1.5 })
-    say(r.left.every(Number.isFinite) && onsets(r.left.slice(SR)).length === 1 && Math.abs(crossings(r.left, 1, 1.1) * 10 - 440) <= 10, '70 synths at once (there is room for 64): all play, and one that lost its place plays again as itself', onsets(r.left.slice(SR)))
+    say(r.left.every(Number.isFinite) && onsets(r.left.slice(SR)).length === 1 && Math.abs(crossings(r.left, 1, 1.1) * 10 - 440) <= 10, '70 synths at once (there is room for 32; the other parts of the engine belong to a song): all play, and one that lost its place plays again as itself', onsets(r.left.slice(SR)))
   })
-  say(said.length === 1 && /more than 64 synths are in use at once.*call its remove\(\)/.test(said[0]), 'the console says so once, with what to do', said)
+  say(said.length === 1 && /more than 32 synths are in use at once.*call its remove\(\)/.test(said[0]), 'the console says so once, with what to do', said)
   const many = await saying(async () => {
     const player = await createOfflinePlayer()
     const s = createSound({ sound: player, clock: () => 0 })
@@ -381,9 +381,9 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
     const moved = await renderSound((s) => {
       const first = s.makeSynth({ ...CLICK, macro: [{ pitch: 12 }] })
       first.play('A3', 0.01)
-      const rest = Array.from({ length: 64 }, () => s.makeSynth(CLICK))
+      const rest = Array.from({ length: 32 }, () => s.makeSynth(CLICK))
       rest.forEach((synth, i) => synth.play('A3', 0.01, { at: 0.01 + i * 0.001 }))
-      rest[63].play('A3', 0.4, { at: 0.2 })
+      rest[31].play('A3', 0.4, { at: 0.2 })
     }, { seconds: 0.6 })
     say(Math.abs(crossings(moved.left, 0.21, 0.39) / 0.18 - 220) < 8, 'a place that passes from a synth with a macro to one without loses the macro', crossings(moved.left, 0.21, 0.39) / 0.18)
   })
@@ -418,6 +418,20 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
   out.set('volume', 0.5)
   out.set('echoTime', 0.2)
   say(out.get('volume') === 0.5 && out.get('echoTime') === 0.2 && out.describe('volume').max === 2 && out.describe('reverbSize').max === 1 && s.mainSynth().describe('attack').unit === 'seconds', 'soundOutput() takes dials for the volume and the shared effects, and mainSynth() is the synth playNote uses', [out.get('volume'), out.describe('reverbSize')])
+  // A synth made somewhere else (Python sends its commands), driven on the page by its id alone.
+  const there = await createOfflinePlayer()
+  there.send({ synths: 1, now: 0, cmds: [{ op: 'synth', id: 'p1', preset: 'bass', set: { cutoff: 700, wave: 'sine', filter: 'off', attack: 0, release: 0 } }] })
+  const knob = there.target('p1')
+  say(knob.get('cutoff') === 700 && knob.get('wave') === 'sine' && same(knob.describe('cutoff'), { name: 'filter.cutoff', kind: 'float', min: 20, max: 20000, default: 700, unit: 'hz' }) && knob.describe('sub').default === 0.6,
+    'player.target(id) answers get and describe for a synth it was only sent commands for, preset and all', [knob.get('cutoff'), knob.describe('cutoff')])
+  knob.set('cutoff', 1500)
+  knob.noteOn(69, 1)
+  await there.render(0.2)
+  const sounding = [knob.get('cutoff'), knob.notes(), knob.samples().length, knob.level()[0] > 0.1]
+  knob.noteOff(69)
+  await there.render(0.2)
+  say(same(sounding, [1500, [69], 1024, true]) && same(knob.notes(), []), 'and its set, noteOn and noteOff play that synth, with notes(), samples() and level() to draw', [sounding, knob.notes()])
+  // Two senders with clocks of their own may share a real-time player; offline, a batch's own times are simply kept.
   const far = createSound({ sound: { send() {} } }).makeSynth()
   say(same([far.samples().length, far.level(), far.notes()], [0, [0, 0], []]), 'a synth whose commands go somewhere that cannot be read gives nothing, without a fuss', [far.samples().length, far.level(), far.notes()])
 }
