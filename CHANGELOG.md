@@ -14,6 +14,9 @@ The first version.
 - Arpeggios, the fast chords of a C64 tune, from one voice: `playArp("Cm7")`, `lead.arp("C4", "minor", 2, { speed: 50, order: "up-down" })`, and `startArp("Am")` for one that stays and changes chord with `chord.change("F")` without starting again.
 - Step macros for chip sounds: `makeSynth("chip", { macro: [{ wave: "noise", pitch: 24 }, { wave: "square" }] })`, `lead.macro = [...]`. The chip drums, the chip bass and the sounds hit, shoot and powerup are made of them.
 - A synth is something [dials.js](https://github.com/johnwylie70/dials.js) can be tied to as it is: `dial("cutoff", lead, "cutoff")`, `scope(lead)`, `meter(lead)`, `keyboard(lead)`. For your own drawing: `lead.samples()`, `lead.level()`, `lead.notes()`, and `soundOutput()` for all the sound.
+- Note lengths by name, measured against `setTempo`: `playNote("C4", "quarter")`, `"eighth."`, `"1/16"`, `playSound("win", { length: "half" })`. A number is still seconds.
+- A tune as ordinary code, one note a line, each beginning where the last ended: `note("E4", "quarter")`, `rest("eighth")`, `chord("Cm", "whole")`, on any synth (`lead.note`), lines written together start together, `loopNotes(() => { … })` has a section go round, `startLines()` begins again.
+- In `playNotes`, lengths on notes (`"C4:q E4:e G4:h"`) and a step by name (`"eighth"`); a tune in beats changes speed when `setTempo` is called.
 - `lead.start("C4")` gives a note that stays, and can be slid, turned down and stopped.
 - Effects in one word: `lead.echo`, `lead.reverb`, `lead.chorus`, `lead.distortion`, `lead.crush`, and `setEffects({ echoTime: 0.3 })` for the ones every synth shares.
 - `loadSample("kick.wav")`: a recorded sound, played like any synth.

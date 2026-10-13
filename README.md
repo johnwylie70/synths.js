@@ -101,6 +101,67 @@ A chord is a note and a kind: `"C"`+`"m7"` is `"Cm7"`. The kinds are `major` (or
 
 A letter followed by a number is always a note, so `"C7"` is the note C in octave 7. For the seventh chord write `"Cdom7"`. For a chord in another octave put the octave after the letter: `"C3m7"`.
 
+## Lengths
+
+Wherever a length is wanted there are two ways to say it, and they are never mixed up:
+
+- **A number is seconds.** `playNote("C4", 0.5)` lasts half a second, whatever the tempo.
+- **A name is a note length**, measured against the tempo: `playNote("C4", "quarter")`. At `setTempo(120)` a quarter note is half a second; at 60 it is a whole one.
+
+| | | |
+|---|---|---|
+| `"whole"` | `"1/1"`, `"w"` | 4 beats |
+| `"half"` | `"1/2"`, `"h"` | 2 beats |
+| `"quarter"` | `"1/4"`, `"q"` | 1 beat |
+| `"eighth"` | `"1/8"`, `"e"` | half a beat |
+| `"sixteenth"` | `"1/16"`, `"s"` | a quarter of a beat |
+
+A dot makes one half as long again (`"quarter."`, `"q."`), and a triplet fits three where two were (`"eighth triplet"`, `"e3"`). Names work for the length of a note, a chord, an arpeggio or a sound (`playSound("win", { length: "half" })` cuts a sound short there, or holds its last note until then), for the step of a tune, and for `{ after: "half" }`. `setTempo(140)` sets the beats in a minute (120 until you say), and `beats(3)` is how many seconds three beats last.
+
+## A tune, one note a line
+
+`playNote` plays a note **now**. `note` plays the **next** note of a tune: each one begins where the one before it ended, so a tune is written as ordinary lines of code, with loops and ifs, and no arithmetic.
+
+```js
+setTempo(100)
+
+note("E4", "quarter")
+note("G4", "quarter")
+rest("quarter")
+note("C5", "half")
+chord("Cm", "whole")
+
+for (const name of ["C4", "D4", "E4"]) note(name, "eighth")
+```
+
+The same tune as text, for comparison: `playNotes("E4:q G4:q -:q C5:h Cm:w C4:e D4:e E4:e")`.
+
+In a line, a length is a name, or a number of **beats** (`note("C4", 2)` is a half note); with nothing said it is a quarter. `note`, `chord` and `rest` write on the synth `playNote` uses, and every synth has its own line: `lead.note("C4", "eighth")`.
+
+- **Two lines together.** Lines written in the same go begin together, however much code is between them: write the whole melody, then the whole bass, and they start on the same instant.
+
+  ```js
+  for (const n of ["E4", "G4", "C5", "G4"]) lead.note(n, "quarter")
+  bass.note("C2", "half")
+  bass.note("G2", "half")
+  ```
+
+- **A section that repeats.** A `for` loop writes a section several times. `loopNotes` has it go round for ever, kept in time by the sound engine, and it follows `setTempo` as it plays:
+
+  ```js
+  const beat = loopNotes(() => {
+    kick.note("C3", "quarter")
+    snare.note("A3", "quarter")
+  })
+  beat.stop()
+  ```
+
+  `loopNotes(4, () => { … })` goes round four times, and the lines carry on after it.
+
+- **Starting over.** A line carries on from where it ended; if it ended a while ago, the next note begins now. `startLines()` begins every line again from now, `startLines({ after: "whole" })` a bar from now, and `lead.startLine()` begins one.
+
+Everything a line plays is placed on its exact sample when it is written, so a tune written this way keeps time however busy the page is. [`examples/melody.js`](examples/melody.js) is a whole one.
+
 ## Tunes
 
 ```js
@@ -108,7 +169,7 @@ const tune = playNotes("C4 E4 G4 - C5:2 G4+B4+D5", 0.25, { repeat: true })
 tune.stop()
 ```
 
-The notes are text with spaces between, or a list: `["C4", null, ["C4", "E4"]]`, where `null` is a rest and a list inside is a chord. In text a chord is joined with `+`. The second thing is the seconds in a step; leave it out and a step is half a beat (see [When things start](#when-things-start)). Options: `repeat` (`true`, or how many times), `volume`, `hold` (how much of its step a note sounds for, 0.9 unless you say), and `after`, `at` or `beat`.
+The notes are text with spaces between, or a list: `["C4", null, ["C4", "E4"]]`, where `null` is a rest and a list inside is a chord. In text a chord is joined with `+`, or named (`Am`). The second thing is how long a step is: a number is seconds, a name is a note length (`playNotes("C4 E4 G4", "eighth")`), and with nothing said it is an eighth. After a colon a note says how long it is itself: `:2` is two steps, and `:q`, `:h`, `:e`, `:s`, `:w` (or `:quarter`, `:1/4`) are note lengths, as in `"C4:q E4:e G4:e C5:h"`. A tune whose step is a name or left out is in beats: it changes speed when `setTempo` is called, even while it repeats. A tune whose step is seconds does not. Options: `repeat` (`true`, or how many times), `volume`, `hold` (how much of its step a note sounds for, 0.9 unless you say), and `after`, `at` or `beat`.
 
 Every synth has `playNotes` too: `makeSynth("bass").playNotes("C2 C2 G2 C2", 0.25)`.
 

@@ -79,9 +79,16 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
       else if (kind === 'sample') loadSample(op)
       else if (kind === 'unsample') x.synths_sample_free(engine, op[1])
       else if (kind === 'tune') {
-        const [, id, at, part, steps, length, repeat] = op
-        const frames = Math.round(length * sampleRate)
-        if (steps.length && frames >= 1) tunes.set(id, { part, steps, length: frames, start: frameOf(at), cycle: 0, i: 0, repeat: repeat || Infinity })
+        // A tune's times are in units: seconds, or beats when it has a `beat` (the seconds in a beat, which a
+        // change of tempo for its group alters as it plays).
+        const [, id, at, part, steps, length, repeat, beat, group] = op
+        const unit = (beat || 1) * sampleRate
+        if (steps.length && length * unit >= 1) tunes.set(id, { part, steps, length, unit, start: frameOf(at), cycle: 0, i: 0, repeat: repeat || Infinity, beats: !!beat, group })
+      } else if (kind === 'tempo') {
+        // From this frame on a beat lasts so long: every tune in beats of the group carries on from the beat it had reached.
+        // It waits for its frame, so the notes before it keep the old tempo.
+        tempos.push([frameOf(op[3]), op[1], op[2]])
+        tempos.sort((a, b) => a[0] - b[0])
       } else if (kind === 'stopTune') tunes.delete(op[1])
       else if (kind === 'stopPart') {
         // Let go of what the part is playing, and take back what it has not started.
@@ -205,16 +212,27 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
     return out
   }
 
+  /** Changes of tempo that are still to come: [frame, group, seconds in a beat]. */
+  const tempos = []
+  function changeTempo([from, group, beat]) {
+    for (const tune of tunes.values()) {
+      if (!tune.beats || tune.group !== group) continue
+      const reached = (from - tune.start) / tune.unit
+      tune.unit = beat * sampleRate
+      tune.start = from - reached * tune.unit
+    }
+  }
+
   // Put the notes of every tune that fall before `end` into the queue.
   function playTunes(end) {
     for (const [id, tune] of tunes) {
       for (let guard = 0; guard < 512; guard++) {
         const step = tune.steps[tune.i]
-        const frame = tune.start + tune.cycle * tune.length + Math.round(step[0] * sampleRate)
+        const frame = Math.round(tune.start + (tune.cycle * tune.length + step[0]) * tune.unit)
         if (frame >= end) break
         handle = handle >= 0xfffffff0 ? 0xc0000000 : handle + 1
         for (const note of step[1]) add(frame, NOTE_ON, tune.part, handle, note, step[3])
-        add(frame + Math.max(1, Math.round(step[2] * sampleRate)), NOTE_OFF, tune.part, handle, 0, 0)
+        add(frame + Math.max(1, Math.round(step[2] * tune.unit)), NOTE_OFF, tune.part, handle, 0, 0)
         if (++tune.i >= tune.steps.length) {
           tune.i = 0
           if (++tune.cycle >= tune.repeat) { tunes.delete(id); break }
@@ -253,6 +271,10 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
     for (let done = 0; done < frames;) {
       const n = Math.min(outRoom, frames - done)
       const end = core.time + n
+      while (tempos.length && tempos[0][0] < end) {
+        if (tunes.size) playTunes(tempos[0][0])
+        changeTempo(tempos.shift())
+      }
       if (tunes.size) playTunes(end)
       if (queue.length) feed(end)
       const made = x.synths_render(engine, n)

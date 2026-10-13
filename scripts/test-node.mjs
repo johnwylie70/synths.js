@@ -184,7 +184,7 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
     ['a sound that does not exist', () => s.playSound('lazer'), /playSound\("lazer"\): there is no sound called "lazer"\. Did you mean "laser"\? The sounds are: coin, jump, laser/],
     ['a synth that does not exist', () => s.makeSynth('base'), /makeSynth\("base"\): there is no synth called "base"\. Did you mean "bass"\? The synths are: keys, bass, lead/],
     ['a note that is not one', () => lead.play('H2'), /"H2" is not a note/],
-    ['a length that is not a time', () => lead.play('C4', -1), /play: the length needs a number of seconds, more than 0, not -1/],
+    ['a length that is not a time', () => lead.play('C4', -1), /play: the length needs a number of seconds, more than 0, or a note length such as "quarter", not -1/],
     ['playNote with nothing', () => s.playNote(), /playNote needs a note, as in playNote\("C4"\)/],
     ['a tune with nothing in it', () => s.playNotes(''), /playNotes needs notes to play, as in playNotes\("C4 E4 G4 - C5"\)/],
     ['loadSample with no file', () => s.loadSample(), /loadSample\(\) needs the name of a sound file, as in loadSample\("kick\.wav"\)/],
@@ -311,6 +311,66 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
     await player.render(0.1)
   })
   say(many.length === 0, 'synths that are removed give their places back: 200 made and removed, nothing said', many)
+}
+
+// --- musical time: lengths by name, the tempo, and tunes written a note at a time
+{
+  const { lengthBeats } = synths
+  say(same(['whole', 'half', 'quarter', 'eighth', 'sixteenth', '1/4', '1/8', 'q', 'e', 'h', 'quarter.', 'q.', 'dotted half', 'eighth triplet', 'e3', 'Quarter note', 'soon', 'm7'].map(lengthBeats),
+    [4, 2, 1, 0.5, 0.25, 1, 0.5, 1, 0.5, 2, 1.5, 1.5, 3, 1 / 3, 1 / 3, 1, null, null]), 'note lengths by name, in beats: words, fractions, letters, dotted and triplets', ['q.', 'e3'].map(lengthBeats))
+  const ends = (r) => (r.left.length - 1 - [...r.left].reverse().findIndex((v) => Math.abs(v) > 1e-4)) / SR
+  const a = await renderSound((s) => s.makeSynth(CLICK).play('A4', 'quarter'), { seconds: 2 })
+  const b = await renderSound((s) => { s.setTempo(60); s.makeSynth(CLICK).play('A4', 'quarter') }, { seconds: 2 })
+  const c = await renderSound((s) => { s.setTempo(120); s.playNote('A4', 'eighth', { after: 'half' }) }, { seconds: 2 })
+  say(Math.abs(ends(a) - 0.5) < 0.01 && Math.abs(ends(b) - 1) < 0.01 && Math.abs(first(c.left) / SR - 1) < 0.001, 'a length by name follows the tempo: a quarter note is half a second at 120 and a second at 60, and { after: "half" } waits two beats', [ends(a), ends(b), first(c.left) / SR])
+  const cut = await renderSound((s) => s.playSound('win', { length: 0.15 }), { seconds: 2 })
+  const whole = await renderSound((s) => s.playSound('win'), { seconds: 3 })
+  const held = await renderSound((s) => s.playSound('powerup', { length: 'whole' }), { seconds: 3 })
+  const usual = await renderSound((s) => s.playSound('powerup'), { seconds: 3 })
+  const energy = (r, from, to) => peak(r.left.slice(from * SR, to * SR))
+  say(energy(cut, 0.1, 0.14) > 0.1 && energy(cut, 0.6, 2) < energy(whole, 0.6, 2) * 0.2 && energy(held, 1.5, 1.9) > 0.1 && energy(usual, 1.5, 1.9) < 0.01, 'playSound takes a length: a sound is cut short there, or its last note is held until then', [energy(cut, 0.6, 2), energy(whole, 0.6, 2), energy(held, 1.5, 1.9), energy(usual, 1.5, 1.9)])
+
+  // One line per note: each begins exactly where the last ended.
+  const line = await renderSound((s) => { const v = s.makeSynth(CLICK); v.note('A4', 'quarter'); v.note('E5', 'eighth'); v.rest('eighth'); v.note('A4', 'half'); v.chord('Am', 1) }, { seconds: 4 })
+  say(same(onsets(line.left), [0, 24000, 48000, 96000]) || same(onsets(line.left).map((f) => f - onsets(line.left)[0]), [0, 24000, 48000, 96000]), 'note, rest and chord in a row: a quarter, an eighth, a rest, a half and a chord begin on frames 0, 24000, 48000 and 96000 at 120 beats a minute', onsets(line.left))
+  const moved = await renderSound((s) => { const v = s.makeSynth(CLICK); v.note('A4', 'quarter'); s.setTempo(60); v.note('A4', 'quarter'); v.note('A4', 2); v.note('A4') }, { seconds: 5 })
+  say(same(onsets(moved.left), [0, 24000, 72000, 168000]), 'setTempo between notes changes the lengths of the ones written after it; a number is beats', onsets(moved.left))
+  // Two lines written one after the other, with a clock that moves between calls, start on the same instant.
+  let tick = 0
+  const two = commands((s) => {
+    const lead = s.makeSynth('lead'), bass = s.makeSynth('bass')
+    for (const n of ['C4', 'E4', 'G4']) lead.note(n, 'eighth')
+    bass.note('C2', 'quarter.')
+    s.note('C5', 'whole')
+    bass.startLine({ after: 1 }).note('G2')
+  }, { clock: () => (tick += 0.001) })
+  const starts = two.filter((c) => c.op === 'note').map((c) => [c.id, +(c.t - two.find((x) => x.op === 'note').t).toFixed(6)])
+  say(same(starts.slice(0, 5).map((x) => x[1]), [0, 0.25, 0.5, 0, 0]) && starts[5][1] > 0.99 && starts[5][1] < 1.02, 'lines of different synths written in one go begin on the same instant, without arithmetic; startLine({ after: 1 }) begins one again later', starts)
+  say(/note needs a note, as in note\("C4", "quarter"\)\. For a silence, use rest\("quarter"\)/.test(thrown(() => createSound({ sound: { send() {} } }).note())) && /note needs a number, or a note length by name: "whole", "half", "quarter", "eighth", "sixteenth".*not "quater"\. Did you mean "quarter"\?/.test(thrown(() => createSound({ sound: { send() {} } }).note('C4', 'quater'))),
+    'note with nothing, and a length spelt wrongly, say so', thrown(() => createSound({ sound: { send() {} } }).note('C4', 'quater')))
+
+  // Tunes in beats: lengths in the text, a step by name, and a tempo that changes as it plays.
+  const text = await renderSound((s) => s.makeSynth(CLICK).playNotes('A4:q A4:e A4:e A4:2 A4', 'sixteenth', { hold: 0.2 }), { seconds: 3 })
+  say(same(onsets(text.left), [0, 24000, 36000, 48000, 60000]), 'in a tune, "A4:q A4:e" are a quarter and an eighth whatever the step, ":2" is two steps, and the step can be "sixteenth"', onsets(text.left))
+  const player = await createOfflinePlayer()
+  const s = createSound({ sound: player, clock: () => 0 })
+  s.makeSynth(CLICK).playNotes('A4 A4', 'quarter', { repeat: true, hold: 0.2 })
+  s.makeSynth(CLICK).playNotes('E6', 0.5, { repeat: true, hold: 0.02, at: 0.25 })
+  s.flush()
+  player.send({ synths: 1, now: 0, cmds: [{ op: 'tempo', bpm: 240, t: 1.5 }] })
+  const fast = await player.render(3)
+  const got = onsets(fast.left)
+  say(same(got.slice(0, 12), [0, 12000, 24000, 36000, 48000, 60000, 72000, 84000, 96000, 108000, 120000, 132000]), 'a tune in beats changes speed when the tempo does (a note every half second, then every quarter from 1.5 seconds), and a tune in seconds beside it does not', got)
+  let made
+  const loop = await renderSound((x) => {
+    const v = x.makeSynth(CLICK), w = x.makeSynth(CLICK)
+    v.note('A4', 'quarter')
+    made = x.loopNotes(() => { v.note('A4', 'eighth'); v.rest('eighth'); w.rest('quarter'); w.note('A5', 'eighth'); w.rest('eighth') }, 2)
+    v.note('E5', 'quarter')
+  }, { seconds: 4 })
+  say(same(onsets(loop.left), [0, 24000, 48000, 72000, 96000, 120000]) && typeof made.stop === 'function', 'loopNotes writes a section once and has it go round (twice here), every synth in it together, and the line carries on after it', onsets(loop.left))
+  const dn = describe()
+  say(dn.lengths.quarter === 1 && dn.lengthLetters.e === 0.5, 'the names file has the note lengths for other languages', dn.lengths)
 }
 
 // --- chords by name
@@ -607,7 +667,7 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
   const cmds = batches.flatMap((b) => b.cmds)
   const text = JSON.stringify(batches)
   say(batches.every((b) => b.synths === 1 && typeof b.now === 'number') && cmds.every((c) => typeof c.op === 'string') && same(JSON.parse(text), batches), `what the functions write is plain data: ${cmds.length} commands that survive being turned into text and back`, null)
-  say(same([...new Set(cmds.map((c) => c.op))].sort(), ['macro', 'master', 'note', 'set', 'sound', 'synth', 'tune', 'voice']), 'with the ops macro, master, note, set, sound, synth, tune and voice', [...new Set(cmds.map((c) => c.op))].sort())
+  say(same([...new Set(cmds.map((c) => c.op))].sort(), ['macro', 'master', 'note', 'set', 'sound', 'synth', 'tempo', 'tune', 'voice']), 'with the ops macro, master, note, set, sound, synth, tempo, tune and voice', [...new Set(cmds.map((c) => c.op))].sort())
   const direct = await renderSound(play, { seconds: 2 })
   const player = await createOfflinePlayer()
   for (const batch of JSON.parse(text)) player.send(batch)

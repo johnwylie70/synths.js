@@ -242,6 +242,8 @@ Play a ready-made game sound.
 { op: "sound", name: "laser", vol: 0.8, pitch: 3, pan: 0.2 }
 ```
 
+`len`, optional, is a length in seconds for the sound: it is cut off there, or its last note is held until then.
+
 `name` is one of `coin`, `jump`, `laser`, `shoot`, `explosion`, `hit`, `powerup`, `blip`, `click`, `zap`, `bounce`, `pop`,
 `win`, `lose`. `vol` is a multiplier (1), `pitch` is semitones up or down (0). A sound is a patch and a few timed
 notes that the player knows; it uses a part of its own, made the first time it is played.
@@ -293,8 +295,28 @@ exact to the sample and does not depend on the sender staying awake.
 | `steps` | a list of `[seconds after the tune starts, notes, seconds the note lasts, loudness]`. `notes` is a note, a list, or `null` for the synth's own note |
 | `length` | seconds in one time round (so a tune may end with a rest). Missing: the end of the last note |
 | `repeat` | `true` for ever, or a number of times. Missing: once |
+| `beats` | `true`: every time in `steps` and `length` is in beats, not seconds. The tune goes at the sender's tempo (see [`tempo`](#tempo)) and changes speed when that changes, as it plays |
 
 A tune with the id of one that is playing replaces it.
+
+### `tempo`
+
+```js
+{ op: "tempo", bpm: 140 }
+```
+
+How fast a beat is for this sender (its scope), in beats a minute: 120 until it says. It matters to the player
+only for tunes with `beats: true`, which change speed on the sample of this command's `t` and carry on from the
+beat they had reached. Everything else a sender writes in beats (a note's length by name, "the next note of the
+line") it turns into seconds itself before sending: `synths-names.json` has the note lengths in beats (`lengths`,
+`lengthLetters`; a dot is times 1.5, a triplet times two thirds).
+
+A line of notes (`note("C4", "quarter")`, each beginning where the last ended) is not a command of its own: the
+sender keeps, for each synth, the time its line has reached, and writes an ordinary `note` with that `t` and a
+`len` of 0.95 of the length. A line that has not been written to, or whose time has passed, begins at the time
+of the first such call in the present turn of the program, so that lines written one after another begin
+together. `loopNotes` writes one `tune` with `beats: true` for each synth in the section, all with the same `t`
+and `length`.
 
 ### `stop`
 
