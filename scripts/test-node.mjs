@@ -915,5 +915,29 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
   say(before === 'room' && target.get('reverbType') === 'plate' && same(target.describe('reverbType').choices, TYPES) && target.describe('reverbType').kind === 'choice', 'a player\'s target describes the reverb\'s type with its choices, and sets it', [before, target.get('reverbType'), target.describe('reverbType')])
 }
 
+// --- with no transport given, a sound makes the page's own player: here, where there is no Web Audio, it says so and carries on
+{
+  const said = []
+  const keep = console.warn
+  console.warn = (...a) => said.push(a.join(' '))
+  let state = null
+  const threw = thrown(() => {
+    const s = createSound({ batch: 'manual' })
+    const lead = s.makeSynth('lead')
+    lead.reverbType = 'hall'
+    s.setEffects({ reverbSize: 0.7 })
+    s.playNote('C4')
+    s.flush()
+    state = s.player?.state
+    const other = createSound({ batch: 'manual' })
+    other.playNote('E4')
+    other.flush()
+    other.close()
+    s.close()
+  })
+  console.warn = keep
+  say(threw === null && state === 'failed' && said.filter((t) => /no Web Audio/.test(t)).length <= 1, 'createSound() with nothing given reaches for the page\'s shared player on its first flush, a second sound joins it, and both close: nothing throws where there is no sound card', [threw, state, said])
+}
+
 console.log(`${count - failed} of ${count} passed`)
 process.exit(failed ? 1 : 0)

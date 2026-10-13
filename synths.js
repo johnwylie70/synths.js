@@ -2505,6 +2505,8 @@ export function createPlayer(options = {}) {
     if (closed) return
     closed = true
     midi.close()
+    // A browser with no Web Audio never made the rest: there is nothing more to let go of.
+    if (!player.context) { player.state = 'closed'; return }
     mic.close()
     if (typeof removeEventListener === 'function') for (const g of GESTURES) removeEventListener(g, unlock, { capture: true })
     try { player.node?.disconnect() } catch (e) { /* already gone */ }
