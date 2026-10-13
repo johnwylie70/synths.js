@@ -330,8 +330,48 @@ const LENGTH_LETTERS = { w: 4, h: 2, q: 1, e: 0.5, s: 0.25, t: 0.125 }
 /** The orders an arpeggio can go in, as the engine numbers them. */
 const ORDERS = { up: 0, down: 1, updown: 2, written: 3, aswritten: 3, given: 3, random: 4, updown2: 5, together: 6, stab: 6 }
 /** The patterns an arpeggio can follow by name (the engine's own), and what a step of one written out looks like. */
-const ARP_PATTERNS = ['bounce', 'octaves', 'root-fifth', 'thumb', 'converge', 'diverge', 'offbeat', 'gallop', 'trance', 'acid']
+const ARP_PATTERN_STEPS = { bounce: '1 2 3 2', octaves: "1 1' 1 1'", 'root-fifth': "1 3 1' 3", thumb: '1 2 1 3 1 4 1 3', converge: '1 4 2 3', diverge: '2 3 1 4', offbeat: '- 1 - 2 - 3 - 2', gallop: '1^ - 1 1 2^ - 2 2', trance: '1^ - 3 2 - 1^ 3 -', acid: "1^ 1 ~3 - 1' ~1 2^ -" }
+const ARP_PATTERNS = Object.keys(ARP_PATTERN_STEPS)
 const ARP_STEP = /^(?:~?\d{1,2}[',]*\^?(?::\d)?|[-._])$/
+/** The trance gate's patterns by name: one character a step, x open, . closed, 0 to 9 a level in ninths. */
+const GATE_PATTERNS = { eighths: 'x.x.x.x.x.x.x.x.', offbeat: '..x...x...x...x.', gallop: 'x.xxx.xxx.xxx.xx', trance: 'x.x.xx.xx.x.xx.x', stutter: 'xxx.xx.xx.xxx.x.', pump: '2468246824682468', triplets: 'x..x..x..x..x..x..x..x..', dotted: 'x..x..x.x..x..x.' }
+/**
+ * A PATTERN AS TEXT, which is how it is kept, sent and read back, from what was given: the text itself, the name of
+ * a built-in one, or a list of steps. null (and "off", "none", "", false) is no pattern. It throws a plain sentence.
+ * An arpeggio's steps have spaces between them ("1 - 3 2 _ 1 3 5^"); in a list a step is that text or a number, and
+ * 0 or null is a rest. A gate's are one character each ("x.x.xx.x"); in a list a step is a level from 0 to 1.
+ */
+const NO_PATTERN = new Set(['', 'off', 'none'])
+function arpPatternText(given, said = 'arpPattern') {
+  if (given === null || given === undefined || given === false) return null
+  if (Array.isArray(given)) given = given.map((step) => (step === 0 || step === null || step === undefined ? '-' : String(step).trim())).join(' ')
+  const text = typeof given === 'string' ? given.trim().replace(/\s+/g, ' ') : null
+  if (text !== null && NO_PATTERN.has(text.toLowerCase())) return null
+  if (text !== null && Object.prototype.hasOwnProperty.call(ARP_PATTERN_STEPS, text.toLowerCase())) return ARP_PATTERN_STEPS[text.toLowerCase()]
+  const steps = text === null ? [] : text.split(' ')
+  if (!steps.length || steps.length > 32 || !steps.every((t) => ARP_STEP.test(t))) throw new Error(`${said}: a pattern is up to 32 steps with spaces between them, as in "1 - 3 2 _ 1 3 5^" (a number is that note of the chord, - a rest, _ holds the last note, ' an octave up, ^ an accent), a list of them, or one by name: ${ARP_PATTERNS.join(', ')}; not ${shown(given)}`)
+  return text
+}
+function gatePatternText(given, said = 'gatePattern') {
+  if (given === null || given === undefined || given === false) return null
+  if (Array.isArray(given) && given.every((v) => typeof v === 'number' && v >= 0 && v <= 1)) given = given.map((v) => (v >= 1 ? 'x' : v <= 0 ? '.' : String(Math.round(v * 9)))).join('')
+  const text = typeof given === 'string' ? given.replace(/\s+/g, '') : null
+  if (text !== null && NO_PATTERN.has(text.toLowerCase())) return null
+  if (text !== null && Object.prototype.hasOwnProperty.call(GATE_PATTERNS, text.toLowerCase())) return GATE_PATTERNS[text.toLowerCase()]
+  if (text === null || text.length > 32 || !/^[xX.0-9]+$/.test(text)) throw new Error(`${said}: a gate's pattern is up to 32 steps, one character each, as in "x.x.xx.x" (x is open, . is closed, 0 to 9 a level between), a list of levels from 0 to 1, or one by name: ${Object.keys(GATE_PATTERNS).join(', ')}; not ${shown(given)}`)
+  return text.toLowerCase()
+}
+/** The name of a built-in pattern whose text this is, if it is one. */
+const patternName = (table, text) => Object.keys(table).find((name) => table[name] === text)
+/** What a control is told a pattern is: its text now, the built-in ones by name, and the name of this one if it is one of them. */
+const describePattern = (which, text) => {
+  const table = which === 'arpPattern' ? ARP_PATTERN_STEPS : GATE_PATTERNS
+  const named = text ? patternName(table, text) : undefined
+  return { name: which, kind: 'pattern', default: '', value: text || '', steps: 32, patterns: { ...table }, ...(named ? { named } : {}) }
+}
+const PATTERN_WORDS = { arppattern: 'arpPattern', gatepattern: 'gatePattern' }
+/** Is this the name of a pattern setting (arpPattern, arp_pattern, gatePattern, gate_pattern)? It gives the name it goes by. */
+const patternWord = (name) => (typeof name === 'string' ? PATTERN_WORDS[key(name)] : undefined)
 /**
  * Does an arpeggio (as a command carries it) need the engine's arpeggiator? One that is only a voice whose pitch
  * steps so many times a second, in one of the first five orders, does not: that is the C64 chord, as it always was.
@@ -919,7 +959,10 @@ function makeCore(wasm, sampleRate, post) {
       else if (kind === 'sample') loadSample(op)
       else if (kind === 'unsample') x.synths_sample_free(engine, op[1])
       else if (kind === 'zones') setZones(op)
-      else if (kind === 'arpPattern') { if (x.synths_arp_pattern_text) { const at = put(op[2]); if (at) { x.synths_arp_pattern_text(engine, op[1], at, op[2].length); x.synths_free(at) } } }
+      else if (kind === 'gate') {
+        // A part's trance gate: [, part, the pattern's text as bytes, or null for open and closed by turns].
+        if (x.synths_gate_text && op[2]) { const at = put(op[2]); if (at) { x.synths_gate_text(engine, op[1], at, op[2].length); x.synths_free(at) } } else if (x.synths_gate_set) x.synths_gate_set(engine, op[1], 0, 0)
+      } else if (kind === 'arpPattern') { if (x.synths_arp_pattern_text) { const at = put(op[2]); if (at) { x.synths_arp_pattern_text(engine, op[1], at, op[2].length); x.synths_free(at) } } }
       else if (kind === 'tune') {
         // A tune's times are in units: seconds, or beats when it has a `beat` (the seconds in a beat, which a
         // change of tempo for its group alters as it plays).
@@ -1467,7 +1510,7 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
 
   // Give the note with a handle an arpeggio (or change the one it has, or with no offsets take it away): the
   // engine steps one voice through the offsets, in semitones, so many times a second.
-  function arpeggio(at, part, h, arp, fresh = false) {
+  function arpeggio(at, part, h, arp, fresh = false, rec = null) {
     if (!canArp) return tell('arpeggios are not ready yet in this version, so an arpeggio plays as its lowest note alone.')
     const offsets = arp && Array.isArray(arp.offsets) ? arp.offsets.slice(0, 8).map((v) => clamp(Math.round(+v || 0), -128, 127)) : []
     const pack = (o) => ((o[0] & 255) | (o[1] & 255) << 8 | (o[2] & 255) << 16 | (o[3] & 255) << 24) >>> 0
@@ -1476,7 +1519,8 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
     // accents or a pattern. `fresh` is a note about to start (the events wait on the part for it, handle 0, and
     // go before its note_on); otherwise they go to a sounding note's handle, which takes them at its next step
     // and keeps its place.
-    if (offsets.length && arpIsPlayed(arp)) {
+    // A synth with a pattern of its own (arpPattern) gives it to every arpeggio that says none.
+    if (offsets.length && (arpIsPlayed(arp) || (rec && rec.arpPattern && arp.pattern === undefined))) {
       const a = fresh ? 0 : h
       const strike = arp.style ? arp.style !== 'slide' : arp.beats > 0 || arp.gate > 0
       const accents = (Array.isArray(arp.accent) ? arp.accent : []).slice(0, 8).reduce((bits, v, i) => (bits | (clamp(Math.round((+v || 0) * 15), 0, 15) << (i * 4))) >>> 0, 0)
@@ -1484,7 +1528,8 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
       if (offsets.length > 4) event(at, ARP_MORE, part, a, 0, 0, 0, pack(offsets.slice(4)))
       event(at, ARP_STYLE, part, a, strike ? clamp(arp.gate > 0 ? +arp.gate : 0.5, 0.05, 1) : 0, clamp(Math.round(+arp.octaves || 1), 1, 4), clamp(+arp.swing || 0, 0, 0.75), accents)
       event(at, ARP_BEAT, part, a, arp.beats > 0 ? clamp(1 / arp.beats, 0.01, 64) : 0, 0)
-      event(at, ARP_PATTERN, part, a, arp.pattern ? patternSlot(String(arp.pattern)) : 0, 0)
+      const pattern = arp.pattern === undefined ? rec && rec.arpPattern : arp.pattern
+      event(at, ARP_PATTERN, part, a, pattern ? patternSlot(String(pattern)) : 0, 0)
       return true
     }
     if (fresh) return false
@@ -1507,6 +1552,14 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
     return had.slot
   }
   const TEMPO = setting('tempo')?.id
+  const GATE_DEPTH = setting('gate.depth')?.id, GATE_RATE = setting('gate.rate')?.id
+  const CLOCK = ENGINE.events.indexOf('clock') + 1
+  // THE BEAT, as the engine counts it, kept here too so that a display can be told which step is sounding: the
+  // beat it was at a time of the sound card, and the tempo since.
+  const beat = { at: 0, was: 0, tempo: 120 }
+  const beatAt = (now) => beat.was + Math.max(0, now - beat.at) * beat.tempo / 60
+  // How many steps an arpeggio has taken by a time.
+  const arpSteps = (run, now) => run.done + Math.max(0, Math.min(now, run.until) - run.at) * (run.arp.beats > 0 ? beat.tempo / 60 / run.arp.beats : run.arp.rate > 0 ? run.arp.rate : 50)
   const autoHandle = () => (handle = handle >= 0xbffffff0 ? 0x80000001 : handle + 1)
   const plain = () => patchOf(PLAIN, '', false)
 
@@ -1537,6 +1590,10 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
     if ((part.zones || null) !== (rec.zones || null)) {
       part.zones = rec.zones || null
       ops.push(rec.zones ? ['zones', rec.part, rec.zones.bytes, rec.zones.list.length, rec.zones.flags] : ['zones', rec.part, null, 0, 0])
+    }
+    if ((part.gate || null) !== (rec.gatePattern || null)) {
+      part.gate = rec.gatePattern || null
+      ops.push(['gate', rec.part, rec.gatePattern ? new TextEncoder().encode(rec.gatePattern) : null])
     }
     if (part.macro !== rec.macro) {
       part.macro = rec.macro
@@ -1665,6 +1722,20 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
     set(c, at) {
       const rec = c.id == null ? null : synthFor(c.id, at)
       if (rec && c.voice != null) voiceOn(rec, c.voice, at)
+      if (rec && c.arpPattern !== undefined) {
+        // The synth's own pattern: every arpeggio of it that says none follows this, the one sounding from its next step.
+        try { rec.arpPattern = arpPatternText(c.arpPattern) } catch (e) { tell(e.message) }
+        if (rec.arpNow && rec.arpNow.played && rec.arpNow.arp.pattern === undefined && rec.part >= 0) event(at, ARP_PATTERN, rec.part, rec.arpNow.h, rec.arpPattern ? patternSlot(rec.arpPattern) : 0, 0)
+      }
+      if (rec && c.gatePattern !== undefined) {
+        // The trance gate's pattern. Given one, a gate that is fully open (depth 0, which is no gate) is closed all the way; taken away, it is opened.
+        let text = rec.gatePattern
+        try { text = gatePatternText(c.gatePattern) } catch (e) { tell(e.message) }
+        const depth = rec.patch.has(GATE_DEPTH) ? rec.patch.get(GATE_DEPTH) : 0
+        rec.gatePattern = text
+        if (rec.part >= 0) dress(rec, at)
+        if (GATE_DEPTH !== undefined && (c.set == null || !Object.keys(c.set).some((k) => setting(k)?.id === GATE_DEPTH))) { if (text && depth === 0) change(rec, new Map([[GATE_DEPTH, 1]]), at, 0); else if (!text && depth !== 0) change(rec, new Map([[GATE_DEPTH, 0]]), at, 0) }
+      }
       if (c.set) setAll(rec, c.set, at, c.glide > 0 ? c.glide : 0)
     },
     // The microphone: opened (it takes a part and the engine's input is sent there), listened to or not, and closed.
@@ -1751,15 +1822,18 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
       const h = c.h > 0 ? c.h : autoHandle()
       const list = c.note == null ? [rec.note] : notes(c.note)
       // An arpeggio the engine's arpeggiator plays waits on the part for its note; a voice's own is given to the note after.
-      const played = !!c.arp && list.length > 0 && arpeggio(at, rec.part, h, c.arp, true)
+      const played = !!c.arp && list.length > 0 && arpeggio(at, rec.part, h, c.arp, true, rec)
+      // The arpeggio that is sounding on a synth, for a display to follow and for a new pattern to reach.
+      if (c.arp && list.length) rec.arpNow = { h, arp: c.arp, at, done: 0, until: c.len != null ? at + Math.max(0.001, c.len) : Infinity, played }
       for (const n of list) event(at, NOTE_ON, rec.part, h, n, c.vel == null ? 0.8 : clamp(c.vel, 0, 1))
       if (c.pan) event(at, VOICE_PAN, rec.part, h, clamp(c.pan, -1, 1))
-      if (c.arp && !played) arpeggio(at, rec.part, h, c.arp)
+      if (c.arp && !played) arpeggio(at, rec.part, h, c.arp, false, rec)
       if (c.len != null && list.length) event(at + Math.max(0.001, c.len), NOTE_OFF, rec.part, h, 0)
     },
     off(c, at) {
       const rec = synths.get(c.id)
       if (!rec || rec.part < 0) return
+      if (rec.arpNow && (!(c.h > 0) || rec.arpNow.h === c.h)) rec.arpNow.until = Math.min(rec.arpNow.until, at ?? 0)
       if (c.h > 0) event(at, NOTE_OFF, rec.part, c.h, 0)
       else if (c.note != null) for (const n of notes(c.note)) event(at, NOTE_OFF, rec.part, 0, n)
       else ops.push(['stopPart', rec.part, c.cut ? 1 : 0])
@@ -1772,7 +1846,10 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
       if (c.freq > 0) event(at, VOICE_FREQ, rec.part, c.h, c.freq, glide)
       if (c.vol != null) event(at, VOICE_VOLUME, rec.part, c.h, clamp(c.vol, 0, 4))
       if (c.pan != null) event(at, VOICE_PAN, rec.part, c.h, clamp(c.pan, -1, 1))
-      if (c.arp !== undefined) arpeggio(at, rec.part, c.h, c.arp)
+      if (c.arp !== undefined) {
+        arpeggio(at, rec.part, c.h, c.arp, false, rec)
+        if (rec.arpNow && rec.arpNow.h === c.h) { if (c.arp) { rec.arpNow.done = arpSteps(rec.arpNow, at); rec.arpNow.at = at; rec.arpNow.arp = c.arp } else rec.arpNow = null }
+      }
       if (c.kill) event(at, VOICE_KILL, rec.part, c.h, 0)
     },
     sound(c, at) {
@@ -1850,8 +1927,15 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
       if (!(c.bpm > 0)) return
       scope.tempo = clamp(+c.bpm, 20, 400)
       ops.push(['tempo', scope.name, 60 / scope.tempo, at])
-      // The engine has one tempo, for arpeggios counted in beats: it is whoever set theirs last.
-      if (TEMPO !== undefined) event(at, PARAM, 0, TEMPO, scope.tempo, 0)
+      // The engine has one tempo, for arpeggios and gates counted in beats: it is whoever set theirs last. Beat 0 is
+      // then (as setTempo says), so every gate begins its pattern there.
+      if (TEMPO !== undefined) {
+        const now = at ?? 0
+        for (const rec of synths.values()) if (rec.arpNow && rec.arpNow.arp.beats > 0) { rec.arpNow.done = arpSteps(rec.arpNow, now); rec.arpNow.at = Math.max(rec.arpNow.at, now) }
+        event(at, PARAM, 0, TEMPO, scope.tempo, 0)
+        if (CLOCK > 0) event(at, CLOCK, 0, 0, 0, 0)
+        beat.at = now; beat.was = 0; beat.tempo = scope.tempo
+      }
     },
     stop(c) {
       if (c.id != null) ops.push(['stopTune', c.id])
@@ -2099,6 +2183,27 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
     /** The voice changer a synth has on, 'none' for none, or undefined for a synth that is not there. */
     /** The zones of a synth's sample map as they are now (see zoneAsRead), or null for a synth with none. */
     zonesOf(sid, scopeName) { const rec = found(sid, scopeName); return rec && rec.zones ? rec.zones.list.map(zoneAsRead) : null },
+    /** A synth's pattern for its arpeggios or for its gate, as text ('' for none), or undefined for a synth that is not there. */
+    patternOf(sid, which, scopeName) { const rec = found(sid, scopeName); return rec ? (which === 'arpPattern' ? rec.arpPattern : rec.gatePattern) || '' : undefined },
+    /**
+     * Which step is sounding at a time of the sound card: { arpStep, gateStep }, each counted from 0 within its
+     * pattern (an arpeggio with no pattern: within its chord and octaves), or -1 when there is none. It is worked
+     * out here from the tempo, not asked of the engine, so swing is not in it.
+     */
+    stepsOf(sid, now, scopeName) {
+      const rec = found(sid, scopeName)
+      const out = { arpStep: -1, gateStep: -1 }
+      if (!rec) return out
+      const run = rec.arpNow
+      if (run && now >= run.at - 1e-9 && now < run.until) {
+        const pattern = run.arp.pattern === undefined ? rec.arpPattern : run.arp.pattern
+        const length = pattern ? pattern.split(' ').length : Math.max(1, (run.arp.offsets || []).length * clamp(Math.round(+run.arp.octaves || 1), 1, 4))
+        out.arpStep = Math.floor(arpSteps(run, now) + 1e-6) % length
+      }
+      const depth = rec.patch.has(GATE_DEPTH) ? rec.patch.get(GATE_DEPTH) : 0
+      if (depth > 0) out.gateStep = Math.floor(beatAt(now) * (rec.patch.has(GATE_RATE) ? rec.patch.get(GATE_RATE) : 4) + 1e-6) % (rec.gatePattern ? rec.gatePattern.length : 2)
+      return out
+    },
     voiceOf(sid, scopeName) { const rec = found(sid, scopeName); return rec ? (rec.worn ? rec.worn.voice : 'none') : undefined },
     /** A setting of a synth as the commands so far have left it: [what it is, its value in the engine's units], or null. */
     settingOf(sid, name, scopeName) {
@@ -2232,14 +2337,17 @@ function makeTarget(id, run, conductor, read, scope) {
       const given = Object.entries(typeof name === 'string' ? { [name]: value } : name)
       // A voice is not a setting of the engine's but a handful of them, put on by its name (or its place among the choices).
       const voice = given.find(([k]) => key(k) === 'voice')
-      const c = { op: 'set', id, set: Object.fromEntries(given.filter(([k]) => key(k) !== 'voice').map(([k, v]) => [named(k), v])) }
+      const c = { op: 'set', id, set: Object.fromEntries(given.filter(([k]) => key(k) !== 'voice' && !patternWord(k)).map(([k, v]) => [named(k), v])) }
       if (voice && voiceName(voice[1]) !== null) c.voice = voiceName(voice[1])
+      // A pattern goes as its text, whatever it was given as.
+      for (const [k, v] of given) if (patternWord(k)) c[patternWord(k)] = (patternWord(k) === 'arpPattern' ? arpPatternText : gatePatternText)(v, k) || ''
       run(c)
       return target
     },
-    get(name) { if (key(name) === 'voice') return conductor()?.voiceOf(id, scope); if (key(name) === 'zones') return conductor()?.zonesOf(id, scope) ?? null; const now = conductor()?.settingOf(id, named(name), scope); return now ? readSetting(now[0], now[1]) : undefined },
+    get(name) { if (key(name) === 'voice') return conductor()?.voiceOf(id, scope); if (patternWord(name)) return conductor()?.patternOf(id, patternWord(name), scope); if (key(name) === 'arpstep' || key(name) === 'gatestep') return read(id, scope)[key(name) === 'arpstep' ? 'arpStep' : 'gateStep'] ?? -1; if (key(name) === 'zones') return conductor()?.zonesOf(id, scope) ?? null; const now = conductor()?.settingOf(id, named(name), scope); return now ? readSetting(now[0], now[1]) : undefined },
     describe(name) {
       if (key(name) === 'voice') return describeVoice()
+      if (patternWord(name)) return describePattern(patternWord(name), conductor()?.patternOf(id, patternWord(name), scope))
       if (key(name) === 'zones') { const zones = conductor()?.zonesOf(id, scope); return zones ? { name: 'zones', kind: 'zones', zones } : null }
       const now = conductor()?.settingOf(id, named(name), scope)
       if (!now) return setting(named(name)) ? describeSetting(setting(named(name))) : null
@@ -2841,13 +2949,16 @@ export function createPlayer(options = {}) {
   function read(id, scope) {
     const part = conductor ? conductor.partOf(id, scope) : -1
     if (part < 0 || closed) return NOTHING
-    if (core) { const now = core.taps?.([part], 1024)?.[0]; return now ? reading(now, conductor.gain()) : NOTHING }
-    if (!port) return NOTHING
+    // Which step of its arpeggio and of its gate a synth is on comes with it, for a pattern's editor to follow.
+    const steps = id == null ? null : conductor.stepsOf(id, context.currentTime, scope)
+    const with_ = (r) => (steps ? { ...r, ...steps } : r)
+    if (core) { const now = core.taps?.([part], 1024)?.[0]; return with_(now ? reading(now, conductor.gain()) : NOTHING) }
+    if (!port) return with_(NOTHING)
     const at = local()
     const fresh = !watched.has(part)
     watched.set(part, at)
     watch(at, fresh)
-    return tapped.get(part) || NOTHING
+    return with_(tapped.get(part) || NOTHING)
   }
   /** Where the song is now: { state: 'none'|'stopped'|'playing'|'paused', order, pattern, row, tick, speed, tempo, rounds, rows, orders }. It never waits. */
   function songPosition() {
@@ -3164,7 +3275,8 @@ export async function createOfflinePlayer(options = {}) {
     read(id, scope) {
       const part = conductor.partOf(id, scope)
       const now = part < 0 ? null : core.taps([part], 1024)[0]
-      return now ? reading(now, conductor.gain()) : NOTHING
+      const steps = id == null ? null : conductor.stepsOf(id, core.time / sampleRate, scope)
+      return { ...(now ? reading(now, conductor.gain()) : NOTHING), ...steps }
     },
     close() { midi.close(); core.close() },
   }
@@ -3514,12 +3626,7 @@ export function createSound(options = {}) {
       if (!Array.isArray(accent) || accent.length > 8 || !accent.every((v) => typeof v === 'number' && v >= 0 && v <= 1)) throw new Error(`${said}: accent is how hard each step is struck, up to eight numbers from 0 (a rest) to 1, as in { accent: [1, 0.5, 0.5, 0.5] }, not ${shown(accent)}`)
       arp.accent = accent
     }
-    if (o.pattern !== undefined && o.pattern !== null) {
-      const text = typeof o.pattern === 'string' ? o.pattern.trim() : ''
-      const steps = text.split(/\s+/)
-      if (!text || (!ARP_PATTERNS.includes(text) && (steps.length > 32 || !steps.every((t) => ARP_STEP.test(t))))) throw new Error(`${said}: a pattern is steps with spaces between them, as in { pattern: "1 - 3 2 _ 1 3 5^" } (a number is that note of the chord, - a rest, _ holds the last note, ' an octave up, ^ an accent), or one by name: ${ARP_PATTERNS.join(', ')}; not ${shown(o.pattern)}`)
-      arp.pattern = text
-    }
+    if (o.pattern !== undefined) { const text = arpPatternText(o.pattern, `${said}: pattern`); if (text) arp.pattern = text; else if (o.pattern !== null) arp.pattern = '' }
     return arp
   }
   /** What an arpeggio may be told, kept between changes of its chord. */
@@ -3711,6 +3818,9 @@ export function createSound(options = {}) {
     /** The value of a setting: lead.get("cutoff"). */
     get(name) {
       if (key(name) === 'voice') return this.voice
+      if (patternWord(name)) return this._patterns?.[patternWord(name)] || ''
+      if (key(name) === 'arpstep') return this.arpStep()
+      if (key(name) === 'gatestep') return this.gateStep()
       if (key(name) === 'zones') return this._zones ? this.zones() : null
       const entry = setting(this._name(name))
       if (!entry) throw new Error(`get: there is no setting called ${shown(name)}.${meant(String(name), namesToShow)}`)
@@ -3719,6 +3829,7 @@ export function createSound(options = {}) {
     /** What a setting is: { name, min, max, default, unit, kind, choices }, for a control that takes its range from it. */
     describe(name) {
       if (key(name) === 'voice') return describeVoice()
+      if (patternWord(name)) return describePattern(patternWord(name), this._patterns?.[patternWord(name)])
       if (key(name) === 'zones') return this._zones ? { name: 'zones', kind: 'zones', zones: this.zones(), kit: !!this._zones.kit } : null
       const entry = setting(this._name(name))
       if (!entry) return null
@@ -3734,10 +3845,56 @@ export function createSound(options = {}) {
       const out = {}
       for (const [name, value] of Object.entries(given)) {
         if (key(name) === 'voice') this._wear(value, at)
+        else if (patternWord(name)) this._pattern(patternWord(name), value, at)
         else out[this._name(name)] = value
       }
       return withSamples(out, this._patch, 'set')
     }
+
+    /**
+     * PATTERNS. `lead.arpPattern = "1 - 3 2 _ 1 3 5^"` (or "trance", or a list of steps) is the rhythm every arpeggio of
+     * this synth follows unless it says another, the one that is sounding from its next step; `lead.gatePattern =
+     * "x.x.xx.x"` is the trance gate's. Each reads back as its text, '' for none, and null or "off" takes it away.
+     */
+    get arpPattern() { return this._patterns?.arpPattern || '' }
+    set arpPattern(pattern) { this._pattern('arpPattern', pattern, clock()) }
+    get arp_pattern() { return this.arpPattern }
+    set arp_pattern(pattern) { this.arpPattern = pattern }
+    get gatePattern() { return this._patterns?.gatePattern || '' }
+    set gatePattern(pattern) { this._pattern('gatePattern', pattern, clock()) }
+    get gate_pattern() { return this.gatePattern }
+    set gate_pattern(pattern) { this.gatePattern = pattern }
+    _pattern(which, pattern, at) {
+      const text = (which === 'arpPattern' ? arpPatternText : gatePatternText)(pattern, which)
+      this._patterns = { ...this._patterns, [which]: text || '' }
+      // The gate opens and closes all the way unless its depth says otherwise, as the player will make it.
+      if (which === 'gatePattern') { const depth = setting('gate.depth'); if (depth && text && !this._patch.get(depth.id)) this._patch.set(depth.id, 1); else if (depth && !text) this._patch.set(depth.id, 0) }
+      command({ op: 'set', id: this._id, [which]: text || '', t: at })
+    }
+    /**
+     * The trance gate: this synth's sound turned up and down in a pattern of steps, in time with the tempo, so a held
+     * chord becomes a rhythm. pad.gate("x.x.xx.x") or pad.gate("trance"); x is open, . is closed, 0 to 9 a level
+     * between. { rate: steps to a beat (4, sixteenths) or a note length, depth: how far a closed step closes (1),
+     * smooth: seconds from one level to the next, swing, stereo: left and right by turns, sends: whether the echo
+     * and the reverb are fed the chopped sound }. pad.gate("off") takes it away. The steps begin at setTempo.
+     */
+    gate(pattern = 'eighths', o = {}) {
+      if (!o || typeof o !== 'object') throw new Error(`gate takes its settings in braces, as in pad.gate("x.x.xx.x", { rate: "eighth" }), not ${shown(o)}`)
+      const set = {}
+      for (const [word, value] of Object.entries(o)) {
+        if (!['rate', 'depth', 'smooth', 'swing', 'stereo', 'sends'].includes(word)) throw new Error(`gate: there is no ${shown(word)} to say here.${meant(word, ['rate', 'depth', 'smooth', 'swing', 'stereo', 'sends'])} It may be: rate, depth, smooth, swing, stereo, sends`)
+        set['gate.' + word] = word === 'rate' && typeof value === 'string' ? 1 / beatsLong(value, 'gate: rate') : value
+      }
+      this._pattern('gatePattern', pattern, clock())
+      if (Object.keys(set).length) this.set(set)
+      return this._self || this
+    }
+    /** Which step of its arpeggio this synth is on now, counted from 0 (within the pattern, if it has one), or -1 with none sounding: for drawing it. */
+    arpStep() { return (transport?.read?.(this._id, scope) || NOTHING).arpStep ?? -1 }
+    arp_step() { return this.arpStep() }
+    /** Which step of its trance gate this synth is on now, counted from 0, or -1 with no gate. */
+    gateStep() { return (transport?.read?.(this._id, scope) || NOTHING).gateStep ?? -1 }
+    gate_step() { return this.gateStep() }
 
     /**
      * A voice changer on everything this synth plays: lead.voice = "robot". The voices are robot, chipmunk, monster,
@@ -4135,6 +4292,9 @@ export function createSound(options = {}) {
       this._waiting = []
     }
     _name(name) { return micName(name) }
+    // The microphone's `gate` is its noise gate, a level: mic.gate = -45. (A synth's gate() is the trance gate; the microphone's is mic.gatePattern.)
+    get gate() { return this.get('gate') }
+    set gate(level) { this.set({ gate: level }) }
     _given(given, at) {
       const out = {}
       for (const [name, value] of Object.entries(given)) {
@@ -4619,7 +4779,9 @@ export function describe() {
     settings: PARAMS.map(([id, name, kind, min, max, def, unit, choices]) => ({ id, name, kind: KINDS[kind], min, max, default: def, unit, ...(choices ? { choices } : {}), ...(LABELS[name] ? { labels: LABELS[name] } : {}), scope: id < 200 ? 'synth' : 'all' })),
     names: Object.fromEntries(Object.entries(ALIASES).map(([alias, to]) => [alias, Array.isArray(to) ? { setting: to[0], scale: to[1] } : { setting: to, scale: 1 }])),
     // An arpeggio: what it may be told, its two styles, and the patterns it can follow by name.
-    arp: { words: ['speed', 'step', 'order', 'style', 'gate', 'octaves', 'swing', 'accent', 'pattern'], styles: ['slide', 'strike'], patterns: ARP_PATTERNS, fields: ['offsets', 'rate', 'beats', 'order', 'octaves', 'gate', 'style', 'swing', 'accent', 'pattern'] },
+    arp: { words: ['speed', 'step', 'order', 'style', 'gate', 'octaves', 'swing', 'accent', 'pattern'], styles: ['slide', 'strike'], patterns: ARP_PATTERNS, patternSteps: ARP_PATTERN_STEPS, setting: 'arpPattern', step: 'arpStep', fields: ['offsets', 'rate', 'beats', 'order', 'octaves', 'gate', 'style', 'swing', 'accent', 'pattern'] },
+    // The trance gate: its patterns by name, the setting that holds one, its other settings, and the readout of its step.
+    gate: { functions: ['gate', 'gateStep'], patterns: GATE_PATTERNS, setting: 'gatePattern', settings: ['gateDepth', 'gateRate', 'gateSmooth', 'gateSwing', 'gateSends', 'gateStereo'], words: ['rate', 'depth', 'smooth', 'swing', 'stereo', 'sends'], step: 'gateStep' },
     choiceWords: CHOICE_WORDS, plain: PLAIN, synths: PRESETS, sounds: SOUNDS, chords: CHORDS, orders: ORDERS, macroWaves: MACRO_WAVES, lengths: LENGTHS, lengthLetters: LENGTH_LETTERS, midi: MIDI,
     // The voice changers (each a list of settings; putting one on first puts back what the last changed), and the microphone.
     voices: VOICES,

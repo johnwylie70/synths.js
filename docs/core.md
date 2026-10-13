@@ -102,6 +102,7 @@ record"): `type` and `part` are `u16`, `a` is `u32` (a handle, or a parameter's 
 | 18 | `arp_beat` | part | handle or 0 | steps to a beat (0: the rate) | | | |
 | 19 | `arp_notes` | part | handle or 0 | steps a second (0: as it was) | order | how many offsets | four offsets as bytes |
 | 21 | `arp_pattern` | part | handle or 0 | a pattern's place, 1 to 64, or 0 for none | | | |
+| 22 | `clock` | 0 | 0 | the beat it is on this frame (0 with every `tempo` command) | | | |
 | 15 | `song` | 0 | what: 0 stop, 1 play, 2 pause, 3 seek (x order, y row), 4 repeat (x 1 or 0), 5 volume (x), 6 a patch's part (x instrument, y part), 7 mute and 8 solo (x channel or -1, y 1 or 0), 9 loop the pattern (x) | | | | |
 
 Any other type in the engine's document may come the same way (5 `pitch_bend`, 12 `macro_tick`, and those a
@@ -194,6 +195,16 @@ the conductor's.
 `text` is a `Uint8Array` of the pattern's text in UTF-8 (`"1 - 3 2 _ 1 3 5^"`, or the name of one of the engine's),
 to be put in `place` (1 to 64) with `synths_arp_pattern_text`. It is sent before the `arp_pattern` event that
 names the place.
+
+### `gate`: a part's trance gate
+
+```js
+["gate", part, text | null]
+```
+
+`text` is a `Uint8Array` of the gate's pattern as text (`"x.x.xx.x"`), for `synths_gate_text`. `null` takes the
+pattern away (`synths_gate_set` with no levels), which leaves the gate open and closed by turns. Whether the gate
+is heard at all is the part's `gate.depth`, an ordinary `param`.
 
 ### `macro`: a part's step macro
 

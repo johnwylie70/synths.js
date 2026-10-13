@@ -1082,9 +1082,62 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
       'a note command carries the whole arpeggio (offsets, beats, style, gate, octaves, order, swing, accent, pattern) and is struck in time; the names are described, and the engine says it has arp_style', [on, notes])
   }
 
+  // A synth's own pattern for its arpeggios, as a setting an editor can be tied to, and the step that is sounding.
+  {
+    const { player, s, go } = await studio(120)
+    const lead = s.makeSynth(CLICK)
+    lead.arpPattern = [1, 0, 3, 0]
+    const d = lead.describe('arpPattern')
+    const arp = lead.startArp('C4', 'major', { step: 'sixteenth', gate: 0.5 })
+    const first = await go(0.5)                           // rows 0 to 3: notes on steps 0 and 2
+    const at = [lead.arpStep(), lead.get('arpStep'), player.target(lead._id).get('arpStep')]
+    lead.set('arp_pattern', 'bounce')                     // 1 2 3 2, from the next step
+    const then = await go(0.5)
+    const far = [player.target(lead._id).get('arpPattern'), lead.arpPattern, lead.describe('arp_pattern').named]
+    player.target(lead._id).set('arpPattern', '1 1\' - -')
+    await go(0.01)
+    const set = player.target(lead._id).get('arpPattern')
+    lead.arpPattern = 'off'
+    arp.stop()
+    await go(0.2)
+    const refused = [thrown(() => { lead.arpPattern = '1 x 3' }), thrown(() => lead.set({ arpPattern: 7 }))]
+    say(same(onsets(first), [0, 12000]) && d.kind === 'pattern' && d.value === '1 - 3 -' && d.patterns.trance === '1^ - 3 2 - 1^ 3 -' && same(at, [0, 0, 0]) && same(far, ['1 2 3 2', '1 2 3 2', 'bounce']) && onsets(then).length >= 4 && set === '1 1\' - -' && lead.arpPattern === '' && lead.arpStep() === -1 && refused.every((t) => /a pattern is up to 32 steps/.test(t)),
+      'lead.arpPattern is the rhythm of every arpeggio of a synth that says none: set as text, a name or a list, read back as text (with the name it has in describe), taken by the arpeggio that is sounding at its next step, set from a player\'s target too; arpStep() is the step that is sounding', [onsets(first), d, at, far, onsets(then), set, refused])
+  }
+
+  // The trance gate: a held note chopped into a pattern, in time with the tempo.
+  {
+    const { player, s, go } = await studio(120)
+    const pad = s.makeSynth(CLICK)
+    const before = [pad.get('gateDepth'), pad.gatePattern, pad.gateStep()]
+    pad.gate('x.x.xx..', { smooth: 0.001 })
+    pad.start('A4')
+    const levels = (a, steps, long = 6000) => Array.from({ length: steps }, (_, k) => +top(a, k * long + 800, (k + 1) * long - 800).toFixed(2))
+    const chopped = levels(await go(1), 8)
+    const during = [pad.get('gateDepth'), pad.gatePattern, pad.gateStep(), player.target(pad._id).get('gateStep'), player.target(pad._id).get('gatePattern')]
+    await go(0.125 + 0.0625)                                // into step 1 of the second round
+    const step = pad.gateStep()
+    pad.gate('eighths', { rate: 'eighth', depth: 0.5, smooth: 0.001 })
+    s.setTempo(120)                                         // beat 0 is now: the pattern begins again here
+    const halved = levels(await go(1), 4, 12000)
+    const named = [pad.gatePattern, pad.describe('gatePattern').named, pad.get('gateRate'), pad.get('gateDepth')]
+    pad.gatePattern = [1, 0.5, 0, 1]
+    const listed = pad.gatePattern
+    pad.gate('off')
+    const open = levels(await go(0.5), 4)
+    const mic = s.useMicrophone()
+    mic.gate = -45
+    const refused = [thrown(() => pad.gate('x-x-')), thrown(() => pad.gate('x.x.', { speed: 2 }))]
+    say(same(before, [0, '', -1]) && chopped[0] > 0.2 && same(chopped.map((v) => (v > 0.1 ? 'x' : '.')).join(''), 'x.x.xx..') && same(during, [1, 'x.x.xx..', 0, 0, 'x.x.xx..']) && step === 1,
+      'pad.gate("x.x.xx..") chops a held note into that pattern, a step a sixteenth, on the beat that setTempo began; the gate\'s depth becomes 1; gateStep() is the step that is sounding, on the synth and on a player\'s target', [before, chopped, during, step])
+    say(halved[0] > 0.2 && Math.abs(halved[1] / halved[0] - 0.5) < 0.03 && Math.abs(halved[2] - halved[0]) < 0.01 && same(named, ['x.x.x.x.x.x.x.x.', 'eighths', 2, 0.5]) && listed === 'x5.x' && open.every((v) => v > 0.2) && pad.gateStep() === -1 && pad.get('gateDepth') === 0 && mic.get('gate') === -45 && typeof mic.gate === 'number'
+      && /a gate's pattern is up to 32 steps/.test(refused[0]) && /there is no "speed" to say here/.test(refused[1]),
+      'a gate takes a pattern by name, a rate as a note length and a depth (half closed is half as loud), a list of levels is its text, pad.gate("off") opens it again, the microphone\'s own gate is still its noise gate, and nonsense is refused', [halved, named, listed, open, refused])
+  }
+
   const wrong = [() => createSound({ sound: { send() {} } }).makeSynth('lead').arp('Cm7', { step: 'sixteenth', speed: 30 }), () => createSound({ sound: { send() {} } }).makeSynth('lead').arp('Cm7', { style: 'bounce' }),
     () => createSound({ sound: { send() {} } }).makeSynth('lead').arp('Cm7', { pattern: '1 x 3' }), () => createSound({ sound: { send() {} } }).makeSynth('lead').arp('Cm7', { accent: 'loud' }), () => createSound({ sound: { send() {} } }).makeSynth('lead').arp('Cm7', { order: 'sideways' })].map(thrown)
-  say(wrong.every((t) => typeof t === 'string') && /step .* or speed .*, not both/.test(wrong[0]) && /"strike".*"slide"/.test(wrong[1]) && /a pattern is steps with spaces between them/.test(wrong[2]) && /up-down2/.test(wrong[4]), 'what an arpeggio cannot be told is refused in plain words', wrong)
+  say(wrong.every((t) => typeof t === 'string') && /step .* or speed .*, not both/.test(wrong[0]) && /"strike".*"slide"/.test(wrong[1]) && /a pattern is up to 32 steps with spaces between them/.test(wrong[2]) && /up-down2/.test(wrong[4]), 'what an arpeggio cannot be told is refused in plain words', wrong)
 }
 
 // --- several recordings as one instrument (loadSamples): keys, layers, kits, names, a missing file, and letting go

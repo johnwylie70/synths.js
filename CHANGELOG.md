@@ -56,6 +56,9 @@ The first version.
 
 - Musical arpeggios beside the fast ones: `lead.arp("Am", "whole", { step: "sixteenth", octaves: 2, gate: 0.5 })` strikes a new note at each step, in time with `setTempo` (and follows it while it sounds). `gate`, `octaves`, `swing`, `accent`, a `pattern` (`"1 - 3 2 _ 1 3 5^"` or `"trance"`), the orders `"up-down2"` and `"together"`, and `style: "slide"` for one voice. `chord.change("F")` on one that is held keeps its place. In a `note` command's `arp` the fields are `beats`, `style`, `gate`, `octaves`, `swing`, `accent` and `pattern`, beside `offsets`, `rate` and `order`. `playArp("Cm7")` with nothing said is the C64 chord it always was.
 
+- The trance gate: `pad.gate("x.x.xx.x")` chops a synth's sound into a pattern of steps in time with the tempo, by its steps, by name (`"trance"`, `"pump"`) or as a list of levels, with `{ rate, depth, smooth, swing, stereo, sends }`; `pad.gate("off")`. Its parts are settings for dials (`gateDepth`, `gateRate`, `gateSmooth`, `gateSwing`) and `pad.gatePattern`.
+- `lead.arpPattern`: a synth's own pattern for its arpeggios, set as text, a name or a list and read back as text, taken by the arpeggio that is sounding at its next step. `lead.arpStep()` and `pad.gateStep()` are the step that is sounding, for an editor to light.
+
 ### Fixed
 
 - `song.channel(n).level()` read zero for a channel whose instrument is a synth patch. It is now what is heard on the channel whichever kind of instrument plays it (the engine, synths-core a0b6535, shows a channel's synth notes on the channel's own meter).

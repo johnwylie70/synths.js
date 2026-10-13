@@ -164,6 +164,26 @@ what every setting named by any voice was; each voice after that puts those back
 `"none"` puts them back and forgets them. A setting of the whole engine (the echo's time, the reverb's size) is
 touched only if this voice or the one before names it. `synth` takes `voice` as well.
 
+`arpPattern` and `gatePattern`, optional, are the synth's two patterns, each as its **text** (a sender turns a
+name or a list into the text; `""` is none):
+
+```js
+{ op: "set", id: "s1", arpPattern: "1 - 3 2 _ 1 3 5^" }     // the steps of an arpeggio, spaces between them
+{ op: "set", id: "s1", gatePattern: "x.x.xx.x" }            // the steps of the trance gate, one character each
+```
+
+- **`arpPattern`** is the pattern every arpeggio of the synth follows whose own `arp` says none (an `arp` with
+  `pattern: ""` follows none). The arpeggio that is sounding takes it at its next step. The grammar is the
+  engine's: a number is that note of the chord from 1, `-` (or `.`) a rest, `_` a tie; after a note `'` an octave
+  up, `,` an octave down, `^` an accent, `:1` to `:9` its own gate in tenths; `~` before a note slides into it.
+  Up to 32 steps. The built-in ones are in `describe().arp.patternSteps`, name to text.
+- **`gatePattern`** is the trance gate's: `x` open, `.` closed, `0` to `9` a level in ninths, up to 32 steps,
+  spaces passed over. The built-in ones are in `describe().gate.patterns`. The gate's other settings are
+  ordinary settings of the synth: `gateDepth` (how far a closed step closes; 0 is no gate), `gateRate` (steps to
+  a beat, 4), `gateSmooth` (seconds), `gateSwing`, `gateSends`, `gateStereo`. Given a pattern while its depth is
+  0, the depth is made 1; with the pattern taken away it is made 0. The steps are counted from the beat, which a
+  `tempo` command puts at 0.
+
 ### `macro`
 
 Give a synth a step macro: a list of steps that each of its notes plays through, `macro.rate` (the setting
@@ -723,6 +743,13 @@ is read from the **player**, by whoever is beside it:
 player.read("s1")     // { samples: Float32Array of the synth's latest 1024 frames, level: [left, right], notes: [60, 64] }
 player.read()         // the same for all the sound together
 ```
+
+A read of a synth also has `arpStep` and `gateStep`: which step of its arpeggio and of its trance gate is
+sounding, counted from 0 within the pattern (an arpeggio with no pattern: within its chord and octaves), and -1
+when there is none. They are worked out by the player from the tempo and the time, for a pattern's editor to
+light the step; swing is not in them. A target gives them as `get("arpStep")` and `get("gateStep")`, and the
+patterns as `get("arpPattern")` and `get("gatePattern")` (always the text), with `describe("arpPattern")` giving
+`{ kind: "pattern", value, patterns: { name: text }, named }`.
 
 `samples` are from -1 to 1 and `level` is the peak, from 0 to 1, both as loud as they are heard; `notes` are the
 notes sounding, as whole numbers. A read never waits: it gives the latest the audio thread has posted (about 40

@@ -1796,6 +1796,20 @@
    "trance",
    "acid"
   ],
+  "patternSteps": {
+   "bounce": "1 2 3 2",
+   "octaves": "1 1' 1 1'",
+   "root-fifth": "1 3 1' 3",
+   "thumb": "1 2 1 3 1 4 1 3",
+   "converge": "1 4 2 3",
+   "diverge": "2 3 1 4",
+   "offbeat": "- 1 - 2 - 3 - 2",
+   "gallop": "1^ - 1 1 2^ - 2 2",
+   "trance": "1^ - 3 2 - 1^ 3 -",
+   "acid": "1^ 1 ~3 - 1' ~1 2^ -"
+  },
+  "setting": "arpPattern",
+  "step": "arpStep",
   "fields": [
    "offsets",
    "rate",
@@ -1808,6 +1822,40 @@
    "accent",
    "pattern"
   ]
+ },
+ "gate": {
+  "functions": [
+   "gate",
+   "gateStep"
+  ],
+  "patterns": {
+   "eighths": "x.x.x.x.x.x.x.x.",
+   "offbeat": "..x...x...x...x.",
+   "gallop": "x.xxx.xxx.xxx.xx",
+   "trance": "x.x.xx.xx.x.xx.x",
+   "stutter": "xxx.xx.xx.xxx.x.",
+   "pump": "2468246824682468",
+   "triplets": "x..x..x..x..x..x..x..x..",
+   "dotted": "x..x..x.x..x..x."
+  },
+  "setting": "gatePattern",
+  "settings": [
+   "gateDepth",
+   "gateRate",
+   "gateSmooth",
+   "gateSwing",
+   "gateSends",
+   "gateStereo"
+  ],
+  "words": [
+   "rate",
+   "depth",
+   "smooth",
+   "swing",
+   "stereo",
+   "sends"
+  ],
+  "step": "gateStep"
  },
  "choiceWords": {
   "square": "pulse",
