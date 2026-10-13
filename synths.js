@@ -21,6 +21,8 @@
  *   setVolume(0.5), muteSound(), unmuteSound(), stopSound()
  *   setEffects({ echoTime: 0.3, reverbSize: 0.8 })
  *   setTempo(120), beats(2)                beats(2) is how many seconds two beats last
+ *   lead.playFromMidi()                    a MIDI keyboard plays a synth; onMidiNote, onMidiControl, sendMidiNote("C4"),
+ *   lead.learn("cutoff")                   lead.sendToMidi(), midiDevices(): MIDI, which is in synths-midi.js
  *
  * When something starts: every call that makes a sound takes { after: seconds }, { at: a time read from
  * soundTime() } or { beat: a beat number }. Every name has its Python spelling too (play_sound, make_synth).
@@ -1693,6 +1695,7 @@ export async function renderSound(play, options = {}) {
   const player = await createOfflinePlayer(options)
   const sound = createSound({ sound: player, clock: () => 0, resolve: options.resolve, read: options.read })
   await play(sound)
+  await sound.settled()
   sound.flush()
   // A sample read through `read` sends its command when the bytes arrive.
   await new Promise((yes) => setTimeout(yes, 0))
@@ -1749,7 +1752,7 @@ export function createSound(options = {}) {
 
   function flush() {
     waiting = false
-    if (!cmds.length || closed) return
+    if (!cmds.length || closed || midiLoading) return
     if (!transport) {
       // ONE PLAYER FOR THE PAGE. Every createSound() on a page that is not given a transport, or an AudioContext
       // of its own, shares one player (the options of the first make it), each in a scope of its own: so ten
@@ -1763,13 +1766,14 @@ export function createSound(options = {}) {
         transport = player = shared.player
       }
     }
-    const batch = { synths: COMMANDS, now: clock(), cmds }
+    for (const join of midiJoins.splice(0)) join()
+    const batch = { synths: COMMANDS, now: clock(), cmds: midiKept ? cmds.flat() : cmds }
     if (scope) batch.scope = scope
     cmds = []
     transport.send(batch)
   }
   function command(c) {
-    cmds.push(c)
+    (midiSlot || cmds).push(c)
     if (!waiting && options.batch !== 'manual') { waiting = true; queueMicrotask(flush) }
   }
   // When a call should happen, on the sender's clock.
@@ -1790,17 +1794,22 @@ export function createSound(options = {}) {
   }
 
   // MIDI. Its functions are in synths-midi.js, fetched the first time one is used. Until it has arrived (a moment),
-  // what is asked for is kept with the time it was asked at, and carried out then, so the timing is as written; a
-  // mistake in one of those first calls is said in the console, since its line has gone by.
+  // each call is kept with the time it was made and a place among the commands, and nothing is sent; then the calls
+  // are carried out, their commands go where they were asked for, and everything is sent as written. A mistake in
+  // one of those first calls is said in the console, since its line has gone by.
   let midi = null
   let midiKept = null
+  let midiLoading = false
   let midiNow = null
+  let midiSlot = null
+  const midiJoins = []
   function midiCall(name, args, back) {
     if (midi) return midi[name](...args)
     if (!midiKept) {
       if (name === 'stopMidi') return back
       midiKept = []
-      loadMidi(options.midiModule).then((m) => {
+      midiLoading = true
+      midiComing = loadMidi(options.midiModule).then((m) => {
         const made = m.makeMidiApi({
           command, choices, notesOf, shown, amount, tell, api,
           clock: () => midiNow ?? clock(),
@@ -1809,16 +1818,33 @@ export function createSound(options = {}) {
           tempo: () => tempo,
           meant: (name) => meant(String(name), namesToShow),
           remember: (synth, name, value) => patchOf({ [name]: value }, 'MIDI', false, synth._patch, () => 0),
-          listen(heard) { if (!transport) flush(); return transport?.onMidi?.(heard, scope) },
+          // What the player's desk says is asked for once there is a transport to ask, which is at the next batch.
+          listen(heard) {
+            let stop = null
+            const join = () => { if (stop !== false) stop = transport?.onMidi?.(heard, scope) || null }
+            if (transport) join()
+            else midiJoins.push(join)
+            return () => { if (stop) stop(); stop = false }
+          },
         })
-        for (const [n, a, t] of midiKept) { midiNow = t; try { made[n](...a) } catch (e) { tell((e && e.message) || String(e), 'error') } }
-        midiNow = null
+        for (const [n, a, t, slot] of midiKept) {
+          midiNow = t
+          midiSlot = slot
+          try { made[n](...a) } catch (e) { tell((e && e.message) || String(e), 'error') }
+        }
+        midiNow = midiSlot = null
         midi = made
-      }).catch((e) => { midiKept = { push() {} }; midiMissing(e) })
+      }).catch((e) => { midiKept = { push() {} }; midiMissing(e) }).then(() => {
+        midiLoading = false
+        if (options.batch !== 'manual') flush()
+      })
     }
-    midiKept.push([name, args, clock()])
+    const slot = []
+    cmds.push(slot)
+    midiKept.push([name, args, clock(), slot])
     return back
   }
+  let midiComing = null
 
   /** A note that is sounding: what start() gives back. */
   class Note {
@@ -2221,6 +2247,8 @@ export function createSound(options = {}) {
     resume() { command({ op: 'master', pause: false, t: clock() }); flush() },
     /** Send what has been asked for so far (for `batch: 'manual'`). */
     flush,
+    /** A promise of everything asked for so far being ready to send: MIDI's file, if a MIDI function was used, has arrived. */
+    settled: () => midiComing || Promise.resolve(),
     /** The player this made for itself, once a sound has been asked for (null with a `sound` transport). */
     get player() { return player },
     /** Stop everything and let go of the sound card. */

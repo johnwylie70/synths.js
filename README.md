@@ -66,7 +66,7 @@ These and more are in the [examples](examples) folder: open `examples/index.html
 
 ## Run it
 
-Put `synths.js`, `synths_core.wasm` and `synths-worklet.js` in a folder of your site (they are the whole library), and import what you use in a module script:
+Put `synths.js`, `synths_core.wasm`, `synths-worklet.js` and `synths-midi.js` in a folder of your site (they are the whole library; the last is fetched only by a program that uses MIDI), and import what you use in a module script:
 
 ```html
 <button id="go">Play</button>
@@ -210,6 +210,77 @@ keyboard(lead)                       // piano keys that play it, and light up as
 
 [`examples/synth_panel.js`](examples/synth_panel.js) is a whole one. What the controls use is there for your own drawing too: `lead.samples()` is the wave the synth is making now (numbers from -1 to 1), `lead.level()` is how loud it is (`[left, right]`, 0 to 1) and `lead.notes()` is the notes it is sounding. `lead.noteOn("C4")` and `lead.noteOff("C4")` press and let go of a key; `lead.set("cutoff", 800)`, `lead.get("cutoff")` and `lead.describe("cutoff")` (its range, unit and kind) work by name. `soundOutput()` has the same for all the sound together, and `mainSynth()` is the synth that `playNote` plays.
 
+## MIDI
+
+MIDI is how music keyboards, drum pads, boxes of knobs and synths talk to each other and to a computer. Plug a MIDI keyboard into your computer and one line makes it play a synth:
+
+```js
+const lead = makeSynth("lead")
+
+lead.playFromMidi()
+```
+
+It follows the notes, how hard you hit each key, the pitch wheel, the modulation wheel and the sustain pedal. The first time a program uses MIDI the browser asks whether the page may use your MIDI devices: say yes. `lead.playFromMidi({ channel: 2 })` listens to one channel alone, and `lead.playFromMidi(false)` stops.
+
+MIDI works in Chrome, Edge and Firefox on a computer. Safari, iPhones and iPads have no MIDI for web pages. Where there is none your program still runs: the console says so once, and everything else carries on.
+
+### Hearing notes and knobs
+
+Your own functions can be called with what arrives, for a picture that dances or a game played from a keyboard:
+
+```js
+onMidiNote((note, velocity, channel) => {
+  if (velocity > 0) playSound("blip", { pitch: note - 60 })
+})
+
+onMidiControl((number, value, channel) => {
+  lead.reverb = value                    // a knob's value goes from 0 to 1
+})
+```
+
+`note` is a number, where 60 is middle C, and `velocity` is how hard the key was hit, from 0 to 1. A key coming up calls `onMidiNote` with velocity 0, unless you give `onMidiNoteOff((note, channel) => { ... })`, which is called then instead. `number` is which knob, slider or pedal it was; every one has a number from 0 to 127 (the sustain pedal is 64). `onMidi((message) => { ... })` is given everything, as `{ type, channel, note, velocity, control, value, bend, program, data, time, device }`: `type` is `"noteOn"`, `"noteOff"`, `"control"`, `"bend"`, `"program"` and so on, `time` is when it happened on the clock that `soundTime()` reads, `device` is the name of what sent it and `data` is the bytes themselves.
+
+### A knob turns a setting
+
+```js
+lead.learn("cutoff")                     // the next knob you turn is the cutoff from now on
+lead.mapMidi(74, "cutoff")               // or say which knob, by its number
+```
+
+The knob goes through the setting's whole range, from its least to its most, so nothing has to be worked out. `lead.cutoff` reads back what the knob has set. A function is called with each new value, which is how a dial on the screen turns with the knob: `lead.learn("cutoff", (value) => { cutoffDial.value = value })`. `{ min: 200, max: 4000 }` narrows the range, and `lead.unmapMidi("cutoff")` lets it go. [`examples/midi_dials.js`](examples/midi_dials.js) is a whole synth panel worked by a controller.
+
+### Sending
+
+A program can play a synth on your desk, a drum machine, or music software on the same computer:
+
+```js
+sendMidiNote("C4")                                      // a note, let go half a second later
+sendMidiNote("C4", 0.8, { length: 0.5, channel: 1 })    // how hard, how long, which channel (1 to 16)
+sendMidiNote(["C4", "E4", "G4"], { beat: 4 })           // a chord, on beat 4
+sendMidiControl(74, 0.5)                                // turn knob 74 on the other device to half way
+sendMidi([0x90, 60, 100])                               // any message at all, as its bytes
+```
+
+Everything that is sent takes `{ after, at, beat }` like a sound ([When things start](#when-things-start)) and leaves at exactly that time, so a sequence you write with beats is in time however busy the page is. There are also `sendMidiNoteOff("C4")` (for a note sent with `length: null`, which is held), `sendMidiBend(0.5)` and `sendMidiProgram(5)`, which chooses a sound by its number. `stopSound()` lets go of every note that has been sent and takes back the ones still to come.
+
+`lead.sendToMidi()` sends what a synth plays, tunes and all, out as MIDI too: `makeSynth("bass").sendToMidi().playNotes("C2 C2 G2 C2", 0.25, { repeat: true })`. `{ channel: 10 }` chooses the channel (10 is where drum machines listen).
+
+`sendMidiClock()` sends the beat, so that another device's own sequencer keeps time with `setTempo`, and `sendMidiClock(false)` stops it. A clock that another device sends is measured for you: `onMidi((message) => { if (message.type === "tempo") setTempo(message.bpm) })`.
+
+### Which device
+
+```js
+onMidiDevices((devices) => {
+  console.log(devices.inputs, devices.outputs)          // their names
+})
+useMidiInput("Keystation 49")           // listen to this one alone (otherwise: all of them)
+useMidiOutput("Minilogue")              // send to this one (otherwise: the first)
+```
+
+`midiDevices()` gives the same `{ inputs, outputs, available }` at any time; it is empty until the browser has answered, which is why `onMidiDevices` is there. `available` is `false` when there is no MIDI. `stopMidi()` forgets every function you gave and stops everything MIDI is doing.
+
+The four MIDI examples are [a keyboard](examples/midi_keyboard.js), [a scene](examples/midi_scene.js), [a sequencer](examples/midi_sequencer.js) and [dials](examples/midi_dials.js). Each still plays with nothing plugged in.
+
 ## Effects
 
 A synth sends some of its sound to an effect with one word: `lead.echo = 0.4`, `lead.reverb = 0.3`, `lead.chorus = 0.5`. `distortion` and `crush` belong to the synth alone. The echo, the reverb and the chorus are shared by every synth, and are shaped with `setEffects`:
@@ -286,7 +357,7 @@ function update(dt) {
 
 ## The Python spellings
 
-Every function has its Python spelling too, so a program comes across from one language to the other with little more than its syntax changed: `play_sound`, `play_note`, `play_notes`, `play_arp`, `start_arp`, `make_synth`, `load_sample`, `play_song`, `stop_sound`, `set_volume`, `mute_sound`, `set_effects`, `set_tempo`, `sound_time`. Settings too: `lead.vibrato_rate = 6`.
+Every function has its Python spelling too, so a program comes across from one language to the other with little more than its syntax changed: `play_sound`, `play_note`, `play_notes`, `play_arp`, `start_arp`, `make_synth`, `load_sample`, `play_song`, `stop_sound`, `set_volume`, `mute_sound`, `set_effects`, `set_tempo`, `sound_time`, `on_midi_note`, `on_midi_control`, `send_midi_note`, `midi_devices`, `lead.play_from_midi()`. Settings too: `lead.vibrato_rate = 6`.
 
 ## Mistakes
 
@@ -298,7 +369,7 @@ makeSynth(): there is no setting called "cutof". Did you mean "cutoff"?
 "H4" is not a note. Write a note as a name like "C4", "F#3" or "Bb5", or as a number, where 60 is middle C
 ```
 
-Things that are not your mistake do not stop your program. They are said once in the console and the rest carries on: sound that is waiting for a tap, a sample whose file is missing, more synths than there is room for (32 at once; `remove()` gives a place back), more notes than there are voices (64; the oldest note makes way).
+Things that are not your mistake do not stop your program. They are said once in the console and the rest carries on: sound that is waiting for a tap, a sample whose file is missing, more synths than there is room for (32 at once; `remove()` gives a place back), more notes than there are voices (64; the oldest note makes way), a browser with no MIDI.
 
 ## For apps that show scenes
 
@@ -328,16 +399,18 @@ port.onmessage = (m) => player.send(m.data)
 - **Offline.** `createOfflinePlayer()` is the same player with no sound card: send it the same batches and `render(seconds)` gives the samples, and `wav()` a WAV file. It works in node too. `renderSound((s) => { s.playNote("C4") }, { seconds: 1 })` does it in one line. This is how a recorded video gets its soundtrack, and how the tests listen.
 - **Reading back.** `player.read(id)` gives what a synth is doing now, `{ samples, level, notes }` (no id: all the sound), for scopes, meters and lit keys. It never waits: the audio thread posts it about 40 times a second while something is reading. A `sound` transport may have a `read(id)` of its own, and a synth's `samples()`, `level()` and `notes()` use it.
 - **Several scenes on a page** share one player and one sound card without being told to: every `createSound()` that is not given a `sound` joins it, in a scope of its own, so each still stops, mutes and pauses alone.
+- **MIDI** goes the same way. Its functions write a `midi` command into the same batches; a desk beside the player carries it out, plays a synth from a keyboard without the program in between, and hands back what was received as plain data: `player.onMidi((events) => port.postMessage({ midi: events }))` on the page and `sound.receiveMidi(events)` where the program is. A `midi` option, shaped like `sound`, is the devices themselves for an app whose browser has no MIDI (an iPad app, with CoreMIDI behind it). The code is `synths-midi.js`, fetched the first time MIDI is used. [docs/midi.md](docs/midi.md) is the contract.
 - **Pausing.** `sound.pause()` and `sound.resume()` on what `createSound` gave, for a scene that is paused or out of view, and `sound.close()` when it is over. (`player.pause()` silences everyone who shares the player.) `player.state` is `"loading"`, `"waiting"` (for a tap), `"on"` or `"failed"`.
 
 ## Tests
 
 ```bash
 node scripts/test-node.mjs
+node scripts/test-midi.mjs
 PLAYWRIGHT=/path/to/node_modules/playwright node scripts/test-browser.mjs
 ```
 
-The first needs only node: it renders commands with the real engine and measures the sound. The second drives Chromium and WebKit with [Playwright](https://playwright.dev) and listens to what the audio worklet puts out.
+The first needs only node: it renders commands with the real engine and measures the sound. The second is MIDI, with a pretend device: the bytes, and the whole path to the engine and back. The third drives Chromium and WebKit with [Playwright](https://playwright.dev) and listens to what the audio worklet puts out.
 
 The engine is built in [synths-core](https://github.com/johnwylie70/synths-core) and copied here by `node scripts/sync-engine.mjs`, which also writes the files made from it. The built engine is part of this repository, so nothing here needs Rust.
 

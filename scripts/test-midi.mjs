@@ -313,6 +313,26 @@ async function midiSound(options = {}, transport = pretend()) {
   say(sent().length === 0, 'sendToMidi(false) stops it', null)
 }
 
+// --- MIDI in the first lines of a program, before its file has arrived: the order is as written
+{
+  const transport = pretend()
+  const result = await synths.renderSound((s) => {
+    const lead = s.makeSynth(CLICK)
+    s.sendMidiNote('C2', 1, { length: 0.1, after: 0.5 })
+    lead.sendToMidi().playNotes('A4 B4', 0.25)
+    lead.play('C5', 0.1, { after: 1 })
+    s.sendMidiControl(7, 1)
+  }, { seconds: 1.5, midi: transport })
+  say(same(transport.sent.map((m) => [m[0][0], m[0][1], Math.round(m[1])]), [[0xb0, 7, 0], [0x90, 69, 0], [0x80, 69, 225], [0x90, 71, 250], [0x80, 71, 475], [0x90, 36, 500], [0x80, 36, 600], [0x90, 72, 1000], [0x80, 72, 1100]]) && peak(result.left) > 0.2,
+    'a synth told to send to MIDI and played in the same breath sends its first notes too, at the times they were asked for', transport.sent)
+  // And with no transport at all the sound is as it would be.
+  const plain = await synths.renderSound((s) => { s.makeSynth(CLICK).play('A4', 0.5) }, { seconds: 1 })
+  const withMidi = await synths.renderSound((s) => { s.makeSynth(CLICK).playFromMidi().play('A4', 0.5); s.onMidiNote(() => {}) }, { seconds: 1, midi: pretend() })
+  let differ = 0
+  for (let i = 0; i < plain.left.length; i++) if (plain.left[i] !== withMidi.left[i]) differ++
+  say(differ === 0, 'using MIDI changes nothing about the sound, to the sample', differ)
+}
+
 // --- a knob turns a setting
 {
   const { sound, transport, player, render } = await midiSound()

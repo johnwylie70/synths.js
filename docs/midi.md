@@ -40,7 +40,8 @@ Web MIDI (`navigator.requestMIDIAccess`) is in Chrome, Edge and other Chromium b
 a secure page (https or localhost), it asks the person's permission, and a page inside a frame of another origin
 needs `allow="midi"` on the frame. Safari has none, and so neither has any browser or web view on an iPhone or an
 iPad. Measured on 2026-10-13 with Playwright: Chromium 140 has it (with the permission given it lists the
-machine's devices; without, it refuses with `NotAllowedError`), and WebKit 26.0 has no `requestMIDIAccess` at all.
+machine's devices; without, it refuses with `NotAllowedError`; in a frame of another origin it refuses with
+`SecurityError` until the frame has `allow="midi"`), and WebKit 26.0 has no `requestMIDIAccess` at all.
 Firefox was not measured.
 
 Where there is none, every MIDI function still works and nothing throws: `midiDevices()` is empty, nothing is
@@ -230,7 +231,7 @@ it. On the native side, with CoreMIDI:
   page's `performance.now()` by taking both clocks once at the same moment; or send none, and the arrival time is used.
 - **Send**: `send(bytes, time, output)` becomes one `MIDISend` (or `MIDISendEventList`) to the named destination,
   with `time` converted back to host time so that CoreMIDI does the waiting.
-- **Permission**: none is needed for USB and network MIDI. Bluetooth MIDI needs the Bluetooth permission and a
+- **Permission**: USB MIDI needs none. Bluetooth MIDI needs the Bluetooth permission and a
   pairing screen (`CABTMIDICentralViewController`), which is the app's to show.
 
 Nothing else is native: reading the bytes, the keyboard that plays a synth, mapping, timing and the queue are all

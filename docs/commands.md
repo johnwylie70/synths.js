@@ -15,6 +15,7 @@ native app) plays it. It describes command format **1**.
 - [Sound that is not on yet](#sound-that-is-not-on-yet)
 - [Writing a sender](#writing-a-sender)
 - [Being a host](#being-a-host)
+- [MIDI](#midi)
 - [What is not here yet](#what-is-not-here-yet)
 
 ## The shape of it
@@ -117,7 +118,7 @@ be `true` or `false`. For the setting `sample` the value is a sample id.
 or `all`), `names` (each friendly name, the setting it stands for and its `scale`: `octave` is `transpose` times
 12), `choiceWords`, `plain` (what every synth starts from), `synths` (the ready-made synths, and the `note` each
 plays when none is given, and its `macro` if it has one), `sounds` (the ready-made game sounds), `chords` (each
-kind of chord as semitones above its root), `orders` and `macroWaves`. `describe()` returns the same.
+kind of chord as semitones above its root), `orders`, `macroWaves` and `midi` (see [midi.md](midi.md)). `describe()` returns the same.
 
 A sender should check names and values and report mistakes where the program is, in its own language. A player
 does not report them: it passes over what it cannot use.
@@ -461,6 +462,15 @@ has carried out, so it is told nothing. The sender is not told what a dial chang
 A transport may offer the same as `read(id)` beside its `send(batch)`; the library's synths use it for
 `samples()`, `level()` and `notes()`, and give nothing when it is not there. A sender in another place (Python, a
 worker) asks its host, however the host chooses to carry it: once a frame is plenty.
+
+## MIDI
+
+One more command, `{ op: "midi", do: … }`, is how a program sends MIDI, has a keyboard play a synth and ties a knob
+to a setting. A player carries it out with a desk it loads when the first one arrives (`synths-midi.js`), and hands
+back what was received through `player.onMidi(listener, scope)`: lists of plain objects, which is the one other
+thing besides [reading back](#reading-back) that comes from a player. A player without it passes `midi` over like
+any command it does not know. The `midi` option of `createPlayer` is a host's own way to the devices, for a
+browser that has no MIDI. All of it is in [midi.md](midi.md).
 
 ## What is not here yet
 
