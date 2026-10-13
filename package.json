@@ -1,0 +1,16 @@
+{
+  "name": "synths.js",
+  "version": "0.0.0",
+  "description": "Make sounds and music in plain JavaScript: synths, samples, effects and tracker songs, for games and for fun. The sound sibling of pictures.js.",
+  "type": "module",
+  "main": "./synths.js",
+  "module": "./synths.js",
+  "exports": { ".": "./synths.js", "./synths.js": "./synths.js" },
+  "files": ["synths.js", "README.md", "CHANGELOG.md", "LICENSE"],
+  "engines": { "node": ">=20" },
+  "keywords": ["sound", "music", "synth", "synthesizer", "tracker", "mod", "samples", "games", "audio", "education", "creative-coding"],
+  "author": "John Wylie",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/johnwylie70/synths.js.git" },
+  "bugs": { "url": "https://github.com/johnwylie70/synths.js/issues" }
+}
