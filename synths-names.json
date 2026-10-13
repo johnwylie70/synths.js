@@ -1179,7 +1179,7 @@
    "kind": "float",
    "min": 0,
    "max": 1,
-   "default": 0.6,
+   "default": 0.5,
    "unit": "",
    "scope": "all"
   },
@@ -1191,6 +1191,33 @@
    "max": 1,
    "default": 0.4,
    "unit": "",
+   "scope": "all"
+  },
+  {
+   "id": 210,
+   "name": "reverb.type",
+   "kind": "choice",
+   "min": 0,
+   "max": 4,
+   "default": 0,
+   "unit": "",
+   "choices": [
+    "room",
+    "hall",
+    "plate",
+    "cathedral",
+    "spring"
+   ],
+   "scope": "all"
+  },
+  {
+   "id": 211,
+   "name": "reverb.decay",
+   "kind": "float",
+   "min": 0,
+   "max": 30,
+   "default": 0,
+   "unit": "seconds",
    "scope": "all"
   },
   {
@@ -1271,6 +1298,26 @@
    "max": 2,
    "default": 0.15,
    "unit": "seconds",
+   "scope": "all"
+  },
+  {
+   "id": 222,
+   "name": "reverb.predelay",
+   "kind": "float",
+   "min": 0,
+   "max": 0.2,
+   "default": 0,
+   "unit": "seconds",
+   "scope": "all"
+  },
+  {
+   "id": 223,
+   "name": "reverb.low_cut",
+   "kind": "float",
+   "min": 20,
+   "max": 1000,
+   "default": 120,
+   "unit": "hz",
    "scope": "all"
   }
  ],
@@ -1577,6 +1624,22 @@
   },
   "reverbDamping": {
    "setting": "reverb.damping",
+   "scale": 1
+  },
+  "reverbType": {
+   "setting": "reverb.type",
+   "scale": 1
+  },
+  "reverbDecay": {
+   "setting": "reverb.decay",
+   "scale": 1
+  },
+  "reverbPredelay": {
+   "setting": "reverb.predelay",
+   "scale": 1
+  },
+  "reverbLowCut": {
+   "setting": "reverb.low_cut",
    "scale": 1
   },
   "chorusRate": {
@@ -2677,21 +2740,22 @@
    "values": {
     "fx.pitch": -7,
     "fx.drive": 0.25,
-    "send.reverb": 0.25,
+    "send.reverb": 0.3,
     "reverb.size": 0.7,
     "reverb.damping": 0.6
    }
   },
   "cave": {
-   "help": "Far inside a cave: long echoes and a very big room.",
+   "help": "Far inside a cave: long echoes and an enormous, dark space.",
    "values": {
     "send.delay": 0.5,
-    "send.reverb": 0.7,
+    "send.reverb": 0.6,
     "delay.time": 0.38,
     "delay.feedback": 0.55,
     "delay.tone": 2500,
-    "reverb.size": 0.92,
-    "reverb.damping": 0.3
+    "reverb.type": 3,
+    "reverb.size": 0.4,
+    "reverb.damping": 0.55
    }
   },
   "telephone": {

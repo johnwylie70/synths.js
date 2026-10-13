@@ -860,5 +860,60 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
   say(Math.abs(crossings(heard.left, 0, 0.2) * 5 - 440) <= 5 && peak(heard.left.slice(0.5 * SR, 0.6 * SR)) > 0.05, 'a hand-written batch plays: ids may be numbers, notes may be names, a synth never made gets the default, and what is not understood is passed over', crossings(heard.left, 0, 0.2) * 5)
 }
 
+// --- the reverb's types: one reverb, which every synth sends into
+{
+  const TYPES = ['room', 'hall', 'plate', 'cathedral', 'spring']
+  let lead, pad, out
+  const cmds = written((s) => {
+    lead = s.makeSynth('lead')
+    pad = s.makeSynth('pad')
+    out = s.soundOutput()
+    lead.reverbType = 'hall'
+  }).flatMap((b) => b.cmds)
+  const d = lead.describe('reverbType')
+  say(same(d.choices, TYPES) && d.kind === 'choice' && d.default === 'hall' && same(out.describe('reverb_type').choices, TYPES) && same(describe().settings.find((x) => x.name === 'reverb.type').choices, TYPES) && describe().names.reverbType.setting === 'reverb.type',
+    'describe("reverbType") lists the five types, on a synth, on soundOutput() and in the names for other languages', d)
+  say(same(cmds[cmds.length - 1].set, { reverbType: 'hall' }) && lead.reverbType === 'hall' && pad.reverbType === 'hall' && pad.get('reverb_type') === 'hall' && out.get('reverbType') === 'hall',
+    'the type set on one synth is the type every synth and soundOutput() read back: there is one reverb', [cmds[cmds.length - 1], pad.reverbType, out.get('reverbType')])
+  // A select tied to a choice hands over its place in the list.
+  pad.set('reverbType', 2)
+  const byPlace = [lead.reverbType, out.get('reverbType')]
+  out.set('reverbType', 'cathedral')
+  const byOutput = [lead.get('reverbType'), pad.reverbType]
+  written((s) => { s.setEffects({ reverbDecay: 3, reverb_predelay: 0.05, reverbLowCut: 300 }); lead = s.makeSynth('lead'); out = s.soundOutput() })
+  say(same(byPlace, ['plate', 'plate']) && same(byOutput, ['cathedral', 'cathedral']) && lead.reverbDecay === 3 && lead.reverbPredelay === 0.05 && lead.get('reverbLowCut') === 300 && out.get('reverbDecay') === 3 && lead.describe('reverbDecay').max === 30 && lead.describe('reverbLowCut').unit === 'hz',
+    'a place in the list chooses a type too, setEffects and soundOutput() set the same value, and reverbDecay, reverbPredelay and reverbLowCut are there', [byPlace, byOutput, lead.reverbDecay])
+  say(/reverbType: "cave" is not one of its choices\. They are: room, hall, plate, cathedral, spring/.test(thrown(() => { lead.reverbType = 'cave' })), 'a type that does not exist is said, with the five there are', null)
+
+  // How long each rings: the time from a click until the sound has fallen by 60 dB and stays there.
+  const rings = async (play, seconds = 14) => {
+    const a = (await renderSound((s) => { play(s); s.makeSynth({ ...CLICK, reverb: 0.5 }).play('C5', 0.05) }, { seconds })).left
+    const w = SR / 20, levels = []
+    for (let i = 0; i + w <= a.length; i += w) { let sum = 0; for (let j = i; j < i + w; j++) sum += a[j] * a[j]; levels.push(Math.sqrt(sum / w)) }
+    const top = Math.max(...levels)
+    return (levels.reduce((last, level, i) => (level > top / 1000 ? i : last), 0) + 1) / 20
+  }
+  const tails = {}
+  for (const type of TYPES) tails[type] = await rings((s) => s.setEffects({ reverbType: type }))
+  const usual = await rings(() => {})
+  say(tails.room < tails.plate && tails.plate < tails.hall && tails.hall < tails.cathedral && tails.room > 0.5 && tails.room < 1.5 && tails.cathedral > 4 && usual === tails.room,
+    `the types ring for longer in the order room, plate, hall, cathedral (${TYPES.map((t) => `${t} ${tails[t]} s`).join(', ')}), and the room is the one to begin with`, [tails, usual])
+  const onSynth = await rings((s) => { s.makeSynth('bass').reverbType = 'hall' })
+  const decay = [await rings((s) => s.setEffects({ reverbDecay: 0.4 })), await rings((s) => s.setEffects({ reverbDecay: 5 }))]
+  say(onSynth === tails.hall && decay[0] < tails.room && decay[1] > tails.hall, 'the type set on any synth is heard on every other, and reverbDecay says how long the tail is whatever the type', [onSynth, tails.hall, decay])
+
+  // A target on the player's side, as dials.js is given one where the program is elsewhere.
+  const player = await createOfflinePlayer({})
+  const s = createSound({ sound: player, clock: () => 0, batch: 'manual', ids: 'r:' })
+  const synth = s.makeSynth('lead')
+  s.flush()
+  await player.render(0.01)
+  const target = player.target(synth._id)
+  const before = target.get('reverbType')
+  target.set('reverbType', 'plate')
+  await player.render(0.01)
+  say(before === 'room' && target.get('reverbType') === 'plate' && same(target.describe('reverbType').choices, TYPES) && target.describe('reverbType').kind === 'choice', 'a player\'s target describes the reverb\'s type with its choices, and sets it', [before, target.get('reverbType'), target.describe('reverbType')])
+}
+
 console.log(`${count - failed} of ${count} passed`)
 process.exit(failed ? 1 : 0)

@@ -183,8 +183,10 @@ const PARAMS = [
   [203,"delay.feedback","f",0,0.95,0.4,""],
   [204,"delay.tone","f",200,20000,6000,"hz"],
   [205,"delay.pingpong","b",0,1,0,""],
-  [208,"reverb.size","f",0,1,0.6,""],
+  [208,"reverb.size","f",0,1,0.5,""],
   [209,"reverb.damping","f",0,1,0.4,""],
+  [210,"reverb.type","c",0,4,0,"",["room","hall","plate","cathedral","spring"]],
+  [211,"reverb.decay","f",0,30,0,"seconds"],
   [212,"chorus.rate","f",0.05,10,0.8,"hz"],
   [213,"chorus.depth","f",0,1,0.5,""],
   [216,"voices","i",1,64,64,"voices"],
@@ -193,8 +195,10 @@ const PARAMS = [
   [219,"input.monitor","b",0,1,1,""],
   [220,"input.gate","f",-100,0,-100,"db"],
   [221,"input.gate_release","f",0.005,2,0.15,"seconds"],
+  [222,"reverb.predelay","f",0,0.2,0,"seconds"],
+  [223,"reverb.low_cut","f",20,1000,120,"hz"],
 ]
-const VOICES = {"robot":{"help":"A machine: the voice multiplied by a 50 Hz wave, ringing in a metal pipe.","values":{"fx.ring":1,"fx.ring_freq":50,"fx.comb":0.45,"fx.comb_freq":110,"fx.comb_feedback":0.8,"fx.bits":10}},"chipmunk":{"help":"Small and squeaky: everything seven semitones higher.","values":{"fx.pitch":7}},"monster":{"help":"Huge and deep: seven semitones lower, with a growl and a little room.","values":{"fx.pitch":-7,"fx.drive":0.25,"send.reverb":0.25,"reverb.size":0.7,"reverb.damping":0.6}},"cave":{"help":"Far inside a cave: long echoes and a very big room.","values":{"send.delay":0.5,"send.reverb":0.7,"delay.time":0.38,"delay.feedback":0.55,"delay.tone":2500,"reverb.size":0.92,"reverb.damping":0.3}},"telephone":{"help":"Down an old phone line: only the middle of the voice, coarse and a little crushed.","values":{"filter.type":3,"filter.slope":1,"filter.cutoff":1200,"filter.resonance":0.2,"fx.drive":0.2,"fx.bits":8,"fx.downsample":6}},"alien":{"help":"Not from here: higher, multiplied by a 180 Hz wave, with a slow metallic sweep.","values":{"fx.pitch":4,"fx.ring":0.8,"fx.ring_freq":180,"fx.comb":0.4,"fx.comb_freq":600,"fx.comb_feedback":0.75,"fx.comb_rate":0.4,"fx.comb_depth":0.5,"send.chorus":0.4}},"whisper":{"help":"Hoarse and breathy: the voice's pitch blurred into noise, with its low end taken off.","values":{"filter.type":2,"filter.cutoff":500,"filter.resonance":0,"fx.ring":1,"fx.ring_wave":1,"fx.ring_freq":350}}}
+const VOICES = {"robot":{"help":"A machine: the voice multiplied by a 50 Hz wave, ringing in a metal pipe.","values":{"fx.ring":1,"fx.ring_freq":50,"fx.comb":0.45,"fx.comb_freq":110,"fx.comb_feedback":0.8,"fx.bits":10}},"chipmunk":{"help":"Small and squeaky: everything seven semitones higher.","values":{"fx.pitch":7}},"monster":{"help":"Huge and deep: seven semitones lower, with a growl and a little room.","values":{"fx.pitch":-7,"fx.drive":0.25,"send.reverb":0.3,"reverb.size":0.7,"reverb.damping":0.6}},"cave":{"help":"Far inside a cave: long echoes and an enormous, dark space.","values":{"send.delay":0.5,"send.reverb":0.6,"delay.time":0.38,"delay.feedback":0.55,"delay.tone":2500,"reverb.type":3,"reverb.size":0.4,"reverb.damping":0.55}},"telephone":{"help":"Down an old phone line: only the middle of the voice, coarse and a little crushed.","values":{"filter.type":3,"filter.slope":1,"filter.cutoff":1200,"filter.resonance":0.2,"fx.drive":0.2,"fx.bits":8,"fx.downsample":6}},"alien":{"help":"Not from here: higher, multiplied by a 180 Hz wave, with a slow metallic sweep.","values":{"fx.pitch":4,"fx.ring":0.8,"fx.ring_freq":180,"fx.comb":0.4,"fx.comb_freq":600,"fx.comb_feedback":0.75,"fx.comb_rate":0.4,"fx.comb_depth":0.5,"send.chorus":0.4}},"whisper":{"help":"Hoarse and breathy: the voice's pitch blurred into noise, with its low end taken off.","values":{"filter.type":2,"filter.cutoff":500,"filter.resonance":0,"fx.ring":1,"fx.ring_wave":1,"fx.ring_freq":350}}}
 /* PARAMS:END */
 
 /**
@@ -223,7 +227,8 @@ const ALIASES = {
   echo: 'send.delay', delay: 'send.delay', reverb: 'send.reverb', chorus: 'send.chorus',
   masterVolume: 'master.volume', limiter: 'master.limiter',
   echoTime: 'delay.time', echoFeedback: 'delay.feedback', echoTone: 'delay.tone', echoBounce: 'delay.pingpong',
-  reverbSize: 'reverb.size', reverbDamping: 'reverb.damping', chorusRate: 'chorus.rate', chorusDepth: 'chorus.depth',
+  reverbSize: 'reverb.size', reverbDamping: 'reverb.damping', reverbType: 'reverb.type', reverbDecay: 'reverb.decay', reverbPredelay: 'reverb.predelay', reverbLowCut: 'reverb.low_cut',
+  chorusRate: 'chorus.rate', chorusDepth: 'chorus.depth',
   micGain: 'input.gain', micGate: 'input.gate', micGateRelease: 'input.gate_release',
 }
 /**
@@ -2906,7 +2911,7 @@ export function createSound(options = {}) {
           when: (o, said) => when(o, said) - (midiNow === null || o.at !== undefined || o.beat !== undefined ? 0 : clock() - midiNow),
           tempo: () => tempo,
           meant: (name) => meant(String(name), namesToShow),
-          remember: (synth, name, value) => patchOf({ [name]: value }, 'MIDI', false, synth._patch, () => 0),
+          remember: (synth, name, value) => { patchOf({ [name]: value }, 'MIDI', false, synth._patch, () => 0); share([name], synth._patch) },
           // What the player's desk says is asked for once there is a transport to ask, which is at the next batch.
           listen(heard) {
             let stop = null
@@ -2934,6 +2939,19 @@ export function createSound(options = {}) {
     return back
   }
   let midiComing = null
+
+  /**
+   * THE SETTINGS EVERY SYNTH SHARES (the echo's time, the reverb's type): there is one echo and one reverb, so there
+   * is one value of each, whoever set it. It is kept here, by engine id, and is what every synth and soundOutput()
+   * read back: lead.reverbType = "hall" and setEffects({ reverbType: "hall" }) are the same thing.
+   */
+  const forAll = new Map()
+  function share(names, patch) {
+    for (const name of names) {
+      const entry = setting(name)
+      if (entry && !entry.part && patch.has(entry.id)) forAll.set(entry.id, patch.get(entry.id))
+    }
+  }
   /**
    * midiInput() and midiOutput(): the device and the channel as a TARGET, which a select on the screen is tied to
    * as a dial is tied to a synth. It is here, and not in synths-midi.js, so that it can be given at once: until
@@ -3182,14 +3200,14 @@ export function createSound(options = {}) {
       if (key(name) === 'voice') return this.voice
       const entry = setting(this._name(name))
       if (!entry) throw new Error(`get: there is no setting called ${shown(name)}.${meant(String(name), namesToShow)}`)
-      return readSetting(entry, this._patch.get(entry.id))
+      return readSetting(entry, entry.part ? this._patch.get(entry.id) : forAll.get(entry.id))
     }
     /** What a setting is: { name, min, max, default, unit, kind, choices }, for a control that takes its range from it. */
     describe(name) {
       if (key(name) === 'voice') return { name: 'voice', kind: 'choice', min: 0, max: Object.keys(VOICES).length, default: 'none', unit: '', choices: ['none', ...Object.keys(VOICES)] }
       const entry = setting(this._name(name))
       if (!entry) return null
-      const d = describeSetting(entry, this._patch.get(entry.id))
+      const d = describeSetting(entry, entry.part ? this._patch.get(entry.id) : forAll.get(entry.id))
       // "sample" is a wave only for a synth that has been given a sample to play.
       const holds = sampleOfWave(entry)
       return holds && !this._patch.has(holds.id) ? withoutSample(d) : d
@@ -3218,7 +3236,9 @@ export function createSound(options = {}) {
       const voice = voiceName(name)
       if (voice === null) throw new Error(`${shown(name)} is not a voice.${meant(String(name), Object.keys(VOICES))} The voices are: ${Object.keys(VOICES).join(', ')}, and "none"`)
       if (!this._worn) this._worn = { voice: 'none', under: null }
-      wearVoice(this._worn, this._patch, voice, engineDefault)
+      // A voice may change what every synth shares (the cave's reverb), and takes it back when it is taken off.
+      for (const [pid, value] of forAll) this._patch.set(pid, value)
+      for (const [pid, value] of wearVoice(this._worn, this._patch, voice, engineDefault)) if (pid >= 200) forAll.set(pid, value)
       command({ op: 'set', id: this._id, voice, t: at })
     }
 
@@ -3297,6 +3317,7 @@ export function createSound(options = {}) {
       given = this._given(given, at)
       if (!Object.keys(given).length) return this
       patchOf(given, 'set', true, this._patch, () => 0)
+      share(Object.keys(given).map((name) => this._name(name)), this._patch)
       const c = { op: 'set', id: this._id, set: sendable(given), t: at }
       // `slide` is another word for it (the Python library's first spelling).
       const glide = o.glide !== undefined ? o.glide : o.slide
@@ -3410,6 +3431,7 @@ export function createSound(options = {}) {
     const file = typeof o.sample === 'string' ? { note: o.note, loop: o.loop } : null
     const given = withSamples(file ? Object.fromEntries(Object.entries(o).filter(([k]) => k !== 'note' && k !== 'loop')) : o, under, said, file || {})
     const patch = patchOf(given, said, true, under, () => 0)
+    share(Object.keys(given), patch)
     const id = prefix + 's' + ++ids
     const c = { op: 'synth', id, t: clock() }
     if (preset) c.preset = preset
@@ -3537,6 +3559,7 @@ export function createSound(options = {}) {
       micSynth = new Mic(prefix + 'm' + ++ids)
       mic = micSynth._self = asSynth(micSynth)
       patchOf({ micGate: MIC_GATE }, 'useMicrophone', false, micSynth._patch)
+      share(['micGate'], micSynth._patch)
       const c = { op: 'mic', id: micSynth._id, set: { micGate: MIC_GATE }, t: clock() }
       if (raw === false) c.raw = false
       hearBack()
@@ -3700,10 +3723,9 @@ export function createSound(options = {}) {
       const entry = setting(name)
       return entry && !entry.part ? { name: entry.name, kind: KINDS[entry.kind], min: entry.min, max: entry.max, default: entry.def, unit: entry.unit, ...(entry.choices ? { choices: [...entry.choices] } : {}) } : null
     },
-    get(name) { return key(name) === 'volume' ? volumeNow : effects.has(key(name)) ? effects.get(key(name)) : setting(name)?.def },
+    get(name) { const entry = setting(name); return key(name) === 'volume' ? volumeNow : entry && !entry.part ? readSetting(entry, forAll.get(entry.id)) : undefined },
     set(name, value) { if (key(name) === 'volume') api.setVolume(value); else api.setEffects({ [name]: value }) },
   }
-  const effects = new Map()
 
   /**
    * Write a section once and have it go round: loopNotes(() => { note("C4", "quarter"); bass.note("C2", "half") }).
@@ -3860,7 +3882,7 @@ export function createSound(options = {}) {
       if (!given || typeof given !== 'object') throw new Error(`setEffects needs settings in braces, as in setEffects({ echoTime: 0.3 }), not ${shown(given)}`)
       const patch = patchOf(given, 'setEffects', true)
       for (const pid of patch.keys()) if (pid < 200) throw new Error(`setEffects is for the effects every synth shares: ${namesToShow.filter((n) => !setting(n).part).join(', ')}. A synth's own settings are set on the synth, as in lead.echo = 0.4`)
-      for (const [name, value] of Object.entries(given)) effects.set(key(name), value)
+      share(Object.keys(given), patch)
       command({ op: 'master', set: given, t: clock() })
     },
     /** How fast the beat is, in beats a minute. Beat 0 is now. */
