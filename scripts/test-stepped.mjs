@@ -51,6 +51,13 @@ const song = new Uint8Array(await readFile(join(ROOT, 'examples', 'songs', 'nigh
     s.setEffects({ reverbSize: 0.7, echoTime: 0.2 })
     lead.set({ echo: 0.3, reverb: 0.4 })
     lead.set({ cutoff: 900 })
+    // What goes by the beat inside the engine: a trance gate, an arpeggio in beats, and the tempo changed part-way.
+    const pad = s.makeSynth('pad')
+    pad.tranceGate = 'x.x.xx.x'
+    pad.play(['A3', 'C4', 'E4'], { at: 1.2, length: 1.5 })
+    s.makeSynth('chipLead').arp('Am', 1.2, { at: 1.4, step: 'sixteenth' })
+    lead.noteOn('E5', 0.7, { at: 2.05 })
+    lead.noteOff('E5', { at: 2.3 })
   }
   const offline = await createOfflinePlayer()
   const a = createSound({ sound: offline, clock: () => 0 })
@@ -194,6 +201,23 @@ const song = new Uint8Array(await readFile(join(ROOT, 'examples', 'songs', 'nigh
   // Asked for in frame 10: nothing yet in frame 10's own reading, there in frame 11, and the key is up after six frames.
   const on = levels.findIndex((l) => l[0]), wave = levels.findIndex((l) => l[1]), key = levels.findIndex((l) => l[2] > 0), up = levels.findIndex((l, i) => i > key && l[2] === 0)
   say(on === 11 && wave === 11 && key === 11 && up === 17 && sound.soundOutput().samples().length === 1024, 'level(), samples() and notes() are the engine at the frame being drawn: a note asked for in frame 10 is read from frame 11 and its key is up six frames later', { on, wave, key, up })
+  player.close()
+}
+
+// --- the steps of a pattern are read on the stepped clock
+{
+  const { clock, sound, stepped, player } = stage({ fps: 60 })
+  sound.setTempo(120)
+  const pad = sound.makeSynth('pad')
+  pad.tranceGate = 'x.x.xx.x'
+  pad.play('A3', { length: 4 })
+  const seen = []
+  for (let n = 0; n <= 120; n++) { clock.now = n / 60; await stepped.advance(clock.now); seen.push(pad.tranceGateStep()) }
+  // Four steps to a beat at 120 beats a minute: a step every eighth of a second, which is every 7.5 frames; eight steps to the pattern.
+  const want = seen.map((_, n) => Math.floor(n / 60 * 8 + 1e-6) % 8)
+  const before = seen[120]
+  await new Promise((done) => setTimeout(done, 40))
+  say(JSON.stringify(seen.slice(1)) === JSON.stringify(want.slice(1)) && pad.tranceGateStep() === before, 'the trance gate\'s step is the one the stepped time and the tempo give, frame by frame, and does not move while nothing steps', { seen: seen.slice(0, 20), want: want.slice(0, 20) })
   player.close()
 }
 

@@ -3517,7 +3517,9 @@ export function createSteppedPlayer(options = {}) {
   function read(id, scope) {
     const part = core && !closed ? conductor.partOf(id, scope) : -1
     const tap = part < 0 ? null : core.taps([part], 1024)[0]
-    return tap ? reading(tap, conductor.gain()) : NOTHING
+    // Which step of an arpeggio's pattern and of the trance gate is sounding, worked out from the tempo and this same time.
+    const steps = id == null || part < 0 ? null : conductor.stepsOf(id, now(), scope)
+    return { ...(tap ? reading(tap, conductor.gain()) : NOTHING), ...steps }
   }
   /** Where the song is at the point the sound has reached. */
   function songPosition() { return core && !closed ? songPlace(core.songPosition()) : NO_SONG }
