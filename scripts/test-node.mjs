@@ -939,6 +939,23 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
   say(threw === null && state === 'failed' && said.filter((t) => /no Web Audio/.test(t)).length <= 1, 'createSound() with nothing given reaches for the page\'s shared player on its first flush, a second sound joins it, and both close: nothing throws where there is no sound card', [threw, state, said])
 }
 
+// --- values that mean something else are labelled for a control: a reverb's decay of 0 is the type's own
+{
+  const s = createSound({ sound: { send() {} }, batch: 'manual' })
+  const lead = s.makeSynth('lead')
+  const mic = s.useMicrophone()
+  const player = await createOfflinePlayer({})
+  const far = createSound({ sound: player, clock: () => 0, batch: 'manual', ids: 'l:' })
+  const synth = far.makeSynth('lead')
+  far.flush()
+  await player.render(0.01)
+  const got = [lead.describe('reverbDecay'), s.soundOutput().describe('reverbDecay'), player.target(synth._id).describe('reverbDecay'), mic.describe('gate'), lead.describe('reverbPredelay'), lead.describe('cutoff')]
+  const table = describe().settings
+  say(got.slice(0, 3).every((d) => d && same(d.labels, { 0: 'auto' }) && d.min === 0) && same(got[3].labels, { '-100': 'off' }) && got[4].labels === undefined && got[5].labels === undefined
+    && same(table.find((x) => x.name === 'reverb.decay').labels, { 0: 'auto' }) && same(table.find((x) => x.name === 'input.gate').labels, { '-100': 'off' }),
+  'describe gives labels for the values that mean something else (reverbDecay 0 is "auto" on a synth, on soundOutput() and on a player\'s target; the microphone\'s gate at -100 is "off"), none where 0 is a real zero, and the table of settings carries them', got)
+}
+
 // --- the sound buffer: a command like the rest, with the words and the rounding
 {
   const said = []

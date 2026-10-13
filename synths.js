@@ -357,11 +357,15 @@ function allSettings() {
 }
 const setting = (name) => (typeof name === 'string' ? allSettings().get(key(name)) : undefined)
 
+// VALUES THAT MEAN SOMETHING ELSE, by the engine's name of the setting: the text a control shows in place of the
+// number (dials.js reads `labels` from what describe gives). A reverb's decay of 0 is the type's own.
+const LABELS = { 'reverb.decay': { 0: 'auto' }, 'input.gate': { '-100': 'off' } }
+const labelsOf = (entry, scale = entry.scale) => (LABELS[entry.name] ? { labels: Object.fromEntries(Object.entries(LABELS[entry.name]).map(([value, text]) => [value / scale, text])) } : {})
 /** What a setting is, for a control that takes its range from it; `now` is its value in the engine's units, if it is not the default. */
 function describeSetting(entry, now) {
   const value = (now === undefined ? entry.def : now) / entry.scale
   return { name: entry.name, kind: KINDS[entry.kind], min: entry.min / entry.scale, max: entry.max / entry.scale, default: entry.kind === 'c' ? entry.choices[value] : entry.kind === 'b' ? value === 1 : value,
-    unit: entry.scale === 12 ? 'octaves' : entry.unit, ...(entry.choices ? { choices: [...entry.choices] } : {}) }
+    unit: entry.scale === 12 ? 'octaves' : entry.unit, ...(entry.choices ? { choices: [...entry.choices] } : {}), ...labelsOf(entry) }
 }
 /** Which setting holds the sample of the oscillator whose wave this is, or null for a setting that is not an oscillator's wave. */
 const sampleOfWave = (entry) => (entry.name === 'osc1.wave' || entry.name === 'osc2.wave' ? setting(entry.name.replace('wave', 'sample')) : null)
@@ -426,7 +430,8 @@ function settingValue(entry, value, said) {
     const wants = entry.kind === 'c' ? `one of ${entry.choices.join(', ')}` : entry.kind === 'b' ? 'true or false' : `a number from ${entry.min / entry.scale} to ${entry.max / entry.scale}`
     throw new Error(`${said} needs ${wants}, not ${shown(value)}`)
   }
-  return clamp(value * entry.scale, entry.min, entry.max)
+  // A choice may be given by its place in the list, which is what a control that turns through them gives.
+  return clamp(entry.kind === 'c' ? Math.round(value) : value * entry.scale, entry.min, entry.max)
 }
 
 /**
@@ -590,8 +595,13 @@ function voices() {
 const micName = (name) => (typeof name === 'string' && Object.prototype.hasOwnProperty.call(MIC_NAMES, key(name)) ? MIC_NAMES[key(name)] : name)
 const NO_VOICE = new Set(['none', 'plain', 'off', 'normal', ''])
 /** A voice's name as written -> its name here, "none" for the plain voice, or null for a name that is not a voice. */
+const voiceChoices = () => ['none', ...Object.keys(VOICES)]
+/** What a control is told `voice` is: a choice, as a wave is, so a select or a rotary switch can be tied to it. */
+const describeVoice = (now = 'none') => ({ name: 'voice', kind: 'choice', min: 0, max: Object.keys(VOICES).length, default: now, unit: '', choices: voiceChoices() })
 function voiceName(name) {
   if (name === null || name === undefined || name === false) return 'none'
+  // A control that turns through the choices gives the place of one in the list, as it does for any choice.
+  if (typeof name === 'number') return voiceChoices()[Math.round(name)] ?? null
   const k = key(name)
   return NO_VOICE.has(k) ? 'none' : Object.prototype.hasOwnProperty.call(VOICES, k) ? k : null
 }
@@ -1867,6 +1877,8 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
     },
     /** Whether a synth is the microphone, whose settings have names of their own. */
     isMic(sid, scopeName) { const rec = found(sid, scopeName); return !!rec && rec === mic },
+    /** The voice changer a synth has on, 'none' for none, or undefined for a synth that is not there. */
+    voiceOf(sid, scopeName) { const rec = found(sid, scopeName); return rec ? (rec.worn ? rec.worn.voice : 'none') : undefined },
     /** A setting of a synth as the commands so far have left it: [what it is, its value in the engine's units], or null. */
     settingOf(sid, name, scopeName) {
       const entry = setting(name)
@@ -1954,9 +1966,18 @@ function makeTarget(id, run, conductor, read, scope) {
   const named = (name) => (conductor()?.isMic(id, scope) ? micName(name) : name)
   const target = {
     id,
-    set(name, value) { run({ op: 'set', id, set: Object.fromEntries(Object.entries(typeof name === 'string' ? { [name]: value } : name).map(([k, v]) => [named(k), v])) }); return target },
-    get(name) { const now = conductor()?.settingOf(id, named(name), scope); return now ? readSetting(now[0], now[1]) : undefined },
+    set(name, value) {
+      const given = Object.entries(typeof name === 'string' ? { [name]: value } : name)
+      // A voice is not a setting of the engine's but a handful of them, put on by its name (or its place among the choices).
+      const voice = given.find(([k]) => key(k) === 'voice')
+      const c = { op: 'set', id, set: Object.fromEntries(given.filter(([k]) => key(k) !== 'voice').map(([k, v]) => [named(k), v])) }
+      if (voice && voiceName(voice[1]) !== null) c.voice = voiceName(voice[1])
+      run(c)
+      return target
+    },
+    get(name) { if (key(name) === 'voice') return conductor()?.voiceOf(id, scope); const now = conductor()?.settingOf(id, named(name), scope); return now ? readSetting(now[0], now[1]) : undefined },
     describe(name) {
+      if (key(name) === 'voice') return describeVoice()
       const now = conductor()?.settingOf(id, named(name), scope)
       if (!now) return setting(named(name)) ? describeSetting(setting(named(name))) : null
       const d = describeSetting(now[0], now[1])
@@ -2503,7 +2524,7 @@ export function createPlayer(options = {}) {
         const ahead = typeof c.t === 'number' && typeof batch.now === 'number' ? c.t - batch.now : 0
         if (c.op !== 'stop' || c.id == null) held.push({ c, asked: at, ahead, scope: batch.scope })
       }
-      if (!saidWaiting && batch.cmds.some((c) => c && (ONE_SHOTS.has(c.op) || c.op === 'tune' || c.op === 'song'))) {
+      if (!saidWaiting && batch.cmds.some((c) => c && (ONE_SHOTS.has(c.op) || c.op === 'tune' || c.op === 'song' || (c.op === 'mic' && c.do !== 'close')))) {
         saidWaiting = true
         setTimeout(() => { if (!closed && !paused && !resting && context.state !== 'running' && player.state !== 'failed') tell('sound is waiting for a tap, a click or a key press. Browsers keep a page silent until the person using it has touched it.', 'info') }, 400)
       }
@@ -3372,7 +3393,7 @@ export function createSound(options = {}) {
     }
     /** What a setting is: { name, min, max, default, unit, kind, choices }, for a control that takes its range from it. */
     describe(name) {
-      if (key(name) === 'voice') return { name: 'voice', kind: 'choice', min: 0, max: Object.keys(VOICES).length, default: 'none', unit: '', choices: ['none', ...Object.keys(VOICES)] }
+      if (key(name) === 'voice') return describeVoice()
       const entry = setting(this._name(name))
       if (!entry) return null
       const d = describeSetting(entry, entry.part ? this._patch.get(entry.id) : forAll.get(entry.id))
@@ -3890,7 +3911,7 @@ export function createSound(options = {}) {
     describe(name) {
       if (key(name) === 'volume') return { name: 'volume', kind: 'float', min: 0, max: 2, default: 1, unit: 'gain' }
       const entry = setting(name)
-      return entry && !entry.part ? { name: entry.name, kind: KINDS[entry.kind], min: entry.min, max: entry.max, default: entry.def, unit: entry.unit, ...(entry.choices ? { choices: [...entry.choices] } : {}) } : null
+      return entry && !entry.part ? { name: entry.name, kind: KINDS[entry.kind], min: entry.min, max: entry.max, default: entry.def, unit: entry.unit, ...(entry.choices ? { choices: [...entry.choices] } : {}), ...labelsOf(entry, 1) } : null
     },
     get(name) { const entry = setting(name); return key(name) === 'volume' ? volumeNow : entry && !entry.part ? readSetting(entry, forAll.get(entry.id)) : undefined },
     set(name, value) { if (key(name) === 'volume') api.setVolume(value); else api.setEffects({ [name]: value }) },
@@ -4145,7 +4166,7 @@ export function configure(options = {}) {
 export function describe() {
   return {
     version, commands: COMMANDS, engine: ENGINE,
-    settings: PARAMS.map(([id, name, kind, min, max, def, unit, choices]) => ({ id, name, kind: KINDS[kind], min, max, default: def, unit, ...(choices ? { choices } : {}), scope: id < 200 ? 'synth' : 'all' })),
+    settings: PARAMS.map(([id, name, kind, min, max, def, unit, choices]) => ({ id, name, kind: KINDS[kind], min, max, default: def, unit, ...(choices ? { choices } : {}), ...(LABELS[name] ? { labels: LABELS[name] } : {}), scope: id < 200 ? 'synth' : 'all' })),
     names: Object.fromEntries(Object.entries(ALIASES).map(([alias, to]) => [alias, Array.isArray(to) ? { setting: to[0], scale: to[1] } : { setting: to, scale: 1 }])),
     choiceWords: CHOICE_WORDS, plain: PLAIN, synths: PRESETS, sounds: SOUNDS, chords: CHORDS, orders: ORDERS, macroWaves: MACRO_WAVES, lengths: LENGTHS, lengthLetters: LENGTH_LETTERS, midi: MIDI,
     // The voice changers (each a list of settings; putting one on first puts back what the last changed), and the microphone.

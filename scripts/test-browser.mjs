@@ -81,8 +81,10 @@ window.T = {
     return { peak, hz: best * player.context.sampleRate / a.fftSize }
   },
   // TAP: a second worklet after the player's that keeps every sample it is given, so timing can be read exactly.
+  // A block with nothing coming in (a browser gives none while what is before it is silent) is kept as silence,
+  // so a sample's place is always its time.
   async tap(player) {
-    const src = 'registerProcessor("tap", class extends AudioWorkletProcessor { constructor() { super(); this.first = -1; this.port.onmessage = () => this.port.postMessage(["end", this.first]) } process(i) { if (i[0] && i[0][0]) { if (this.first < 0) this.first = currentFrame; this.port.postMessage(i[0][0].slice()) } return true } })'
+    const src = 'registerProcessor("tap", class extends AudioWorkletProcessor { constructor() { super(); this.first = -1; this.port.onmessage = () => this.port.postMessage(["end", this.first]) } process(i) { if (this.first < 0) { if (!(i[0] && i[0][0])) return true; this.first = currentFrame } this.port.postMessage(i[0] && i[0][0] ? i[0][0].slice() : new Float32Array(128)); return true } })'
     const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }))
     await player.context.audioWorklet.addModule(url)
     const node = new AudioWorkletNode(player.context, 'tap', { numberOfInputs: 1, numberOfOutputs: 1 })
@@ -567,6 +569,25 @@ async function waitingForATap(name, browser) {
   const waiting = said.filter((t) => /sound is waiting for a tap/.test(t))
   say(got.state === 'waiting' && got.voices === 0, name, `before any tap the player is waiting, and silent (${how})`, got)
   say(waiting.length === 1, name, 'and the console says once that sound is waiting for a tap', said)
+  // A scene whose first line is the microphone waits like any other first sound, and says so.
+  await begin()
+  said.length = 0
+  const micOnly = await page.evaluate(async () => {
+    const synths = await import('/synths.js')
+    await ruled(synths)
+    synths.useMicrophone()
+    await T.wait(1500)
+    return { state: synths.soundPlayer().state }
+  })
+  say(micOnly.state === 'waiting' && said.filter((t) => /sound is waiting for a tap/.test(t)).length === 1, name, 'with nothing asked for but the microphone the player is waiting too, and the console says once that sound is waiting for a tap', { micOnly, said })
+  await begin()
+  await page.evaluate(async () => {
+    const synths = await import('/synths.js')
+    await ruled(synths)
+    synths.makeSynth(T.CLICK).play('A4', 30)
+    synths.playSound('explosion')
+    await T.wait(1500)
+  })
   await page.click('#b')
   got = await page.evaluate(async () => {
     const player = window.synths.soundPlayer()

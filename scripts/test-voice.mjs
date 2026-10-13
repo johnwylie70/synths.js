@@ -446,5 +446,39 @@ async function through(input, set, seconds = 1) {
 
 function same(a, b) { return JSON.stringify(a) === JSON.stringify(b) }
 
+// --- a voice chosen by a control: what describe gives is a choice, and a control sets a choice by its place in the list
+{
+  let mic, lead, d
+  const c = commands((s) => {
+    mic = s.useMicrophone()
+    lead = s.makeSynth('lead')
+    d = mic.describe('voice')
+    mic.set('voice', d.choices.indexOf('robot'))
+    lead.set('voice', d.choices.indexOf('cave'))
+    lead.set('wave', lead.describe('wave').choices.indexOf('saw'))
+  })
+  const was = [mic.voice, mic.get('voice'), lead.voice, lead.get('wave')]
+  mic.set('voice', 0)
+  const off = mic.voice
+  const refused = [thrown(() => mic.set('voice', 99)), thrown(() => { mic.voice = 'nobody' })]
+  say(d.kind === 'choice' && d.choices[0] === 'none' && same(was, ['robot', 'robot', 'cave', 'saw']) && off === 'none' && c.some((x) => x.op === 'set' && x.id === mic._id && x.voice === 'robot') && c.some((x) => x.op === 'set' && x.id === lead._id && x.voice === 'cave')
+    && refused.every((t) => /is not a voice/.test(t)),
+  'a voice set by its place among the choices, as a select or a rotary switch sets it, is that voice (on the microphone and on a synth), 0 is "none", a wave is chosen the same way, and a place that is not there is refused in plain words', [d, was, off, refused])
+
+  // The same on the player's side, where the program is elsewhere.
+  const { s, player, go } = await studio()
+  const synth = s.makeSynth('lead')
+  await go(0.01)
+  const target = player.target(synth._id)
+  const td = target.describe('voice')
+  const before = target.get('voice')
+  target.set('voice', td.choices.indexOf('telephone'))
+  await go(0.01)
+  const on = target.get('voice')
+  target.set({ voice: 'none', cutoff: 900 })
+  await go(0.01)
+  say(td.kind === 'choice' && same(td.choices, d.choices) && before === 'none' && on === 'telephone' && target.get('voice') === 'none' && target.get('cutoff') === 900, 'and a player\'s target describes voice, takes it by its place or its name beside other settings, and reads it back', [td, before, on, target.get('voice'), target.get('cutoff')])
+}
+
 console.log(`${count - failed} of ${count} passed`)
 process.exit(failed ? 1 : 0)

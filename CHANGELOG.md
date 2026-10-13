@@ -46,8 +46,12 @@ The first version.
 
 - `setSoundBuffer("large")` and `soundBuffer()` (`set_sound_buffer`, `sound_buffer`): how much sound is made at a time, set in a program's own code and read back as `{ frames, delay, thread, underruns, setting }`. `"small"`, `"medium"`, `"large"`, `"auto"` or a number of frames. On a page with no https address it is the buffer itself (larger for fewer clicks, smaller for a keyboard that feels late); on the audio thread, where the buffer cannot change, it sets how far ahead everything is scheduled, and says so once. It travels as a `buffer` command, so Python and a scene in a frame can send it.
 
+- `describe(name)` gives `labels` for values that mean something else, for a dial to show: `reverbDecay` 0 is `"auto"`, the microphone's `gate` at -100 is `"off"`. The table of settings in `synths-names.json` carries them.
+
 ### Fixed
 
+- `voice` is described as a choice, and a control that sets a choice by its place in the list (a select, a rotary switch) made it throw. A voice may now be set by its place or its name, on the microphone, a synth and a player's target; a target describes and reads `voice` too.
+- A scene whose first line is the microphone (`useMicrophone()` with no note played) now says once that sound is waiting for a tap, as any other first sound does.
 - On a page with no audio worklet (one not served over https or from localhost, such as a development build opened on an iPad) the sound stuttered and clicked whenever the page was busy for more than about 20 ms. The fallback now makes 2048 frames at a time where it made 1024, which rides over 30 ms; a key is heard about 95 ms after it is pressed where it was 80. `fallbackBuffer` sets it (`4096` for a busier page, heard about 190 ms late), `"auto"` doubles it once if the page keeps being too busy, and `player.fallback` is `{ buffer, underruns, reason }`. The table of what was measured is in [docs/commands.md](docs/commands.md).
 - On the same fallback, a callback that came late (but in time) moved the notes inside its buffer by as much as it was late. The engine's clock now goes by the buffers' own grid, and scheduled notes are exact to the sample while the page is busy.
 - What was asked for while the engine was still loading (a repeating tune, `loopNotes`, a song) could stay silent for as long again as the page had been open: always on the fallback with no audio worklet, and now and then in WebKit. It now starts as soon as the engine is there.

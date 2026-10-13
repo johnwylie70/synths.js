@@ -672,7 +672,8 @@ second and a half). Before anything has arrived, and for a synth that has no par
 
 `player.target(id)` is a synth that exists by its id, as an object for controls on the player's side to be tied
 to when the program that made it is elsewhere: `set(name, value)`, `get(name)`, `describe(name)` (`{ name, kind,
-min, max, default, unit, choices }`), `noteOn(note, velocity)`, `noteOff(note)`, `samples()`, `level()`,
+min, max, default, unit, choices, labels }`, where `labels` is there for a setting some of whose values mean
+something else, as `{ 0: "auto" }` for `reverbDecay`; `voice` is described as a choice and set by name or place), `noteOn(note, velocity)`, `noteOff(note)`, `samples()`, `level()`,
 `notes()`. It writes ordinary commands for that id, and answers `get` and `describe` from the commands the player
 has carried out, so it is told nothing. The sender is not told what a dial changed.
 
