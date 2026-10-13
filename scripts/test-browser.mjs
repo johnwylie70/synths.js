@@ -45,6 +45,10 @@ const say = (ok, engine, what, got) => {
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${engine}: ${what}${ok ? '' : `: ${JSON.stringify(got)}`}`)
 }
 
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+// ONLY=midi runs the MIDI cases alone.
+const ONLY = process.env.ONLY
+
 // Helpers every test page is given, as window.T.
 const HELPERS = `
 window.T = {
@@ -600,21 +604,144 @@ async function notSecure(name, browser) {
   await context.close()
 }
 
+/**
+ * MIDI in a real browser. There is no MIDI device here, so three things are looked at: the file is not fetched
+ * until MIDI is used; the browser's own Web MIDI is asked and answers (Chromium, with the permission given), or is
+ * said plainly not to exist (WebKit); and with a pretend transport in place of the devices, a key plays the synth
+ * through the real worklet and what is sent carries exact times.
+ */
+async function midi(name, browser) {
+  const context = await browser.newContext(name === 'chromium' ? { permissions: ['midi', 'midi-sysex'] } : {})
+  const page = await context.newPage()
+  if (name === 'chromium') await letWorkletsRun(page)
+  const said = []
+  page.on('console', (m) => said.push(m.text()))
+  page.on('pageerror', (e) => said.push('ERROR ' + e.message))
+  const requests = []
+  page.on('request', (r) => requests.push(r.url()))
+
+  await fresh(page)
+  let got = await page.evaluate(async () => {
+    const synths = await import('/synths.js')
+    synths.playNote('A4', 0.3)
+    synths.stopMidi()
+    await T.on(() => synths.soundPlayer())
+    const before = performance.getEntriesByType('resource').map((r) => r.name).filter((n) => n.includes('synths-midi')).length
+    const has = typeof navigator.requestMIDIAccess === 'function'
+    // The first MIDI function: the file is fetched and the browser is asked.
+    const lists = []
+    const now = synths.midiDevices()
+    synths.onMidiDevices((d) => lists.push(d))
+    const lead = synths.makeSynth(T.CLICK).playFromMidi()
+    synths.onMidiNote(() => {})
+    // NOTHING IS SENT where the browser has Web MIDI: the machine running this may have real devices plugged in
+    // (the one this was written on has three), and a test must not play them. Where there is none, everything is tried.
+    if (!has) {
+      lead.sendToMidi()
+      synths.sendMidiNote('C4', 0.8, { length: 0.1 })
+      synths.sendMidiClock()
+    }
+    for (let i = 0; i < 300 && !lists.length; i++) await T.wait(10)
+    lead.play('A4', 0.2)
+    if (!has) synths.sendMidiControl(74, 0.5)
+    const heard = await T.listen(synths.soundPlayer(), 300)
+    if (!has) synths.sendMidiClock(false)
+    synths.stopMidi()
+    await T.wait(100)
+    return { before, has, now, lists, heard: heard.peak, after: synths.midiDevices() }
+  })
+  const fetched = requests.filter((r) => r.endsWith('/synths-midi.js')).length
+  say(got.before === 0 && fetched === 1, name, 'synths-midi.js is not fetched until a MIDI function is used, and then once', { before: got.before, fetched })
+  const about = said.filter((t) => /MIDI/.test(t))
+  if (got.has) {
+    say(got.lists.length === 1 && got.lists[0].available === true && Array.isArray(got.lists[0].inputs) && got.after.available === true && about.length === 0, name,
+      `the browser's own Web MIDI is asked when MIDI is first used and answers: ${got.lists[0]?.inputs.length} inputs, ${got.lists[0]?.outputs.length} outputs, and nothing is said`, { got, about })
+  } else {
+    say(got.lists.length === 1 && got.lists[0].available === false && got.lists[0].inputs.length === 0 && about.length === 1 && /MIDI is not available in this browser\. Use Chrome, Edge or Firefox on a computer/.test(about[0]), name,
+      'this browser has no Web MIDI: one plain message says so, midiDevices() is empty and nothing throws', { got, about })
+  }
+  say(same(got.now, { inputs: [], outputs: [], available: null }) && got.heard > 0.1, name, 'midiDevices() answers at once (nothing known yet), and the sound plays whatever MIDI does', got)
+
+  // --- a pretend transport in place of the devices, and the real player
+  await fresh(page)
+  got = await page.evaluate(async () => {
+    const { createSound } = await import('/synths.js')
+    const sent = []
+    let play = null
+    const pretend = { inputs: () => ['Keys'], outputs: () => ['Box'], send: (bytes, time, output) => sent.push([[...bytes], time, performance.now()]), receive: (listener) => { play = listener } }
+    const s = createSound({ midi: pretend, share: false })
+    const lead = s.makeSynth(T.CLICK).playFromMidi()
+    const messages = []
+    s.onMidi((m) => messages.push(m))
+    await T.on(() => s.player)
+    for (let i = 0; i < 300 && !play; i++) await T.wait(10)
+    const silent = await T.listen(s.player, 100)
+    // A key goes down on the pretend keyboard.
+    const pressed = s.soundTime()
+    play([0x90, 69, 127], performance.now(), 'Keys')
+    const heard = await T.listen(s.player, 400)
+    play([0x80, 69, 0], performance.now(), 'Keys')
+    await T.wait(200)
+    const after = await T.listen(s.player, 100)
+    // A short sequence out: four notes a tenth of a second apart, asked for all at once.
+    const asked = performance.now()
+    const from = s.soundTime()
+    for (let i = 0; i < 4; i++) s.sendMidiNote(60 + i, 0.8, { length: 0.05, at: from + i * 0.1 })
+    await T.wait(700)
+    const ons = sent.filter((m) => m[0][0] === 0x90)
+    const offs = sent.filter((m) => m[0][0] === 0x80)
+    s.close()
+    const note = messages.find((m) => m.type === 'noteOn')
+    return { silent: silent.peak, heard, after: after.peak, note, late: note && note.time - pressed, types: messages.map((m) => m.type),
+      gaps: ons.slice(1).map((m, i) => m[1] - ons[i][1]), lengths: ons.map((m, i) => offs[i][1] - m[1]), first: ons[0] && ons[0][1] - asked, ahead: ons.map((m) => m[1] - m[2]), notes: ons.map((m) => m[0][1]) }
+  })
+  say(got.silent === 0 && got.heard.peak > 0.2 && Math.abs(got.heard.hz - 440) < 8 && got.after === 0, name, `a key on a MIDI keyboard plays the synth through the worklet (${Math.round(got.heard?.hz)} Hz) and letting go stops it`, got)
+  say(got.note?.type === 'noteOn' && got.note.note === 69 && got.note.device === 'Keys' && Math.abs(got.late) < 0.02 && same(got.types, ['devices', 'noteOn', 'noteOff']), name, 'the program is told too, with the time of the key on its own sound clock', got)
+  say(same(got.notes, [60, 61, 62, 63]) && got.gaps.every((g) => Math.abs(g - 100) < 0.001) && got.lengths.every((l) => Math.abs(l - 50) < 0.001) && got.first > 30 && got.first < 60, name,
+    `notes sent out carry exact times: 100 ms apart to a thousandth of a millisecond, however the page's timers run, beginning ${got.first?.toFixed(1)} ms after they were asked for`, got)
+  say(got.ahead.every((a) => a > -5 && a < 200), name, 'each is handed to the device a moment before it is due, so that stopSound can still take the rest back', got.ahead)
+
+  const errors = said.filter((t) => /ERROR|could not/.test(t))
+  say(errors.length === 0, name, 'nothing went wrong in the console along the way', errors)
+  await context.close()
+
+  if (name === 'chromium') {
+    // With the permission not given, what does Chromium do? (A headless browser cannot show the question.)
+    const denied = await browser.newContext()
+    const second = await denied.newPage()
+    const told = []
+    second.on('console', (m) => told.push(m.text()))
+    await fresh(second)
+    const answer = await second.evaluate(async () => {
+      const synths = await import('/synths.js')
+      let devices = null
+      synths.onMidiDevices((d) => { devices = d })
+      for (let i = 0; i < 300 && !devices; i++) await T.wait(10)
+      return devices
+    })
+    const about = told.filter((t) => /MIDI/.test(t))
+    if (answer) say(answer.available || (about.length === 1 && /MIDI was not allowed for this page/.test(about[0])), name, `with no permission given beforehand Web MIDI is ${answer.available ? 'allowed anyway by this browser' : 'refused, and one plain message says how to allow it'}`, { answer, about })
+    else console.log(`     ${name}: with no permission given beforehand the browser's question is never answered here, so nothing is said and nothing fails`)
+    await denied.close()
+  }
+}
+
 const ALLOWED = { chromium: { args: ['--autoplay-policy=no-user-gesture-required'] }, webkit: {} }
 for (const name of ['chromium', 'webkit']) {
   let browser
   try { browser = await playwright[name].launch(ALLOWED[name]) } catch { console.log(`${name}: not installed, skipped`); continue }
   try {
-    await withSound(name, browser)
-    await examples(name, browser)
+    if (!ONLY) await withSound(name, browser)
+    if (!ONLY) await examples(name, browser)
+    if (!ONLY || ONLY === 'midi') await midi(name, browser)
   } catch (e) { say(false, name, 'the tests ran to the end', String(e?.stack || e)) }
   await browser.close()
 
   browser = await playwright[name].launch(ALLOWED[name])
-  try { await waitingForATap(name, browser) } catch (e) { say(false, name, 'the tap tests ran to the end', String(e?.stack || e)) }
+  try { if (!ONLY) await waitingForATap(name, browser) } catch (e) { say(false, name, 'the tap tests ran to the end', String(e?.stack || e)) }
   await browser.close()
 
-  if (name === 'chromium') {
+  if (name === 'chromium' && !ONLY) {
     // A name that is not localhost, pointed at this machine: the same page, not a secure context.
     browser = await playwright[name].launch({ args: [...ALLOWED[name].args, `--host-resolver-rules=MAP plain.test 127.0.0.1`] })
     try { await notSecure(name, browser) } catch (e) { say(false, name, 'the not-secure tests ran to the end', String(e?.stack || e)) }

@@ -240,9 +240,18 @@ export function makeMidiDesk(h) {
     return s
   }
   const names = (list) => { try { return Array.from(list || [], (d) => String(d && typeof d === 'object' ? d.name : d)) } catch (e) { return [] } }
+  // The devices there are, said to every sender when they are first known and when one comes or goes (a browser
+  // also says "changed" when a device is only opened: that is not news).
+  let listed = ''
+  const list = () => ({ type: 'devices', inputs: names(transport?.inputs?.()), outputs: names(transport?.outputs?.()), available: state === 'open' })
   function devices() {
-    const event = { type: 'devices', inputs: names(transport?.inputs?.()), outputs: names(transport?.outputs?.()), available: state === 'open' }
-    for (const s of scopes.values()) { s.told = true; h.emit(s.name, [event]) }
+    const event = list()
+    const news = listed !== (listed = JSON.stringify(event))
+    for (const s of scopes.values()) {
+      if (!news && s.told) continue
+      s.told = true
+      h.emit(s.name, [event])
+    }
   }
 
   // THE PERMISSION is asked for here, the first time a sender uses MIDI, and never before.
@@ -276,7 +285,8 @@ export function makeMidiDesk(h) {
 
   // --- sending: a queue, handed to the transport a moment before each message is due, with its exact time
 
-  const enqueue = (s, bytes, t, output, from) => queue.push({ s, bytes, t, output, from })
+  // A message goes to the output it names, or to the one chosen when it was asked for, or to the first there is.
+  const enqueue = (s, bytes, t, output, from) => queue.push({ s, bytes, t, output: output ?? out ?? undefined, from })
   function deliver(q, at) {
     const [status, note, velocity] = q.bytes
     const kind = status & 0xf0
@@ -287,7 +297,7 @@ export function makeMidiDesk(h) {
       else q.s.sounding.delete(k)
     }
     q.s.last = Math.max(q.s.last, q.t)
-    try { transport.send(q.bytes, Math.max(q.t, at), q.output ?? out ?? undefined) } catch (e) {
+    try { transport.send(q.bytes, Math.max(q.t, at), q.output) } catch (e) {
       h.tell(q.bytes[0] === 0xf0 ? 'a system exclusive MIDI message could not be sent: the browser allows those only when asked, with configure({ midiSysex: true }).' : `a MIDI message could not be sent (${(e && e.message) || e}).`)
     }
   }
@@ -300,7 +310,7 @@ export function makeMidiDesk(h) {
     for (const [k, q] of [...s.sounding]) {
       if (!whose(q)) continue
       s.sounding.delete(k)
-      try { transport.send([0x80 | (q.bytes[0] & 15), q.bytes[1], 0], at, q.output ?? out ?? undefined) } catch (e) { /* the device has gone */ }
+      try { transport.send([0x80 | (q.bytes[0] & 15), q.bytes[1], 0], at, q.output) } catch (e) { /* the device has gone */ }
     }
   }
   // The tunes of synths that go out as MIDI, and the clock, are written into the queue a little way ahead.
@@ -557,7 +567,7 @@ export function makeMidiDesk(h) {
     if (used) {
       const s = scopes.get(name)
       if (state === 'closed') open()
-      else if (state !== 'opening' && s && !s.told) { s.told = true; h.emit(name, [{ type: 'devices', inputs: names(transport?.inputs?.()), outputs: names(transport?.outputs?.()), available: state === 'open' }]) }
+      else if (state !== 'opening' && s && !s.told) { s.told = true; h.emit(name, [list()]) }
     }
     if (scopes.size) pump()
   }
@@ -674,7 +684,7 @@ export function makeMidiApi(h) {
     if (typeof min !== 'number' || typeof max !== 'number') throw new Error(`${said}: min and max need numbers, not ${h.shown(o.min)} and ${h.shown(o.max)}`)
     if (!bound.has(synth._id)) bound.set(synth._id, new Map())
     bound.get(synth._id).set(setting, { synth, changed: o.onChange || o.on_change || changed })
-    const c = { id: synth._id, setting, min, max, kind: d.kind, curve: d.unit === 'Hz' && min > 0 && max / min >= 100 ? 'exp' : 'lin' }
+    const c = { id: synth._id, setting, min, max, kind: d.kind, curve: /^hz$/i.test(d.unit || '') && min > 0 && max / min >= 100 ? 'exp' : 'lin' }
     if (o.channel !== undefined) c.channel = channelOf(o, said) + 1
     return c
   }
