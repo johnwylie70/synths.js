@@ -25,6 +25,12 @@
  *   setTempo(120), beats(2)                beats(2) is how many seconds two beats last
  *   lead.playFromMidi()                    a MIDI keyboard plays a synth; onMidiNote, onMidiControl, sendMidiNote("C4"),
  *   lead.learn("cutoff")                   lead.sendToMidi(), midiDevices(): MIDI, which is in synths-midi.js
+ *   const mic = useMicrophone()            the microphone (the browser asks first); nothing is heard until mic.listen()
+ *   mic.voice = "robot"                    a voice changer: robot, chipmunk, monster, cave, telephone, alien, whisper, "none"
+ *   mic.pitch = 7, mic.echo = 0.4          and the settings a synth has; a synth has them too: lead.pitchShift, ringMod, comb
+ *   const take = recordSound(3)            three seconds of the microphone as a sample: take.play(), take.play("E4"),
+ *   startRecording(), stopRecording()      take.onDone(() => ...), take.voice = "monster"; recordOutput(10) is what was played
+ *   saveSound(take, "hello.wav")           a recording or a sample as a WAV file
  *
  * When something starts: every call that makes a sound takes { after: seconds }, { at: a time read from
  * soundTime() } or { beat: a beat number }. Every name has its Python spelling too (play_sound, make_synth).
@@ -64,6 +70,7 @@ const COMMANDS = 1
 
 // The engine's parameter table, written here by scripts/sync-engine.mjs from the engine itself. Do not edit by hand.
 // Each row: id, name, kind (f float, i whole number, b on or off, c a choice), least, most, default, unit, the choices.
+// VOICES are the engine's voice changers: for each, what it is and the settings it gives the part it is put on.
 /* PARAMS:BEGIN */
 const ENGINE = {"abi":1,"version":"0.0.0","parts":64,"voices":64,"samples":1024,"events":["note_on","note_off","all_notes_off","param","pitch_bend","voice_pitch","voice_freq","voice_volume","voice_pan","voice_position","voice_kill","macro_tick","arp","arp_more","song","record"]}
 const PARAMS = [
@@ -186,6 +193,7 @@ const PARAMS = [
   [220,"input.gate","f",-100,0,-100,"db"],
   [221,"input.gate_release","f",0.005,2,0.15,"seconds"],
 ]
+const VOICES = {"robot":{"help":"A machine: the voice multiplied by a 50 Hz wave, ringing in a metal pipe.","values":{"fx.ring":1,"fx.ring_freq":50,"fx.comb":0.45,"fx.comb_freq":110,"fx.comb_feedback":0.8,"fx.bits":10}},"chipmunk":{"help":"Small and squeaky: everything seven semitones higher.","values":{"fx.pitch":7}},"monster":{"help":"Huge and deep: seven semitones lower, with a growl and a little room.","values":{"fx.pitch":-7,"fx.drive":0.25,"send.reverb":0.25,"reverb.size":0.7,"reverb.damping":0.6}},"cave":{"help":"Far inside a cave: long echoes and a very big room.","values":{"send.delay":0.5,"send.reverb":0.7,"delay.time":0.38,"delay.feedback":0.55,"delay.tone":2500,"reverb.size":0.92,"reverb.damping":0.3}},"telephone":{"help":"Down an old phone line: only the middle of the voice, coarse and a little crushed.","values":{"filter.type":3,"filter.slope":1,"filter.cutoff":1200,"filter.resonance":0.2,"fx.drive":0.2,"fx.bits":8,"fx.downsample":6}},"alien":{"help":"Not from here: higher, multiplied by a 180 Hz wave, with a slow metallic sweep.","values":{"fx.pitch":4,"fx.ring":0.8,"fx.ring_freq":180,"fx.comb":0.4,"fx.comb_freq":600,"fx.comb_feedback":0.75,"fx.comb_rate":0.4,"fx.comb_depth":0.5,"send.chorus":0.4}},"whisper":{"help":"Hoarse and breathy: the voice's pitch blurred into noise, with its low end taken off.","values":{"filter.type":2,"filter.cutoff":500,"filter.resonance":0,"fx.ring":1,"fx.ring_wave":1,"fx.ring_freq":350}}}
 /* PARAMS:END */
 
 /**
@@ -205,11 +213,28 @@ const ALIASES = {
   vibrato: 'lfo1.pitch', vibratoRate: 'lfo1.rate', vibratoDelay: 'lfo1.delay', tremolo: 'lfo1.amp',
   wobble: 'lfo2.cutoff', wobbleRate: 'lfo2.rate', autopan: 'lfo2.pan',
   distortion: 'fx.drive', drive: 'fx.drive', crush: 'fx.bits', bits: 'fx.bits', downsample: 'fx.downsample',
+  // The voice effects, which every synth has: a pitch shifter, a ring modulator and a comb (which sweeps as a flanger).
+  pitchShift: 'fx.pitch', ringMod: 'fx.ring', ringSpeed: 'fx.ring_freq', ringWave: 'fx.ring_wave',
+  comb: 'fx.comb', combTone: 'fx.comb_freq', combFeedback: 'fx.comb_feedback', flanger: 'fx.comb_depth', flangerRate: 'fx.comb_rate',
+  reverse: 'osc1.reverse',
   echo: 'send.delay', delay: 'send.delay', reverb: 'send.reverb', chorus: 'send.chorus',
   masterVolume: 'master.volume', limiter: 'master.limiter',
   echoTime: 'delay.time', echoFeedback: 'delay.feedback', echoTone: 'delay.tone', echoBounce: 'delay.pingpong',
   reverbSize: 'reverb.size', reverbDamping: 'reverb.damping', chorusRate: 'chorus.rate', chorusDepth: 'chorus.depth',
+  micGain: 'input.gain', micGate: 'input.gate', micGateRelease: 'input.gate_release',
 }
+/**
+ * THE MICROPHONE'S OWN NAMES. A microphone has no notes to transpose and no second oscillator, so on it `pitch` is
+ * the pitch shifter and `ring` the ring modulator, and its gain and gate (which are the engine's) are plain words.
+ */
+const MIC_NAMES = { pitch: 'pitchShift', ring: 'ringMod', gain: 'micGain', gate: 'micGate', gaterelease: 'micGateRelease' }
+/** The gate a microphone starts with, in dB: quieter than this is taken as silence, so the room's hiss is not echoed and crushed. */
+const MIC_GATE = -50
+/** How long a recording may be, in seconds, and how long one with no length runs before it stops by itself. */
+const LONGEST_RECORDING = 120
+const USUAL_RECORDING = 30
+/** Where the plain microphone can be read from for a scope and a meter: a source of its own beside the engine's parts. */
+const MIC_TAP = 0xfffe
 /** Other words for a choice. */
 const CHOICE_WORDS = { square: 'pulse', sawtooth: 'saw', tri: 'triangle', sin: 'sine', low: 'lowpass', high: 'highpass', band: 'bandpass', none: 'off', hiss: 'white', chip: 'lfsr', buzz: 'lfsr_short' }
 
@@ -532,6 +557,61 @@ function tell(what, how = 'warn') {
   if (typeof console !== 'undefined') console[how]('synths.js: ' + what)
 }
 
+// --- voices ----------------------------------------------------------------------------------
+
+/** The voice changers as engine ids: { rows: name -> Map of id -> value, all: every id any of them sets }. */
+let voiceTable = null
+function voices() {
+  if (voiceTable) return voiceTable
+  const rows = new Map(), all = new Set()
+  for (const [name, voice] of Object.entries(VOICES)) {
+    const row = patchOf(voice.values, '', false)
+    rows.set(name, row)
+    for (const pid of row.keys()) all.add(pid)
+  }
+  return (voiceTable = { rows, all })
+}
+/** A setting's name as the microphone says it -> the name every synth knows it by. */
+const micName = (name) => (typeof name === 'string' && Object.prototype.hasOwnProperty.call(MIC_NAMES, key(name)) ? MIC_NAMES[key(name)] : name)
+const NO_VOICE = new Set(['none', 'plain', 'off', 'normal', ''])
+/** A voice's name as written -> its name here, "none" for the plain voice, or null for a name that is not a voice. */
+function voiceName(name) {
+  if (name === null || name === undefined || name === false) return 'none'
+  const k = key(name)
+  return NO_VOICE.has(k) ? 'none' : Object.prototype.hasOwnProperty.call(VOICES, k) ? k : null
+}
+/**
+ * PUT A VOICE ON. `worn` is what is remembered between voices ({ voice, under }) and `patch` the settings, by engine
+ * id. The first voice put on keeps what the settings it may touch were (`under`); every voice after starts by
+ * putting those back, so a voice never leaves a trace in the next, and "none" is how things were before any.
+ * A setting of the whole engine (the echo's time, the reverb's size) is touched only if this voice or the last
+ * names it. It gives the settings to send, as a Map of id -> value, and changes `patch` to match.
+ */
+function wearVoice(worn, patch, name, defaults) {
+  const { rows, all } = voices()
+  const row = rows.get(name) || new Map()
+  const last = rows.get(worn.voice) || new Map()
+  if (!worn.under) {
+    worn.under = new Map()
+    for (const pid of all) if (patch.has(pid)) worn.under.set(pid, patch.get(pid))
+  }
+  const out = new Map()
+  for (const pid of all) {
+    if (pid >= 200 && !row.has(pid) && !last.has(pid)) continue
+    out.set(pid, row.has(pid) ? row.get(pid) : worn.under.has(pid) ? worn.under.get(pid) : defaults(pid))
+  }
+  for (const [pid, value] of out) patch.set(pid, value)
+  worn.voice = name
+  if (name === 'none') worn.under = null
+  return out
+}
+let defaultOf = null
+/** The engine's default for a setting, by id. */
+function engineDefault(pid) {
+  if (!defaultOf) defaultOf = new Map(PARAMS.map((p) => [p[0], p[5]]))
+  return defaultOf.get(pid)
+}
+
 // --- WAV files -------------------------------------------------------------------------------
 
 /** A WAV file's bytes -> { pcm: Float32Array (left, right, left, …), channels, rate }, or null if it is not one this reads. */
@@ -588,6 +668,19 @@ export function toWav(left, right, sampleRate) {
   return bytes
 }
 
+/** Samples as the engine keeps them (one channel, or left, right, left, …) -> the bytes of a 16-bit WAV file with as many channels. */
+function pcmWav(pcm, channels, sampleRate) {
+  const bytes = new Uint8Array(44 + pcm.length * 2)
+  const view = new DataView(bytes.buffer)
+  const text = (at, s) => { for (let i = 0; i < s.length; i++) bytes[at + i] = s.charCodeAt(i) }
+  text(0, 'RIFF'); view.setUint32(4, 36 + pcm.length * 2, true); text(8, 'WAVEfmt ')
+  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, channels, true)
+  view.setUint32(24, sampleRate, true); view.setUint32(28, sampleRate * channels * 2, true); view.setUint16(32, channels * 2, true); view.setUint16(34, 16, true)
+  text(36, 'data'); view.setUint32(40, pcm.length * 2, true)
+  for (let i = 0; i < pcm.length; i++) view.setInt16(44 + i * 2, Math.round(clamp(pcm[i], -1, 1) * 32767), true)
+  return bytes
+}
+
 // --- the core: the engine and its queue, on the audio thread ---------------------------------
 
 /**
@@ -630,7 +723,7 @@ function makeCore(wasm, sampleRate, post) {
   const eventsAt = x.synths_event_buffer(engine)
   const eventRoom = x.synths_event_capacity()
   const outRoom = x.synths_output_capacity()
-  const NOTE_ON = 1, NOTE_OFF = 2, ALL_OFF = 3, SONG = 15, EVERY = 0xffff
+  const NOTE_ON = 1, NOTE_OFF = 2, ALL_OFF = 3, SONG = 15, RECORD = 16, EVERY = 0xffff
 
   /** Events not yet handed to the engine: [frame, type, part, a, x, y, z, b], soonest first. */
   const queue = []
@@ -653,6 +746,7 @@ function makeCore(wasm, sampleRate, post) {
     taps,
     songPosition,
     packSong,
+    pushInput,
     close() { x.synths_destroy(engine) },
   }
 
@@ -705,12 +799,144 @@ function makeCore(wasm, sampleRate, post) {
         if (songLoaded) add(core.time, SONG, 0, 0, 0, 0)
       } else if (kind === 'songLoad') loadSong(op)
       else if (kind === 'songUnload') { if (x.synths_song_unload) x.synths_song_unload(engine); songLoaded = false }
+      else if (kind === 'record') record(op)
+      else if (kind === 'recordStop') recordStop(op)
+      else if (kind === 'sampleRead') readSample(op)
+      else if (kind === 'sampleConfig') {
+        // A loop or a base note for a sample that is already there (a recording, when it is done).
+        const [, slot, base, loopMode, loopStart, loopEnd] = op
+        const had = kept.get(slot) || { channels: 1, base: 60 }
+        if (base != null) had.base = base
+        kept.set(slot, had)
+        x.synths_sample_config(engine, slot, had.base, loopMode, loopStart, loopEnd || x.synths_sample_frames(engine, slot))
+      }
     }
   }
+
+  /** What is known of the sample in each slot, for reading it back out: slot -> { channels, base }. */
+  const kept = new Map()
+
+  /**
+   * RECORDING. The engine records into a sample slot between a start event and a stop event, one recording at a
+   * time. Here each recording asked for is kept until its time comes: [, slot, at, how long or null, what (0 the
+   * input, 1 a part, 2 everything), part, room in seconds, channels]. The slot's memory is made now, outside any
+   * render. A recording that begins while another is running ends that one, which keeps what it had. When one
+   * ends, by its length, by being stopped, by the next beginning or by its room running out, the page is told how
+   * many frames it has: { type: 'recorded', slot, frames, full }.
+   */
+  const recs = []
+  let recording = null
+  const ended = []
+  let recAt = 0
+  function record([, slot, at, len, source, part, room, channels]) {
+    const none = () => post({ type: 'recorded', slot, frames: 0, full: false, rate: sampleRate })
+    if (!x.synths_record_buffer) { post({ type: 'unsupported', what: 'record' }); return none() }
+    if (!recAt) recAt = x.synths_alloc(16)
+    if (x.synths_record_buffer(engine, slot, Math.max(1, Math.ceil(room * sampleRate)), channels) !== 0) { post({ type: 'problem', what: 'record-memory' }); return none() }
+    kept.set(slot, { channels, base: 60 })
+    const start = frameOf(at)
+    recs.push({ slot, start, end: len == null ? null : start + Math.max(1, Math.round(len * sampleRate)), source, part })
+    recs.sort((a, b) => a.start - b.start)
+  }
+  function recordStop([, at, slot]) {
+    const frame = frameOf(at)
+    if (recording && (slot < 0 || recording.slot === slot)) recording.end = recording.end == null ? frame : Math.min(recording.end, frame)
+    for (let i = recs.length - 1; i >= 0; i--) {
+      if (slot >= 0 && recs[i].slot !== slot) continue
+      // One that was to begin later never begins; one about to begin is as long as the time until the stop.
+      if (recs[i].start >= frame) { post({ type: 'recorded', slot: recs[i].slot, frames: 0, full: false, rate: sampleRate }); recs.splice(i, 1) } else recs[i].end = recs[i].end == null ? frame : Math.min(recs[i].end, frame)
+    }
+  }
+  // The start and stop events that fall before `end`, in the order they happen.
+  function recordEvents(end) {
+    for (;;) {
+      const next = recs[0]
+      const stopAt = recording && recording.end != null ? recording.end : Infinity
+      if (next && next.start < end && next.start <= stopAt) {
+        if (recording) ended.push(recording)
+        recording = recs.shift()
+        add(Math.max(core.time, recording.start), RECORD, recording.part, 1, recording.slot, recording.source)
+      } else if (recording && stopAt < end) {
+        add(Math.max(core.time, stopAt), RECORD, 0, 0, 0, 0)
+        ended.push(recording)
+        recording = null
+      } else return
+    }
+  }
+  // After a render: say which recordings are over. One still running that the engine has stopped ran out of room.
+  function recordEnds() {
+    for (const r of ended.splice(0)) post({ type: 'recorded', slot: r.slot, frames: x.synths_sample_frames(engine, r.slot), full: false, rate: sampleRate })
+    if (!recording || !recAt) return
+    x.synths_record_read(engine, recAt)
+    const state = new Uint32Array(memory.buffer, recAt, 4)
+    if (state[0] === 1 && state[1] === recording.slot) return
+    post({ type: 'recorded', slot: recording.slot, frames: x.synths_sample_frames(engine, recording.slot), full: true, rate: sampleRate })
+    recording = null
+  }
+  // A sample read back out of the engine, to be saved: [, slot, token].
+  function readSample([, slot, token]) {
+    const had = kept.get(slot) || { channels: 1 }
+    const frames = x.synths_sample_read ? x.synths_sample_frames(engine, slot) : 0
+    const at = frames ? x.synths_alloc(frames * had.channels * 4) : 0
+    const pcm = at ? new Float32Array(memory.buffer, at, x.synths_sample_read(engine, slot, 0, at, frames) * had.channels).slice() : new Float32Array(0)
+    if (at) x.synths_free(at)
+    post({ type: 'sample', token, pcm, channels: had.channels, rate: sampleRate })
+  }
+
+  /**
+   * THE LIVE INPUT: a microphone. render() is handed each block's input by a host that has it as the sound card
+   * does (the worklet's own input). A host that has it as frames arriving from elsewhere pushes them here, and they
+   * wait in a ring to be played out a block at a time. Playing begins when a lump and a little more is in hand, and
+   * begins again like that after the ring runs dry, so frames arriving in uneven lumps are not heard as gaps. The latest input is also kept here as it
+   * came, for a scope and a meter to show while the microphone is not being listened to.
+   */
+  const RING = 65536
+  let ring = null, ringAt = 0, ringHas = 0, ringDry = true, ringOn = false
+  function pushInput(frames) {
+    if (!ring) ring = new Float32Array(RING)
+    ringOn = true
+    let n = frames.length, from = 0
+    if (n > RING) { from = n - RING; n = RING }
+    // No room: the oldest frames make way.
+    if (ringHas + n > RING) { const drop = ringHas + n - RING; ringAt = (ringAt + drop) % RING; ringHas -= drop }
+    let to = (ringAt + ringHas) % RING
+    for (let i = 0; i < n; i++) { ring[to] = frames[from + i]; if (++to === RING) to = 0 }
+    ringHas += n
+    // Enough in hand to begin (again) is one lump and a little more, so the next lump can be late.
+    const enough = n + Math.min(n, 2048)
+    // Far more than that waiting is a host that sends faster than the sound card plays: the oldest is let go.
+    if (ringHas > Math.max(sampleRate / 4, 3 * n)) { const drop = ringHas - enough; ringAt = (ringAt + drop) % RING; ringHas -= drop }
+    if (ringDry && ringHas >= enough) ringDry = false
+  }
+  function pullInput(into, n) {
+    if (ringDry || ringHas < n) {
+      ringDry = true
+      into.fill(0, 0, n)
+      return
+    }
+    for (let i = 0; i < n; i++) { into[i] = ring[ringAt]; if (++ringAt === RING) ringAt = 0 }
+    ringHas -= n
+  }
+  const heardInput = new Float32Array(1024)
+  let heardAt = 0, heardPeak = 0
+  function hearInput(block, n) {
+    let top = 0
+    for (let i = 0; i < n; i++) {
+      const v = block[i]
+      heardInput[heardAt] = v
+      heardAt = (heardAt + 1) & 1023
+      if (v > top) top = v
+      else if (-v > top) top = -v
+    }
+    // As the engine's meters do: up at once, and back to 37% in half a second.
+    heardPeak = Math.max(top, heardPeak * Math.exp(-n / (0.5 * sampleRate)))
+  }
+  let input = null
 
   function loadSample([, slot, pcm, channels, rate, base, loopMode, loopStart, loopEnd]) {
     const frames = Math.floor(pcm.length / channels)
     if (!frames) return
+    kept.set(slot, { channels, base })
     const at = x.synths_alloc(pcm.length * 4)
     if (!at) return post({ type: 'problem', what: 'sample-memory' })
     new Float32Array(memory.buffer, at, pcm.length).set(pcm)
@@ -804,6 +1030,13 @@ function makeCore(wasm, sampleRate, post) {
     if (!tapAt) return []
     const out = []
     for (const source of sources) {
+      if (source === 0xfffe) {
+        // The microphone as it came in, which is kept here and not in the engine.
+        const samples = new Float32Array(1024)
+        for (let i = 0; i < 1024; i++) samples[i] = heardInput[(heardAt + i) & 1023]
+        out.push([source, samples, heardPeak, heardPeak, new Uint32Array(4)])
+        continue
+      }
       const n = x.synths_scope_read(engine, source, tapAt, Math.min(frames, 4096))
       const samples = new Float32Array(memory.buffer, tapAt, n).slice()
       x.synths_levels_read(engine, source, 1, tapAt)
@@ -869,8 +1102,12 @@ function makeCore(wasm, sampleRate, post) {
     }
   }
 
-  /** Make `frames` frames into `outLeft` and `outRight` (which may be missing), starting at `at`. */
-  function render(outLeft, outRight, frames, at = 0) {
+  /**
+   * Make `frames` frames into `outLeft` and `outRight` (which may be missing), starting at `at`. `inLeft` is the
+   * live input that came in over the same frames, if the host has one: one channel, at the engine's sample rate.
+   */
+  function render(outLeft, outRight, frames, at = 0, inLeft = null) {
+    const live = (inLeft || ringOn) && x.synths_render_io
     for (let done = 0; done < frames;) {
       const n = Math.min(outRoom, frames - done)
       const end = core.time + n
@@ -879,8 +1116,16 @@ function makeCore(wasm, sampleRate, post) {
         changeTempo(tempos.shift())
       }
       if (tunes.size) playTunes(end)
+      if (recs.length || recording) recordEvents(end)
       if (queue.length) feed(end)
-      const made = x.synths_render(engine, n)
+      if (live) {
+        if (!input || input.buffer !== memory.buffer) input = new Float32Array(memory.buffer, x.synths_input_left(engine), outRoom)
+        if (!inLeft) pullInput(input, n)
+        else if (done + n <= inLeft.length) input.set(done === 0 && n === inLeft.length ? inLeft : inLeft.subarray(done, done + n))
+        else { input.fill(0, 0, n); if (done < inLeft.length) input.set(inLeft.subarray(done)) }
+        hearInput(input, n)
+      }
+      const made = live ? x.synths_render_io(engine, n, 1) : x.synths_render(engine, n)
       if (!made) break
       if (!left || left.buffer !== memory.buffer) {
         left = new Float32Array(memory.buffer, x.synths_output_left(engine), outRoom)
@@ -890,6 +1135,7 @@ function makeCore(wasm, sampleRate, post) {
       if (outRight) outRight.set(made === outRoom ? right : right.subarray(0, made), at + done)
       core.time += made
       done += made
+      if (recording || ended.length) recordEnds()
     }
   }
 
@@ -908,6 +1154,8 @@ function registerSynths(makeCore) {
       this.watch = null
       this.watchFor = 0
       this.blocks = 0
+      // Whether the node's input is a microphone to be given to the engine. Until it is, the input is not looked at.
+      this.mic = false
       this.port.onmessage = (m) => {
         const core = this.core
         if (!core) return
@@ -927,6 +1175,8 @@ function registerSynths(makeCore) {
           this.watch = m.data.watch
           this.watchFor = Math.ceil(sampleRate * 1.5 / 128)
         }
+        if (m.data.mic !== undefined) this.mic = !!m.data.mic
+        if (m.data.input) core.pushInput(m.data.input)
         if (m.data.ask) this.port.postMessage({ type: 'state', ask: m.data.ask, voices: core.voices(), time: core.time, frame: currentFrame })
       }
       try {
@@ -943,7 +1193,7 @@ function registerSynths(makeCore) {
       if (!core) return !this.over
       if (!out || !out[0]) return true
       core.delta = core.time - currentFrame
-      core.render(out[0], out[1], out[0].length)
+      core.render(out[0], out[1], out[0].length, 0, (this.mic && inputs[0] && inputs[0][0]) || null)
       if (this.watch && (++this.blocks & 7) === 0) {
         if ((this.watchFor -= 8) <= 0) this.watch = null
         else this.port.postMessage({ type: 'taps', taps: core.taps(this.watch, 1024), song: this.watchSong ? core.songPosition() : null })
@@ -967,14 +1217,19 @@ export const workletSource = `// synths.js: the audio worklet. Made from synths.
  * @param post   given the ops for the core: post(ops, transfer)
  * @param load     reads and decodes a sample: load({ url, bytes }) -> Promise<{ pcm, channels, rate }>
  * @param bytesOf  reads a file as it is: bytesOf({ url, bytes }) -> Promise<bytes>
+ * @param say      tells a sender something, as plain data: say(the sender's scope, { type: 'recorded', id, … })
  */
-function makeConductor(post, load, bytesOf) {
+function makeConductor(post, load, bytesOf, say = () => {}) {
   const params = allSettings()
   const partParams = PARAMS.filter((p) => p[0] < 200)
   const id = (name) => params.get(key(name)).id
   const PARAM = 4, NOTE_ON = 1, NOTE_OFF = 2, VOICE_PITCH = 6, VOICE_FREQ = 7, VOICE_VOLUME = 8, VOICE_PAN = 9, VOICE_KILL = 11, ARP = 13, ARP_MORE = 14
   const canArp = ENGINE.events.includes('arp')
   const MASTER = id('master.volume')
+  // The live input, in an engine that has one: which part it plays through, and whether it is heard.
+  const INPUT_PART = params.get('inputpart')?.id, MONITOR = params.get('inputmonitor')?.id
+  /** What the settings of the whole engine were last set to, by id. */
+  const globals = new Map()
 
   /** id -> { patch: Map of engine id -> value, part: its part or -1, used, note } */
   const synths = new Map()
@@ -1079,7 +1334,7 @@ function makeConductor(post, load, bytesOf) {
     let index = parts.findIndex((p) => !p.owner)
     if (index < 0) {
       let oldest = null
-      for (const other of synths.values()) if (other.part >= 0 && (!oldest || other.used < oldest.used)) oldest = other
+      for (const other of synths.values()) if (other.part >= 0 && other !== mic && (!oldest || other.used < oldest.used)) oldest = other
       tell(`more than ${parts.length} synths are in use at once, which is all there is room for. The one played longest ago gave up its place. To free one yourself, call its remove().`)
       index = oldest.part
       ops.push(['stopPart', index, 1])
@@ -1103,10 +1358,11 @@ function makeConductor(post, load, bytesOf) {
   const note = (n) => { try { return noteNumber(n) } catch (e) { return null } }
   const notes = (n) => (Array.isArray(n) ? n : [n]).map(note).filter((v) => v !== null)
 
-  function setAll(rec, given, at, glide) {
-    const changed = patchOf(given, '', false, new Map(), slotFor)
+  function setAll(rec, given, at, glide) { change(rec, patchOf(given, '', false, new Map(), slotFor), at, glide) }
+  // Settings by engine id: a part's go to the synth and its part, the whole engine's to the engine.
+  function change(rec, changed, at, glide) {
     for (const [pid, value] of changed) {
-      if (pid >= 200) { if (pid !== MASTER) event(at, PARAM, 0, pid, value, glide); continue }
+      if (pid >= 200) { if (pid !== MASTER && pid !== INPUT_PART && pid !== MONITOR) { globals.set(pid, value); event(at, PARAM, 0, pid, value, glide) } continue }
       if (!rec) continue
       rec.patch.set(pid, value)
       if (rec.part >= 0) {
@@ -1115,6 +1371,30 @@ function makeConductor(post, load, bytesOf) {
       }
     }
   }
+
+  // A voice changer on a synth (or on the microphone, which is one here): see wearVoice. A name that is not a voice is passed over.
+  function voiceOn(rec, name, at) {
+    const voice = voiceName(name)
+    if (voice === null) return
+    if (!rec.worn) rec.worn = { voice: 'none', under: null }
+    // The synth's settings and the engine's are looked at together, and what comes back is sent to each.
+    const both = new Map([...globals, ...rec.patch])
+    change(rec, wearVoice(rec.worn, both, voice, engineDefault), at, 0)
+  }
+
+  /**
+   * THE MICROPHONE is a synth with no notes of its own: the engine plays its live input through the part of
+   * whichever synth this is, so that part's filter, effects, volume, scope and meter are the microphone's. It
+   * keeps its part for as long as it is open, and is heard only while it is listened to.
+   */
+  let mic = null
+  const hear = (at) => { if (MONITOR !== undefined) event(at, PARAM, 0, MONITOR, mic && mic.listen && mic.part >= 0 ? 1 : 0, 0) }
+  /** Recordings being made, and samples being read out to save: what the core will answer about, and for whom. */
+  const recordings = new Map()
+  const saves = new Map()
+  let asked = 0
+  // A sample's loop, by what was asked: true for all of it, or [first frame, the frame after the last].
+  const loopOf = (c) => { const loop = c.loop === true ? [0, 0] : Array.isArray(c.loop) ? c.loop : null; return [loop ? (c.pingpong ? 2 : 1) : 0, loop ? loop[0] : 0, loop ? loop[1] : 0] }
 
   // setVolume(1) is the engine's master volume at 0.5: loud enough for one voice, with room for many.
   const master = (at) => event(at, PARAM, 0, MASTER, muted || paused ? 0 : clamp(volume * 0.5, 0, 2), 0)
@@ -1128,10 +1408,79 @@ function makeConductor(post, load, bytesOf) {
       rec.note = (preset && preset.note) || 60
       rec.macro = macroOf(c.macro !== undefined ? c.macro : preset && preset.macro, false)
       for (const [pid, value] of rec.patch) if (pid >= 200) { rec.patch.delete(pid); if (pid !== MASTER) event(at, PARAM, 0, pid, value, 0) }
+      rec.worn = null
       if (rec.part >= 0) dress(rec, at)
       else seat(rec, at)
+      if (c.voice != null) voiceOn(rec, c.voice, at)
     },
-    set(c, at) { setAll(c.id == null ? null : synthFor(c.id, at), c.set, at, c.glide > 0 ? c.glide : 0) },
+    set(c, at) {
+      const rec = c.id == null ? null : synthFor(c.id, at)
+      if (rec && c.voice != null) voiceOn(rec, c.voice, at)
+      if (c.set) setAll(rec, c.set, at, c.glide > 0 ? c.glide : 0)
+    },
+    // The microphone: opened (it takes a part and the engine's input is sent there), listened to or not, and closed.
+    mic(c, at) {
+      let rec = synths.get(c.id)
+      if (c.do === 'close') {
+        if (!rec) return
+        if (rec.part >= 0) { ops.push(['stopPart', rec.part, 1]); parts[rec.part].owner = null; rec.part = -1 }
+        rec.listen = false
+        if (mic === rec) { mic = null; hear(at) }
+        return
+      }
+      if (INPUT_PART === undefined) return tell('the microphone is not ready yet in this version, so nothing will be heard from it. The rest of your sound is not affected.')
+      if (!rec) { rec = record(c.id, new Map(), 60, null); rec.listen = false }
+      rec.used = ++uses
+      // One microphone, one part: it goes to whoever asked for it last.
+      if (mic && mic !== rec && mic.part >= 0) { ops.push(['stopPart', mic.part, 1]); parts[mic.part].owner = null; mic.part = -1 }
+      mic = rec
+      const seated = rec.part < 0
+      seat(rec, at)
+      if (seated) event(at, PARAM, 0, INPUT_PART, rec.part, 0)
+      if (c.voice != null) voiceOn(rec, c.voice, at)
+      if (c.set) setAll(rec, c.set, at, 0)
+      if (c.listen != null) rec.listen = !!c.listen
+      hear(at)
+    },
+    /**
+     * Record into a sample: the microphone as it comes in (or after its effects, with `effects`, while it is
+     * listened to), a synth, or everything that is played. The sample can be played while it is being recorded.
+     */
+    record(c, at) {
+      if (c.do === 'stop') {
+        // One recording by its id, or with none every recording of this sender.
+        for (const [slot, r] of recordings) if (c.id != null ? r.sid === c.id : r.scope === scope.name) ops.push(['recordStop', at, slot])
+        return
+      }
+      const mine = { sid: c.id, id: prefix ? c.id.slice(prefix.length) : c.id, scope: scope.name }
+      const none = () => say(mine.scope, { type: 'recorded', id: mine.id, frames: 0, seconds: 0, full: false })
+      if (!ENGINE.events.includes('record')) { tell('recording is not ready yet in this version, so a recording will be empty. The rest of your sound is not affected.'); return none() }
+      let source = 0, part = 0
+      if (c.from === 'output') source = 2
+      else if (c.from === 'synth') { source = 1; part = synthFor(c.synth, at).part } else {
+        if (!mic || mic.part < 0) return none()
+        if (c.effects && mic.listen) { source = 1; part = mic.part }
+      }
+      const slot = slotOf(c.id)
+      scope.samples.add(c.id)
+      const len = c.len > 0 ? Math.min(c.len, LONGEST_RECORDING) : null
+      const room = len ?? clamp(c.max > 0 ? c.max : USUAL_RECORDING, 0.01, LONGEST_RECORDING)
+      mine.loop = c.loop ? loopOf(c) : null
+      mine.open = len === null
+      recordings.set(slot, mine)
+      ops.push(['record', slot, at, len, source, part, room, c.from === 'output' ? 2 : 1])
+    },
+    // A sample read back out of the engine and handed to whoever asked, as a WAV file.
+    save(c) {
+      const slot = slots.get(c.id)
+      const mine = { id: prefix ? c.id.slice(prefix.length) : c.id, scope: scope.name, name: c.name || 'sound.wav', ask: c.ask, download: c.download !== false }
+      // Something that is not a sample here is saved as a file with no sound in it, so whoever asked is still answered.
+      if (slot === undefined) return say(mine.scope, { type: 'saved', id: mine.id, ask: mine.ask, name: mine.name, seconds: 0, bytes: pcmWav(new Float32Array(0), 1, 48000) })
+      const go = () => { saves.set(++asked, mine); ops.push(['sampleRead', slot, asked]) }
+      // A sample that is still being fetched is saved when it has arrived.
+      if (loading.size) Promise.allSettled([...loading]).then(() => { go(); flush() })
+      else go()
+    },
     macro(c, at) {
       const rec = synthFor(c.id, at)
       rec.macro = macroOf(c.macro, false)
@@ -1193,13 +1542,19 @@ function makeConductor(post, load, bytesOf) {
       }
     },
     sample(c) {
+      // With no sound in it, the command changes a sample that is already there: its loop, or the note it was recorded at.
+      if (!c.pcm && !c.url && !c.bytes) {
+        const slot = slots.get(c.id)
+        if (slot === undefined) return
+        const making = recordings.get(slot)
+        if (making) { making.loop = c.loop ? loopOf(c) : null; return }
+        return ops.push(['sampleConfig', slot, c.note == null ? null : note(c.note), ...loopOf(c)])
+      }
       const slot = slotOf(c.id)
       scope.samples.add(c.id)
       const send = ({ pcm, channels, rate }) => {
         const base = c.note == null ? 60 : note(c.note) ?? 60
-        const frames = Math.floor(pcm.length / channels)
-        const loop = c.loop === true ? [0, frames] : Array.isArray(c.loop) ? c.loop : null
-        ops.push(['sample', slot, pcm, channels, rate, base, loop ? (c.pingpong ? 2 : 1) : 0, loop ? loop[0] : 0, loop ? loop[1] : 0])
+        ops.push(['sample', slot, pcm, channels, rate, base, ...loopOf(c)])
         transfer.push(pcm.buffer)
       }
       if (c.pcm) return send({ pcm: Float32Array.from(c.pcm), channels: c.channels === 2 ? 2 : 1, rate: c.rate || 44100 })
@@ -1210,6 +1565,7 @@ function makeConductor(post, load, bytesOf) {
     unsample(c) {
       const slot = slots.get(c.id)
       if (slot === undefined) return
+      recordings.delete(slot)
       slots.delete(c.id)
       freeSlots.push(slot)
       ops.push(['unsample', slot])
@@ -1259,6 +1615,7 @@ function makeConductor(post, load, bytesOf) {
       for (const sid of scope.synths) {
         const rec = synths.get(sid)
         if (rec && rec.part >= 0) { ops.push(['stopPart', rec.part, 1]); parts[rec.part].owner = null }
+        if (rec && rec === mic) { mic = null; hear(null) }
         synths.delete(sid)
       }
       for (const tune of scope.tunes) ops.push(['stopTune', tune])
@@ -1390,17 +1747,42 @@ function makeConductor(post, load, bytesOf) {
       how(command, at)
     },
     flush,
-    /** Set the engine to how a new conductor expects to find it. */
-    begin() { enter(''); master(null); flush() },
+    /** Set the engine to how a new conductor expects to find it: the live input is not heard until it is listened to. */
+    begin() { enter(''); master(null); hear(null); flush() },
     songLoaded,
+    /** The core says a recording is over. It gives [the sender's scope, what to tell it], or null if it was nobody's. */
+    recorded(m) {
+      const mine = recordings.get(m.slot)
+      if (!mine) return null
+      recordings.delete(m.slot)
+      if (mine.loop && m.frames) { ops.push(['sampleConfig', m.slot, null, ...mine.loop]); flush() }
+      if (m.full && mine.open) tell(`a recording reached its longest, ${Math.round(m.frames / m.rate)} seconds, and stopped by itself. For a longer one say how long: startRecording({ max: 60 }), up to ${LONGEST_RECORDING}.`, 'info')
+      return [mine.scope, { type: 'recorded', id: mine.id, frames: m.frames, seconds: m.frames / m.rate, rate: m.rate, full: !!m.full }]
+    },
+    /** The core hands back a sample to be saved: [the sender's scope, what to tell it (with the WAV file), whether to save it here]. */
+    saved(m) {
+      const mine = saves.get(m.token)
+      if (!mine) return null
+      saves.delete(m.token)
+      return [mine.scope, { type: 'saved', id: mine.id, ask: mine.ask, name: mine.name, seconds: m.pcm.length / m.channels / m.rate, bytes: pcmWav(m.pcm, m.channels, m.rate) }, mine.download]
+    },
     loading,
-    /** The engine's part a synth has now: 65535 for no id (everything), -1 for a synth with no part. */
-    partOf(sid, scopeName) { return sid == null ? 0xffff : synths.get((scopeName ? scopeName + '\u0001' : '') + sid)?.part ?? -1 },
+    /**
+     * Where a synth is read from: its part of the engine, 65535 for no id (everything), -1 for a synth with no part.
+     * A microphone that is not being listened to puts nothing through its part, and is read as it comes in.
+     */
+    partOf(sid, scopeName) {
+      if (sid == null) return 0xffff
+      const rec = synths.get((scopeName ? scopeName + '\u0001' : '') + sid)
+      return !rec ? -1 : rec === mic && !rec.listen && rec.part >= 0 ? MIC_TAP : rec.part
+    },
+    /** Whether a synth is the microphone, whose settings have names of their own. */
+    isMic(sid, scopeName) { const rec = synths.get((scopeName ? scopeName + '\u0001' : '') + sid); return !!rec && rec === mic },
     /** A setting of a synth as the commands so far have left it: [what it is, its value in the engine's units], or null. */
     settingOf(sid, name, scopeName) {
       const entry = setting(name)
       const rec = synths.get((scopeName ? scopeName + '\u0001' : '') + sid)
-      return entry && rec ? [entry, rec.patch.get(entry.id)] : null
+      return entry && rec ? [entry, entry.part ? rec.patch.get(entry.id) : globals.get(entry.id)] : null
     },
     /** How much everything is turned down or up after the parts are mixed. */
     gain: () => (muted || paused ? 0 : clamp(volume * 0.5, 0, 2)),
@@ -1466,7 +1848,7 @@ function reading([source, samples, left, right, words], gain) {
   const notes = []
   for (let n = 0; n < 128; n++) if ((words[n >> 5] >>> (n & 31)) & 1) notes.push(n)
   // The engine measures a part before the volume of everything is applied; a display should show what is heard.
-  if (source === 0xffff) gain = 1
+  if (source >= MIC_TAP) gain = 1
   else for (let i = 0; i < samples.length; i++) samples[i] = clamp(samples[i] * gain, -1, 1)
   return { samples, level: [Math.min(1, left * gain), Math.min(1, right * gain)], notes }
 }
@@ -1479,11 +1861,13 @@ function reading([source, samples, left, right, words], gain) {
 function makeTarget(id, run, conductor, read, scope) {
   const held = new Map()
   let handle = 0x7f000000
+  // The microphone's settings go by its own names (its `pitch` is the pitch shifter).
+  const named = (name) => (conductor()?.isMic(id, scope) ? micName(name) : name)
   const target = {
     id,
-    set(name, value) { run({ op: 'set', id, set: typeof name === 'string' ? { [name]: value } : name }); return target },
-    get(name) { const now = conductor()?.settingOf(id, name, scope); return now ? readSetting(now[0], now[1]) : undefined },
-    describe(name) { const now = conductor()?.settingOf(id, name, scope); return now ? describeSetting(now[0], now[1]) : setting(name) ? describeSetting(setting(name)) : null },
+    set(name, value) { run({ op: 'set', id, set: Object.fromEntries(Object.entries(typeof name === 'string' ? { [name]: value } : name).map(([k, v]) => [named(k), v])) }); return target },
+    get(name) { const now = conductor()?.settingOf(id, named(name), scope); return now ? readSetting(now[0], now[1]) : undefined },
+    describe(name) { const now = conductor()?.settingOf(id, named(name), scope); return now ? describeSetting(now[0], now[1]) : setting(named(name)) ? describeSetting(setting(named(name))) : null },
     noteOn(note, velocity = 0.8) {
       const n = noteNumber(note)
       target.noteOff(n)
@@ -1570,6 +1954,129 @@ function midiSide(options, hooks) {
     close() { closed = true; desk?.close() },
   }
 }
+// --- the microphone ---------------------------------------------------------------------------
+
+/** Why there is no microphone, as [the state it leaves, one plain sentence]. `e` is what the browser threw, or { kind }. */
+function micProblem(e) {
+  const name = (e && e.name) || '', kind = e && e.kind
+  const rest = ' Everything else carries on, and a recording of the microphone will be empty.'
+  if (kind === 'insecure') return ['unavailable', 'this page cannot use the microphone, because that needs an https address, or localhost.' + rest]
+  if (kind === 'unsupported') return ['unavailable', 'there is no way to ask for the microphone here: this browser gives pages none, or this is a frame that may not ask (the app showing it can pass one in: see docs/microphone.md).' + rest]
+  if (kind === 'off') return ['unavailable', 'the microphone is turned off for this page by the app that shows it.' + rest]
+  if (kind === 'offline') return ['unavailable', 'there is no microphone when sound is rendered to a file. Give the sound to use in its place: createOfflinePlayer({ microphone: samples }).' + rest]
+  if (kind === 'nothing') return ['none', 'the app that shows this page was asked for the microphone and gave none.' + rest]
+  if (/NotAllowed|Security|PermissionDenied/.test(name)) return ['refused', 'the microphone was not allowed. To allow it, press the microphone or the padlock beside the page\'s address, allow it there, and load the page again. (A page inside a frame also needs allow="microphone" on the frame.)' + rest]
+  if (/NotFound|Overconstrained/.test(name)) return ['none', 'no microphone was found. Plug one in, or let the browser use one in the computer\'s settings, and load the page again.' + rest]
+  if (/NotReadable|TrackStart|Abort/.test(name)) return ['busy', 'the microphone is there but could not be opened: another program may be using it. Close that, and load the page again.' + rest]
+  return ['unavailable', `the microphone could not be opened (${(e && e.message) || e}).` + rest]
+}
+
+/**
+ * WHAT IS ASKED OF THE BROWSER FOR A MICROPHONE. A browser's microphone is set up for a phone call: it cancels
+ * echo, takes out noise and turns the level up and down by itself. Each of those is a filter that delays the
+ * sound by tens of milliseconds and reshapes it, and a voice changer then changes the reshaped voice: the pitch
+ * shifter warbles on the noise gate's edges and the level pumps. So the plain microphone is asked for (`raw`,
+ * which is the default), in one channel, since a voice is one. `raw: false` asks for the phone-call kind instead,
+ * which is the right thing for one case: listening through loudspeakers, where echo cancelling stops the howl.
+ */
+const micConstraints = (raw) => ({ echoCancellation: !raw, noiseSuppression: !raw, autoGainControl: !raw, channelCount: 1 })
+
+/** Frames at one rate as frames at another, a lump at a time: straight lines between the samples, carried across lumps. */
+function resampler() {
+  let last = 0, pos = 0
+  return (input, step) => {
+    const n = input.length
+    const out = new Float32Array(Math.max(0, Math.ceil((n - 1 - pos) / step)))
+    let made = 0
+    for (; pos < n - 1 && made < out.length; pos += step) {
+      const i = Math.floor(pos)
+      const a = i < 0 ? last : input[i]
+      out[made++] = a + (input[i + 1] - a) * (pos - i)
+    }
+    pos -= n
+    if (n) last = input[n - 1]
+    return made === out.length ? out : out.subarray(0, made)
+  }
+}
+
+/**
+ * A PLAYER'S MICROPHONE. The microphone is where the player is, so that is where it is opened: the first `mic`
+ * command asks for it (which is when the browser asks the person), and never anything before that. While the
+ * answer is awaited a recording of the microphone waits too, and begins when it is there; with no microphone the
+ * recording is over at once with nothing in it, the reason is said once, and every other command is carried out
+ * as usual. Senders are told how it went as plain data: { type: 'microphone', state, message }.
+ *
+ * @param hooks  open(command): open it, now or as a promise, or throw why not; close(); emit(scope, events) to tell
+ *               senders (no scope: all of them); run(command, at, scope) to carry out a command that waited
+ */
+function micSide(hooks) {
+  let state = 'off', message, turn = 0, asking = null
+  let waiting = []
+  const say = (to) => hooks.emit(to, [{ type: 'microphone', state, ...(message ? { message } : {}) }])
+  function settle(mine, now, why) {
+    if (mine !== turn || state !== 'asking') return
+    state = now
+    message = why
+    if (why) tell(why)
+    say(null)
+    const kept = waiting
+    waiting = []
+    for (const [c, at, scope] of kept) if (take(c, scope)) hooks.run(c, at, scope)
+  }
+  function open(c) {
+    if (state !== 'off') return
+    const mine = ++turn
+    state = 'asking'
+    message = undefined
+    say(null)
+    const no = (e) => settle(mine, ...micProblem(e))
+    try {
+      const opened = hooks.open(c)
+      if (opened && typeof opened.then === 'function') asking = opened.then(() => settle(mine, 'on'), no)
+      else settle(mine, 'on')
+    } catch (e) { no(e) }
+  }
+  /** One command on its way to be carried out: false if it is not to be (it waits for the microphone, or there is none). */
+  function take(c, scope, at) {
+    if (c.op === 'mic') {
+      if (c.do === 'close') {
+        if (state !== 'off') { turn++; hooks.close(); state = 'off'; message = undefined; say(null) }
+        const kept = waiting
+        waiting = []
+        for (const [w, , sc] of kept) hooks.emit(sc, [{ type: 'recorded', id: w.id, frames: 0, seconds: 0, full: false }])
+        return true
+      }
+      if (state === 'off') open(c)
+      else if (state !== 'asking') say(scope)
+      if (c.listen && hooks.live) tell('the microphone is being listened to. Through loudspeakers that can howl, so headphones are best; mic.mute() stops it.', 'info')
+    } else if (c.op === 'record' && c.do !== 'stop' && (c.from === 'mic' || c.from == null)) {
+      if (state === 'asking') { waiting.push([c, at, scope]); return false }
+      if (state !== 'on') { hooks.emit(scope, [{ type: 'recorded', id: c.id, frames: 0, seconds: 0, full: false }]); return false }
+    }
+    return true
+  }
+  return {
+    get state() { return state },
+    open, take,
+    /** A promise of the browser's answer, if it is being waited for. */
+    settled: () => asking || Promise.resolve(),
+    close() { if (state !== 'off') { turn++; hooks.close(); state = 'off' } },
+  }
+}
+/** The senders that asked to be told things, by scope, and the telling: for a player. */
+function listeners() {
+  const heard = new Map()
+  return {
+    on(listener, scope) {
+      const name = scope || ''
+      if (!heard.has(name)) heard.set(name, new Set())
+      heard.get(name).add(listener)
+      return () => heard.get(name)?.delete(listener)
+    },
+    emit(scope, events) { for (const [name, set] of heard) if (scope == null || name === (scope || '')) for (const listener of [...set]) listener(events) },
+  }
+}
+
 /** Where a song is, from the engine's ten numbers: for drawing a cursor. */
 const NO_SONG = { state: 'none', order: 0, pattern: 0, row: 0, tick: 0, speed: 0, tempo: 0, rounds: 0, rows: 0, orders: 0 }
 const songPlace = (n) => (n ? { state: ['none', 'stopped', 'playing', 'paused'][n[0]] || 'none', order: n[1], pattern: n[2], row: n[3], tick: n[4], speed: n[5], tempo: n[6], rounds: n[7], rows: n[8], orders: n[9] } : NO_SONG)
@@ -1595,13 +2102,16 @@ const KEPT_WHILE_LOADING = 10
  *
  * @param {{ wasm?: ArrayBuffer | Uint8Array | WebAssembly.Module | string | Promise<any>, worklet?: 'auto' | 'blob' | 'file' | string,
  *           latency?: number, context?: AudioContext, destination?: AudioNode, fallback?: boolean | 'always',
- *           onState?: (state: string) => void }} options
+ *           onState?: (state: string) => void, microphone?: any, save?: (file: { name: string, bytes: Uint8Array, type: string }) => void }} options
  *   `wasm` is the engine, as bytes (for a page that may not fetch it) or an address; without it, `synths_core.wasm` beside this file.
  *   `worklet` is how the worklet's module is loaded: 'blob' from the text inside this file (no second file, no fetch), 'file'
  *   from `synths-worklet.js` beside this file, or an address. 'auto' tries the blob and then the file.
  *   `latency` is how far ahead of the sound card everything is scheduled, in seconds (0.04).
  *   `context` and `destination` put the sound into an AudioContext and a node of your own (a recorder, an analyser).
  *   `fallback: false` refuses the slower way of working when the browser has no audio worklet; 'always' uses it regardless.
+ *   `microphone` is where the microphone comes from when it is not the browser's to ask for: a MediaStream, or
+ *   { open({ sampleRate, raw, constraints, push }), close() }, or false for none (docs/microphone.md is the contract).
+ *   `save` is given a file that saveSound made, in place of the browser being asked to download it.
  * @returns {{ send(batch): void, read(id?): { samples: Float32Array, level: number[], notes: number[] },
  *             state: 'loading'|'waiting'|'on'|'failed', kind: 'worklet'|'fallback'|null, ready: Promise<void>,
  *             context: AudioContext, node: AudioNode, unlock(): void, pause(): void, resume(): void, ask(): Promise<object>, close(): void }}
@@ -1627,10 +2137,13 @@ export function createPlayer(options = {}) {
   const local = () => performance.now() / 1000
   const waiting = new Map()
   let ready
+  const told = listeners()
   const player = {
     state: 'loading', kind: null, context: null, node: null,
     ready: new Promise((yes) => { ready = yes }),
     send, unlock, close, read, songPosition,
+    /** What the player has to say to one sender, as lists of plain objects: a recording is over, a file is saved, the microphone is on or is not. It gives back a function that stops it. */
+    onSoundEvents: (listener, scope) => told.on(listener, scope),
     /** What MIDI devices send, and what the desk has to say, for one sender: onMidi((events) => { ... }, scope). It gives back a function that stops it. */
     onMidi: (listener, scope) => midi.onMidi(listener, scope),
     /** A synth that exists by its id, as something controls can be tied to: set, get, describe, noteOn, noteOff, samples, level, notes. */
@@ -1669,6 +2182,84 @@ export function createPlayer(options = {}) {
   const context = player.context = options.context || new Context({ latencyHint: 'interactive' })
   let engineReady = false
   const live = () => engineReady && context.state === 'running'
+  let engineUp
+  const engineIsUp = new Promise((yes) => { engineUp = yes })
+
+  // THE MICROPHONE. The browser is asked for the plain microphone as a stream, which goes into the worklet's one
+  // input through a source node; that node brings the stream to the sound card's sample rate where the two differ,
+  // so the engine is always given frames at its own rate. (Firefox does not convert, and does not need to: its
+  // default rate for a context and for a microphone are the same device's.) A host may give the stream instead,
+  // or push the frames itself, which the core plays out of a ring.
+  let micStream = null, micSource = null, micOwn = false, micLive = false, micOpen = 0
+  const stretch = resampler()
+  function pushMic(frames, rate) {
+    if (closed || mic.state === 'off' || !frames || !frames.length) return
+    let lump = frames instanceof Float32Array ? frames : Float32Array.from(frames)
+    if (rate > 0 && rate !== context.sampleRate) lump = stretch(lump, rate / context.sampleRate)
+    if (port) port.postMessage({ input: lump })
+    else core?.pushInput(lump)
+  }
+  async function openMic(c) {
+    const mine = ++micOpen
+    const raw = c.raw !== false
+    const wants = { sampleRate: context.sampleRate, raw, constraints: micConstraints(raw), push: pushMic }
+    const given = options.microphone
+    let got, own = false
+    if (given === false) throw { kind: 'off' }
+    if (given && typeof given.open === 'function') got = await given.open(wants)
+    else if (typeof given === 'function') got = await given(wants)
+    else if (given) got = await given
+    else {
+      if (!globalThis.navigator?.mediaDevices?.getUserMedia) throw { kind: globalThis.isSecureContext === false ? 'insecure' : 'unsupported' }
+      got = await navigator.mediaDevices.getUserMedia({ audio: wants.constraints, video: false })
+      own = true
+    }
+    await engineIsUp
+    const stream = got && typeof got.getAudioTracks === 'function' ? got : null
+    if (closed || mine !== micOpen) { if (own) for (const track of stream.getTracks()) track.stop(); return }
+    if (stream) {
+      if (!stream.getAudioTracks().length) throw { name: 'NotFoundError' }
+      micStream = stream
+      micOwn = own
+      micSource = context.createMediaStreamSource(stream)
+      micSource.connect(player.node)
+      micLive = true
+      port?.postMessage({ mic: true })
+    } else if (!got) throw { kind: 'nothing' }
+    // Anything else that is not a stream is a host that pushes the frames itself.
+  }
+  function closeMic() {
+    micOpen++
+    micLive = false
+    port?.postMessage({ mic: false })
+    try { micSource?.disconnect() } catch (e) { /* already gone */ }
+    // A microphone the browser was asked for here is let go, so its light goes out; a host's own is the host's to stop.
+    if (micOwn && micStream) for (const track of micStream.getTracks()) track.stop()
+    if (!micOwn) { try { options.microphone?.close?.() } catch (e) { /* the host's affair */ } }
+    micStream = micSource = null
+  }
+  const mic = micSide({
+    live: true, open: openMic, close: closeMic, emit: told.emit,
+    run(c, at, scope) { if (closed || !live()) return; conductor.run(c, context.currentTime + latency, scope); conductor.flush() },
+  })
+  // Every command goes by the microphone's side on its way to the conductor.
+  const carry = (c, at, scope) => { if (mic.take(c, scope, at)) conductor.run(c, at, scope) }
+  // A file made by saveSound: the host's to keep if it said so, or else the browser's to download.
+  function saveFile(file) {
+    if (options.save) return options.save({ name: file.name, bytes: file.bytes, type: 'audio/wav' })
+    if (typeof document === 'undefined' || !document.body) return
+    try {
+      const url = URL.createObjectURL(new Blob([file.bytes], { type: 'audio/wav' }))
+      const a = document.createElement('a')
+      a.href = url
+      a.download = file.name
+      a.style.display = 'none'
+      document.body.append(a)
+      a.click()
+      a.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 30000)
+    } catch (e) { tell(`the file ${shown(file.name)} could not be saved from this page (${(e && e.message) || e}).`) }
+  }
 
   // BROWSERS KEEP A PAGE SILENT until the person has touched it. Every touch asks again; the first one that the
   // browser accepts turns the sound on, and what was held back for it is played then.
@@ -1699,7 +2290,7 @@ export function createPlayer(options = {}) {
     for (const { c, asked, ahead, scope } of waited) {
       const still = ahead - (here - asked)
       if (ONE_SHOTS.has(c.op) && still < -patience) continue
-      conductor.run(c, now + Math.max(0, still), scope)
+      carry(c, now + Math.max(0, still), scope)
     }
     conductor.flush()
     ready()
@@ -1724,6 +2315,8 @@ export function createPlayer(options = {}) {
     midi.take(batch)
     if (player.state === 'failed') return
     pauses(batch)
+    // The microphone is asked for as soon as a program wants it, even while the sound itself is waiting for a tap.
+    for (const c of batch.cmds) if (c && c.op === 'mic' && c.do !== 'close') mic.open(c)
     if (!live()) {
       // Not able to play yet: everything is kept in order, with when it was asked for (see settle).
       const at = local()
@@ -1757,7 +2350,7 @@ export function createPlayer(options = {}) {
       let at = current + latency
       if (typeof c.t === 'number' && offset !== null) at = c.t + offset + latency
       if (at < current - TOO_LATE && ONE_SHOTS.has(c.op)) continue
-      conductor.run(c, at, batch.scope)
+      carry(c, at, batch.scope)
     }
     conductor.flush()
   }
@@ -1804,6 +2397,7 @@ export function createPlayer(options = {}) {
     if (closed) return
     closed = true
     midi.close()
+    mic.close()
     if (typeof removeEventListener === 'function') for (const g of GESTURES) removeEventListener(g, unlock, { capture: true })
     try { player.node?.disconnect() } catch (e) { /* already gone */ }
     if (player.node) player.node.onaudioprocess = null
@@ -1827,7 +2421,13 @@ export function createPlayer(options = {}) {
       conductor.songLoaded(m, context.currentTime + latency)
       conductor.flush()
     } else if (m.type === 'state') { waiting.get(m.ask)?.(m); waiting.delete(m.ask) }
-    else if (m.type === 'problem') tell('there was not enough memory for a sample, so it will be silent.')
+    else if (m.type === 'recorded') { const say = conductor.recorded(m); if (say) told.emit(say[0], [say[1]]) }
+    else if (m.type === 'sample') {
+      const say = conductor.saved(m)
+      if (!say) return
+      if (say[2]) saveFile(say[1])
+      told.emit(say[0], [say[1]])
+    } else if (m.type === 'problem') tell(m.what === 'record-memory' ? 'there was not enough memory for a recording, so it will be empty.' : 'there was not enough memory for a sample, so it will be silent.')
   }
 
   async function start() {
@@ -1837,13 +2437,14 @@ export function createPlayer(options = {}) {
       if (port) port.postMessage({ ops }, transfer)
       else core.exec(ops)
     }
-    conductor = makeConductor(post, async (c) => decode(await sampleBytes(c), context), sampleBytes)
+    conductor = makeConductor(post, async (c) => decode(await sampleBytes(c), context), sampleBytes, (scope, event) => told.emit(scope, [event]))
     const destination = options.destination || context.destination
     const how = options.fallback !== 'always' && context.audioWorklet && typeof AudioWorkletNode !== 'undefined' ? await loadWorklet() : 'none'
     if (closed) return
     if (how === 'worklet') {
       const bytes = wasm instanceof WebAssembly.Module ? wasm : ArrayBuffer.isView(wasm) ? wasm.buffer.slice(wasm.byteOffset, wasm.byteOffset + wasm.byteLength) : wasm
-      const node = player.node = new AudioWorkletNode(context, 'synths', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2], processorOptions: { wasm: bytes } })
+      // Its one input is for a microphone, mixed down to one channel; with nothing connected it is not there at all.
+      const node = player.node = new AudioWorkletNode(context, 'synths', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2], channelCount: 1, channelCountMode: 'explicit', processorOptions: { wasm: bytes } })
       await new Promise((yes, no) => {
         node.port.onmessage = (m) => {
           if (m.data.type === 'ready') yes()
@@ -1861,11 +2462,11 @@ export function createPlayer(options = {}) {
       if (options.fallback === false || !context.createScriptProcessor) throw new Error(context.audioWorklet ? 'the audio worklet could not be loaded' : 'this page has no audio worklet: it needs an https address, or localhost')
       if (options.fallback !== 'always') tell(`this page cannot run sound on its own thread (${context.audioWorklet ? `the audio worklet could not be loaded: ${player.workletProblem}` : 'that needs an https address, or localhost'}), so the sound is made on the page's thread instead. It is the same sound, but it may crackle when the page is busy.`, 'info')
       core = makeCore(wasm instanceof WebAssembly.Module ? wasm : await WebAssembly.compile(wasm), context.sampleRate, onMessage)
-      const node = player.node = context.createScriptProcessor(1024, 0, 2)
+      const node = player.node = context.createScriptProcessor(1024, 1, 2)
       node.onaudioprocess = (e) => {
         const out = e.outputBuffer
         core.delta = core.time - Math.round(e.playbackTime * context.sampleRate)
-        core.render(out.getChannelData(0), out.getChannelData(1), out.length)
+        core.render(out.getChannelData(0), out.getChannelData(1), out.length, 0, micLive ? e.inputBuffer.getChannelData(0) : null)
       }
       node.connect(destination)
       player.kind = 'fallback'
@@ -1873,6 +2474,7 @@ export function createPlayer(options = {}) {
       if (options.latency === undefined) latency = 0.08
     }
     engineReady = true
+    engineUp()
     conductor.begin()
     if (context.state !== 'running') state('waiting')
     settle()
@@ -1909,8 +2511,11 @@ export function createPlayer(options = {}) {
  * A player with no sound card: the same engine and the same commands, rendered to numbers. For tests, and for
  * giving a recorded video its soundtrack. It works in a browser and in node.
  *
- * @param {{ sampleRate?: number, wasm?: any, start?: number }} options
+ * @param {{ sampleRate?: number, wasm?: any, start?: number, microphone?: Float32Array | { samples: Float32Array, sampleRate: number },
+ *           save?: (file: { name: string, bytes: Uint8Array, type: string }) => void }} options
  *   `start` is the sender's time that is the first sample (0): a batch's times are counted from there.
+ *   `microphone` is sound to use in place of a microphone: one channel, whose first sample comes in with the first
+ *   frame rendered. After it ends, silence comes in. Without it there is no microphone, as on a page that was refused one.
  * @returns {Promise<{ send(batch): void, render(seconds: number): Promise<{ left: Float32Array, right: Float32Array, sampleRate: number, wav(): Uint8Array }>,
  *                     time: number, voices(): number, close(): void }>}
  *   `render` carries on from where the last one ended, so a long piece can be rendered a part at a time.
@@ -1919,9 +2524,25 @@ export async function createOfflinePlayer(options = {}) {
   const sampleRate = options.sampleRate || 48000
   const start = options.start || 0
   const wasm = await engineBytes(options.wasm)
-  const core = makeCore(wasm instanceof WebAssembly.Module ? wasm : await WebAssembly.compile(wasm), sampleRate, (m) => { if (m.type === 'song') conductor.songLoaded(m, core.time / sampleRate) })
-  const conductor = makeConductor((ops) => core.exec(ops), async (c) => decode(await sampleBytes(c)), sampleBytes)
+  const told = listeners()
+  const core = makeCore(wasm instanceof WebAssembly.Module ? wasm : await WebAssembly.compile(wasm), sampleRate, (m) => {
+    if (m.type === 'song') conductor.songLoaded(m, core.time / sampleRate)
+    else if (m.type === 'recorded') { const say = conductor.recorded(m); if (say) told.emit(say[0], [say[1]]) } else if (m.type === 'sample') {
+      const say = conductor.saved(m)
+      if (!say) return
+      if (say[2]) options.save?.({ name: say[1].name, bytes: say[1].bytes, type: 'audio/wav' })
+      told.emit(say[0], [say[1]])
+    }
+  })
+  const conductor = makeConductor((ops) => core.exec(ops), async (c) => decode(await sampleBytes(c)), sampleBytes, (scope, event) => told.emit(scope, [event]))
   conductor.begin()
+  // The sound given in place of a microphone, at this player's sample rate.
+  const given = options.microphone
+  const input = !given ? null : given.samples ? (given.sampleRate && given.sampleRate !== sampleRate ? resampler()(Float32Array.from(given.samples), given.sampleRate / sampleRate) : Float32Array.from(given.samples)) : Float32Array.from(given)
+  const mic = micSide({
+    open() { if (!input) throw { kind: 'offline' } }, close() {}, emit: told.emit,
+    run(c, at, scope) { conductor.run(c, at, scope); conductor.flush() },
+  })
   // MIDI for an offline player is the `midi` transport it is given: its clock is the point rendering has reached.
   const midi = midiSide(options, {
     now: () => core.time / sampleRate * 1000, look: Infinity, offset: -start, latency: () => 0,
@@ -1930,10 +2551,16 @@ export async function createOfflinePlayer(options = {}) {
   if (options.midi) await midi.load()
   return {
     onMidi: midi.onMidi,
+    /** What the player has to say to one sender (see createPlayer): a recording is over, a file is saved, there is or is not a microphone. */
+    onSoundEvents: (listener, scope) => told.on(listener, scope),
     send(batch) {
       if (!batch || !Array.isArray(batch.cmds)) return
       midi.take(batch)
-      for (const c of batch.cmds) if (c) conductor.run(c, (typeof c.t === 'number' ? c.t : typeof batch.now === 'number' ? batch.now : start) - start, batch.scope)
+      for (const c of batch.cmds) {
+        if (!c) continue
+        const at = (typeof c.t === 'number' ? c.t : typeof batch.now === 'number' ? batch.now : start) - start
+        if (mic.take(c, batch.scope, at)) conductor.run(c, at, batch.scope)
+      }
       conductor.flush()
     },
     async render(seconds) {
@@ -1942,7 +2569,7 @@ export async function createOfflinePlayer(options = {}) {
       const frames = Math.max(0, Math.round(seconds * sampleRate))
       const left = new Float32Array(frames)
       const right = new Float32Array(frames)
-      core.render(left, right, frames)
+      core.render(left, right, frames, 0, mic.state === 'on' ? input.subarray(Math.min(input.length, core.time), Math.min(input.length, core.time + frames)) : null)
       return { left, right, sampleRate, wav: () => toWav(left, right, sampleRate) }
     },
     get time() { return core.time / sampleRate },
@@ -2386,14 +3013,52 @@ export function createSound(options = {}) {
 
     /** The value of a setting: lead.get("cutoff"). */
     get(name) {
-      const entry = setting(name)
+      if (key(name) === 'voice') return this.voice
+      const entry = setting(this._name(name))
       if (!entry) throw new Error(`get: there is no setting called ${shown(name)}.${meant(String(name), namesToShow)}`)
       return readSetting(entry, this._patch.get(entry.id))
     }
     /** What a setting is: { name, min, max, default, unit, kind, choices }, for a control that takes its range from it. */
     describe(name) {
-      const entry = setting(name)
+      if (key(name) === 'voice') return { name: 'voice', kind: 'choice', min: 0, max: Object.keys(VOICES).length, default: 'none', unit: '', choices: ['none', ...Object.keys(VOICES)] }
+      const entry = setting(this._name(name))
       return entry ? describeSetting(entry, this._patch.get(entry.id)) : null
+    }
+    /** A setting's name as this synth says it -> the name it has everywhere. (The microphone has words of its own.) */
+    _name(name) { return name }
+    // What set() was given, ready to send: a voice is put on, and the rest go by their names everywhere.
+    _given(given) {
+      const out = {}
+      for (const [name, value] of Object.entries(given)) {
+        if (key(name) === 'voice') this.voice = value
+        else out[this._name(name)] = value
+      }
+      return out
+    }
+
+    /**
+     * A voice changer on everything this synth plays: lead.voice = "robot". The voices are robot, chipmunk, monster,
+     * cave, telephone, alien and whisper, and "none" takes it off. Each is a handful of settings (the pitch shifter,
+     * the ring modulator, the comb, the filter, the echo), which can be turned further once the voice is on.
+     * Choosing another voice first puts back what the last one changed.
+     */
+    get voice() { return this._worn ? this._worn.voice : 'none' }
+    set voice(name) {
+      const voice = voiceName(name)
+      if (voice === null) throw new Error(`${shown(name)} is not a voice.${meant(String(name), Object.keys(VOICES))} The voices are: ${Object.keys(VOICES).join(', ')}, and "none"`)
+      if (!this._worn) this._worn = { voice: 'none', under: null }
+      wearVoice(this._worn, this._patch, voice, engineDefault)
+      command({ op: 'set', id: this._id, voice, t: clock() })
+    }
+
+    /** Record what this synth plays into a sample: `const take = lead.record(4)`. On the microphone, it records the microphone. See recordSound. */
+    record(...args) { return recordFrom({ ...choices(args, ['length']), from: this._self || this }, 'record') }
+
+    /** A sample or a recording that goes round and round while its note is held: drum.loop = true, or [first frame, the frame after the last]. */
+    get loop() { return this._loop ?? false }
+    set loop(on) {
+      this._loop = Array.isArray(on) ? on : !!on
+      if (this._sample) command({ op: 'sample', id: this._sample, loop: this._loop, t: clock() })
     }
     /** A key goes down, and comes up: what a keyboard plays. The note stays until its noteOff. */
     noteOn(note, velocity = 0.8) {
@@ -2446,6 +3111,8 @@ export function createSound(options = {}) {
     set(given, o = {}) {
       if (typeof given === 'string') return this.set({ [given]: o })
       if (!given || typeof given !== 'object') throw new Error(`set needs settings in braces, as in set({ cutoff: 800 }), not ${shown(given)}`)
+      given = this._given(given)
+      if (!Object.keys(given).length) return this
       patchOf(given, 'set', true, this._patch, () => 0)
       const c = { op: 'set', id: this._id, set: sendable(given), t: when(o, 'set') }
       if (o.glide !== undefined) c.glide = amount(o.glide, 'set: glide', 0, 60)
@@ -2476,12 +3143,12 @@ export function createSound(options = {}) {
   const asSynth = (synth) => new Proxy(synth, {
     get(target, name, self) {
       if (typeof name !== 'string' || name in target) return Reflect.get(target, name, target)
-      return setting(name) ? target.get(name) : undefined
+      return setting(target._name(name)) ? target.get(name) : undefined
     },
     set(target, name, value) {
       if (name === 'macro') { target.setMacro(value); return true }
       if (typeof name !== 'string' || name in target) return Reflect.set(target, name, value, target)
-      if (!setting(name)) {
+      if (!setting(target._name(name))) {
         const near = nearest(name, namesToShow)
         if (near) throw new Error(`A synth has no setting called ${shown(name)}. Did you mean ${shown(near)}?`)
         return Reflect.set(target, name, value, target)
@@ -2537,6 +3204,235 @@ export function createSound(options = {}) {
     const synth = new Synth(id, patch, c.note ?? 60, null)
     synth._sample = sid
     return asSynth(synth)
+  }
+
+  // WHAT THE PLAYER SAYS BACK: a recording is over, a file is saved, the microphone is there or is not. It is asked
+  // for the first time something needs it; a host that carries the commands away hands what its player says to
+  // receiveSoundEvents.
+  const takes = new Map()
+  const saves = new Map()
+  let asks = 0
+  let hearing = false
+  let stopHearing = null
+  function hearBack() {
+    if (hearing) return
+    hearing = true
+    const join = () => { if (stopHearing !== false) stopHearing = transport?.onSoundEvents?.(receiveSoundEvents, scope) || null }
+    if (transport) join()
+    else midiJoins.push(join)
+  }
+  function receiveSoundEvents(events) {
+    for (const e of Array.isArray(events) ? events : [events]) {
+      if (!e) continue
+      if (e.type === 'recorded') takes.get(e.id)?._finish(e)
+      else if (e.type === 'saved') { saves.get(e.ask)?.(e.bytes); saves.delete(e.ask) } else if (e.type === 'microphone') micSynth?._said(e)
+    }
+  }
+
+  /**
+   * THE MICROPHONE: `const mic = useMicrophone()`. It is a synth whose sound comes in instead of being made, so it
+   * has a synth's settings (mic.echo = 0.4, mic.cutoff = 900), the voice changers (mic.voice = "robot") and the
+   * things a dial, a scope and a meter look for. Its own words: `pitch` is the pitch shifter (-12 to 12 semitones),
+   * `ring` the ring modulator, `gain` how much the microphone is turned up, and `gate` the level in dB below which
+   * it is taken as silence ("off" for none). Nothing is heard until listen().
+   */
+  class Mic extends Synth {
+    constructor(id) {
+      super(id, new Map(), 60, 0.3)
+      this._listening = false
+      /** "asking" until the browser answers, then "on", or why not: "refused", "none", "busy", "unavailable". "off" once closed. */
+      this.state = 'asking'
+      this.message = ''
+      this._waiting = []
+    }
+    _name(name) { return micName(name) }
+    _given(given) {
+      const out = {}
+      for (const [name, value] of Object.entries(given)) {
+        const k = key(name)
+        if (k === 'listening') this.listening = value
+        else if (k === 'gate' && (value === false || value === 'off' || value === null)) out.micGate = -100
+        else out[name] = value
+      }
+      // The microphone starts with no filter, so that it comes through untouched. Turning the cutoff asks for one.
+      const names = Object.keys(out).map((n) => setting(micName(n))?.name)
+      if ((names.includes('filter.cutoff') || names.includes('filter.resonance')) && !names.includes('filter.type') && this.get('filter') === 'off') out.filter = 'lowpass'
+      return super._given(out)
+    }
+    get(name) { return key(name) === 'listening' ? this._listening : super.get(name) }
+    describe(name) { return key(name) === 'listening' ? { name: 'listening', kind: 'bool', min: 0, max: 1, default: false, unit: '' } : super.describe(name) }
+    /** Hear the microphone, through its voice and effects. With loudspeakers this can howl: headphones are best. */
+    listen(on = true) {
+      this._listening = !!on
+      command({ op: 'mic', id: this._id, listen: this._listening, t: clock() })
+      return this
+    }
+    /** Stop hearing it. It can still be recorded, and a scope and a meter still show it. */
+    mute() { return this.listen(false) }
+    get listening() { return this._listening }
+    set listening(on) { this.listen(on === true || on === 1 || on === 'on') }
+    /** A promise of whether there is a microphone: true once it is on, false if there is none (the console says why, once). */
+    whenReady() { return this.state === 'asking' ? new Promise((yes) => this._waiting.push(yes)) : Promise.resolve(this.state === 'on') }
+    when_ready() { return this.whenReady() }
+    _said(e) {
+      if (this.state === 'off') return
+      this.state = e.state
+      this.message = e.message || ''
+      if (e.state !== 'asking') for (const yes of this._waiting.splice(0)) yes(e.state === 'on')
+    }
+    /** Let the microphone go: the browser's recording light goes out. useMicrophone() opens it again. */
+    close() {
+      if (this.state === 'off') return this
+      this.state = 'off'
+      this._listening = false
+      for (const yes of this._waiting.splice(0)) yes(false)
+      command({ op: 'mic', id: this._id, do: 'close', t: clock() })
+      if (micSynth === this) micSynth = mic = null
+      return this
+    }
+    remove() { return this.close() }
+  }
+  let mic = null
+  let micSynth = null
+  /**
+   * The microphone. The first call asks the browser for it, and the browser asks the person; until then, and if
+   * the answer is no, everything still works and there is simply no sound from it. useMicrophone({ voice: "robot",
+   * listen: true }) sets it up in one line; { raw: false } asks for the browser's own tidying (echo cancelling, noise
+   * removal, automatic level), which suits loudspeakers and spoils a voice changer.
+   */
+  function useMicrophone(o = {}) {
+    if (typeof o === 'string') o = { voice: o }
+    if (!o || typeof o !== 'object') throw new Error(`useMicrophone takes its settings in braces, as in useMicrophone({ voice: "robot" }), not ${shown(o)}`)
+    const { raw, listen, ...rest } = o
+    if (!mic) {
+      micSynth = new Mic(prefix + 'm' + ++ids)
+      mic = micSynth._self = asSynth(micSynth)
+      patchOf({ micGate: MIC_GATE }, 'useMicrophone', false, micSynth._patch)
+      const c = { op: 'mic', id: micSynth._id, set: { micGate: MIC_GATE }, t: clock() }
+      if (raw === false) c.raw = false
+      hearBack()
+      command(c)
+    }
+    if (Object.keys(rest).length) mic.set(rest)
+    if (listen !== undefined) mic.listen(!!listen)
+    return mic
+  }
+
+  /**
+   * A RECORDING, while it is being made and afterwards: what recordSound gives back at once. It is a sample like
+   * one from loadSample, so take.play(), take.play("E4"), take.reverse = true and take.loop = true all work, and
+   * they work while it is still recording (it plays what there is so far). `done` turns true and `seconds` says
+   * how long it is when it is over; take.onDone(() => take.play()) is told then, and `await take.whenDone()` waits.
+   */
+  class Take extends Synth {
+    constructor(id, patch, sample) {
+      super(id, patch, 60, null)
+      this._sample = sample
+      this.done = false
+      this.recording = true
+      this.seconds = 0
+      this.frames = 0
+      this._after = []
+    }
+    onDone(fn) {
+      if (typeof fn !== 'function') throw new Error('onDone needs a function to call when the recording is over, as in take.onDone(() => take.play())')
+      if (this.done) fn(this._self)
+      else this._after.push(fn)
+      return this._self
+    }
+    on_done(fn) { return this.onDone(fn) }
+    whenDone() { return new Promise((yes) => this.onDone(yes)) }
+    when_done() { return this.whenDone() }
+    /** End this recording now. */
+    stopRecording() { if (!this.done) command({ op: 'record', do: 'stop', id: this._sample, t: clock() }); return this._self }
+    stop_recording() { return this.stopRecording() }
+    _finish(e) {
+      if (this.done) return
+      this.done = true
+      this.recording = false
+      this.seconds = e.seconds || 0
+      this.frames = e.frames || 0
+      for (const fn of this._after.splice(0)) { try { fn(this._self) } catch (err) { tell((err && err.message) || String(err), 'error') } }
+    }
+  }
+  let settingName = null
+  // Settings by engine id as settings by name, to send.
+  const named = (list) => {
+    if (!settingName) settingName = new Map(PARAMS.map((p) => [p[0], p[1]]))
+    return Object.fromEntries(list.map(([pid, value]) => [settingName.get(pid), value]))
+  }
+  // A recording of the plain microphone is given the voice the microphone has, so it plays back as it was heard:
+  // what was set before any voice, the voice, and what was turned after it.
+  function dressLike(take, from) {
+    const part = [...voices().all].filter((pid) => pid < 200)
+    const worn = from._worn
+    if (worn && worn.under) {
+      const under = part.filter((pid) => worn.under.has(pid)).map((pid) => [pid, worn.under.get(pid)])
+      if (under.length) take.set(named(under))
+      take.voice = worn.voice
+    }
+    const differs = part.filter((pid) => from._patch.has(pid) && from._patch.get(pid) !== (take._patch.has(pid) ? take._patch.get(pid) : engineDefault(pid))).map((pid) => [pid, from._patch.get(pid)])
+    if (differs.length) take.set(named(differs))
+  }
+  // What recordSound, recordOutput, startRecording and a synth's record() all do.
+  function recordFrom(o, said) {
+    const wid = prefix + 'w' + ++ids
+    const c = { op: 'record', id: wid }
+    const from = o.from === undefined ? 'mic' : o.from
+    let source = null
+    if (from === 'output' || from === output) c.from = 'output'
+    else if (from === 'mic' || from === 'microphone' || from instanceof Mic) { c.from = 'mic'; source = useMicrophone() } else if (from instanceof Synth) { c.from = 'synth'; c.synth = from._id } else throw new Error(`${said}: "from" needs the microphone, a synth or "output", not ${shown(from)}`)
+    if (o.length !== undefined && o.length !== null) {
+      c.len = length(o.length, `${said}: the length`)
+      if (c.len > LONGEST_RECORDING) throw new Error(`${said}: a recording can be up to ${LONGEST_RECORDING} seconds long, not ${Math.round(c.len)}`)
+    } else if (o.max !== undefined) c.max = amount(o.max, `${said}: max`, 0.1, LONGEST_RECORDING)
+    if (o.effects) c.effects = true
+    if (o.loop) c.loop = Array.isArray(o.loop) ? o.loop : true
+    c.t = when(o, said)
+    const sid = prefix + 's' + ++ids
+    hearBack()
+    command(c)
+    command({ op: 'synth', id: sid, preset: 'sample', set: { sample: wid }, t: clock() })
+    const made = new Take(sid, patchOf(PRESETS.sample, said, false, patchOf(PLAIN, said, false)), wid)
+    if (c.loop) made._loop = c.loop
+    const take = made._self = asSynth(made)
+    takes.set(wid, made)
+    if (source && !c.effects) dressLike(take, source)
+    return take
+  }
+  /**
+   * Record the microphone into a sample: `const take = recordSound(3)` is three seconds (a note length by name
+   * works too). It gives the sample back at once and does not wait: see Take. What is recorded is the plain voice,
+   * whether or not the microphone is being listened to, and the take is given the microphone's voice and effects,
+   * so it plays back as the microphone sounds and can be changed afterwards (take.voice = "monster").
+   * { effects: true } records the voice after its effects instead, which needs listen(). { from: lead } records a
+   * synth, { from: "output" } everything. With no microphone the take is empty, and done at once.
+   */
+  function recordSound(...args) { return recordFrom(choices(args, ['length']), 'recordSound') }
+  /** A recording with no set length: it runs until stopRecording(), or for 30 seconds, or { max: seconds } up to 120. */
+  function startRecording(o = {}) { return recordFrom({ ...o, length: undefined }, 'startRecording') }
+  /** End the recording that is being made. */
+  function stopRecording() { command({ op: 'record', do: 'stop', t: clock() }) }
+  /** Record everything that is played, in stereo, for "save my tune": `const tune = recordOutput(10)`, then saveSound(tune, "tune.wav"). */
+  function recordOutput(...args) { return recordFrom({ ...choices(args, ['length']), from: 'output' }, 'recordOutput') }
+  /**
+   * A recording or a sample as a WAV file: saveSound(take, "hello.wav"). In a browser the file is downloaded (or
+   * given to the app showing the page, if it asked to be). It gives a promise of the file's bytes, and
+   * { download: false } gives the bytes alone. A recording that is still being made is saved when it is over.
+   */
+  function saveSound(what, name, o = {}) {
+    if (name && typeof name === 'object') { o = name; name = undefined }
+    if (!what || !what._sample) throw new Error('saveSound needs a recording or a sample to save, as in saveSound(take, "hello.wav")')
+    if (name !== undefined && (typeof name !== 'string' || !name.trim())) throw new Error(`saveSound needs a name for the file, as in saveSound(take, "hello.wav"), not ${shown(name)}`)
+    name = name === undefined ? 'sound.wav' : /\.wav$/i.test(name) ? name : name + '.wav'
+    const ask = ++asks
+    const c = { op: 'save', id: what._sample, name, ask }
+    if (o.download === false) c.download = false
+    hearBack()
+    const bytes = new Promise((yes) => saves.set(ask, yes))
+    if (typeof what.whenDone === 'function') what.whenDone().then(() => command({ ...c, t: clock() }))
+    else command({ ...c, t: clock() })
+    return bytes
   }
 
   // The synth playNote and playNotes use.
@@ -2667,6 +3563,11 @@ export function createSound(options = {}) {
 
   const api = {
     playSound, playNote, playNotes, makeSynth, loadSample, playSong,
+    useMicrophone, recordSound, startRecording, stopRecording, recordOutput, saveSound, receiveSoundEvents,
+    /** Let the microphone go, if it was asked for. */
+    stopMicrophone() { micSynth?.close() },
+    /** The voice changers by name. */
+    voiceNames,
     /** A chord as a fast arpeggio on a chip sound: playArp("Cm7"), playArp("C4", "minor", 1, { speed: 30, order: "down" }). */
     playArp(...args) { return arpSynth().arp(...args) },
     /** The same, staying until it is stopped, and able to change chord: `const chord = startArp("Am")`, `chord.change("F")`. */
@@ -2719,7 +3620,9 @@ export function createSound(options = {}) {
     close() {
       if (closed) return
       midi?.close()
-      cmds = [{ op: 'stop', t: clock() }, { op: 'close', t: clock() }]
+      if (stopHearing) stopHearing()
+      stopHearing = false
+      cmds = [...(micSynth ? [{ op: 'mic', id: micSynth._id, do: 'close', t: clock() }] : []), { op: 'stop', t: clock() }, { op: 'close', t: clock() }]
       if (transport) flush()
       closed = true
       if (mine) { if (--mine.users <= 0) { mine.player.close(); if (shared === mine) shared = null } } else player?.close()
@@ -2757,6 +3660,14 @@ export function describe() {
     settings: PARAMS.map(([id, name, kind, min, max, def, unit, choices]) => ({ id, name, kind: KINDS[kind], min, max, default: def, unit, ...(choices ? { choices } : {}), scope: id < 200 ? 'synth' : 'all' })),
     names: Object.fromEntries(Object.entries(ALIASES).map(([alias, to]) => [alias, Array.isArray(to) ? { setting: to[0], scale: to[1] } : { setting: to, scale: 1 }])),
     choiceWords: CHOICE_WORDS, plain: PLAIN, synths: PRESETS, sounds: SOUNDS, chords: CHORDS, orders: ORDERS, macroWaves: MACRO_WAVES, lengths: LENGTHS, lengthLetters: LENGTH_LETTERS, midi: MIDI,
+    // The voice changers (each a list of settings; putting one on first puts back what the last changed), and the microphone.
+    voices: VOICES,
+    microphone: {
+      names: MIC_NAMES, gate: MIC_GATE, states: ['asking', 'on', 'refused', 'none', 'busy', 'unavailable', 'off'],
+      functions: ['useMicrophone', 'stopMicrophone', 'recordSound', 'startRecording', 'stopRecording', 'recordOutput', 'saveSound', 'receiveSoundEvents', 'voiceNames'],
+      micFunctions: ['listen', 'mute', 'record', 'whenReady', 'close'], takeFunctions: ['onDone', 'whenDone', 'stopRecording'],
+      events: ['microphone', 'recorded', 'saved'], longestRecording: LONGEST_RECORDING, usualRecording: USUAL_RECORDING,
+    },
   }
 }
 
@@ -2764,6 +3675,8 @@ export function describe() {
 export function soundNames() { return Object.keys(SOUNDS) }
 export function synthNames() { return Object.keys(PRESETS).filter((n) => n !== 'sample') }
 export function settingNames() { allSettings(); return [...namesToShow] }
+/** The voice changers a microphone, a recording or a synth can be given: mic.voice = "robot". */
+export function voiceNames() { return Object.keys(VOICES) }
 
 export const playSound = (...a) => mine().playSound(...a)
 export const playNote = (...a) => mine().playNote(...a)
@@ -2809,6 +3722,15 @@ export const useMidiInput = (name) => mine().useMidiInput(name)
 export const useMidiOutput = (name) => mine().useMidiOutput(name)
 export const receiveMidi = (events) => mine().receiveMidi(events)
 export const stopMidi = () => { if (page) page.stopMidi() }
+// The microphone, recording and saving (see createSound's useMicrophone, recordSound and saveSound).
+export const useMicrophone = (o) => mine().useMicrophone(o)
+export const stopMicrophone = () => { if (page) page.stopMicrophone() }
+export const recordSound = (...a) => mine().recordSound(...a)
+export const startRecording = (o) => mine().startRecording(o)
+export const stopRecording = () => { if (page) page.stopRecording() }
+export const recordOutput = (...a) => mine().recordOutput(...a)
+export const saveSound = (...a) => mine().saveSound(...a)
+export const receiveSoundEvents = (events) => mine().receiveSoundEvents(events)
 /** The page's player, once a sound has been asked for: its `state` is 'waiting' until the first tap. */
 export const soundPlayer = () => mine().player
 export {
@@ -2823,4 +3745,7 @@ export {
   sendMidiNoteOff as send_midi_note_off, sendMidiControl as send_midi_control, sendMidiBend as send_midi_bend,
   sendMidiProgram as send_midi_program, sendMidiClock as send_midi_clock, midiDevices as midi_devices,
   useMidiInput as use_midi_input, useMidiOutput as use_midi_output, receiveMidi as receive_midi, stopMidi as stop_midi,
+  useMicrophone as use_microphone, stopMicrophone as stop_microphone, recordSound as record_sound, startRecording as start_recording,
+  stopRecording as stop_recording, recordOutput as record_output, saveSound as save_sound, receiveSoundEvents as receive_sound_events,
+  voiceNames as voice_names,
 }

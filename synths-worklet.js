@@ -27,7 +27,7 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
   const eventsAt = x.synths_event_buffer(engine)
   const eventRoom = x.synths_event_capacity()
   const outRoom = x.synths_output_capacity()
-  const NOTE_ON = 1, NOTE_OFF = 2, ALL_OFF = 3, SONG = 15, EVERY = 0xffff
+  const NOTE_ON = 1, NOTE_OFF = 2, ALL_OFF = 3, SONG = 15, RECORD = 16, EVERY = 0xffff
 
   /** Events not yet handed to the engine: [frame, type, part, a, x, y, z, b], soonest first. */
   const queue = []
@@ -50,6 +50,7 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
     taps,
     songPosition,
     packSong,
+    pushInput,
     close() { x.synths_destroy(engine) },
   }
 
@@ -102,12 +103,144 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
         if (songLoaded) add(core.time, SONG, 0, 0, 0, 0)
       } else if (kind === 'songLoad') loadSong(op)
       else if (kind === 'songUnload') { if (x.synths_song_unload) x.synths_song_unload(engine); songLoaded = false }
+      else if (kind === 'record') record(op)
+      else if (kind === 'recordStop') recordStop(op)
+      else if (kind === 'sampleRead') readSample(op)
+      else if (kind === 'sampleConfig') {
+        // A loop or a base note for a sample that is already there (a recording, when it is done).
+        const [, slot, base, loopMode, loopStart, loopEnd] = op
+        const had = kept.get(slot) || { channels: 1, base: 60 }
+        if (base != null) had.base = base
+        kept.set(slot, had)
+        x.synths_sample_config(engine, slot, had.base, loopMode, loopStart, loopEnd || x.synths_sample_frames(engine, slot))
+      }
     }
   }
+
+  /** What is known of the sample in each slot, for reading it back out: slot -> { channels, base }. */
+  const kept = new Map()
+
+  /**
+   * RECORDING. The engine records into a sample slot between a start event and a stop event, one recording at a
+   * time. Here each recording asked for is kept until its time comes: [, slot, at, how long or null, what (0 the
+   * input, 1 a part, 2 everything), part, room in seconds, channels]. The slot's memory is made now, outside any
+   * render. A recording that begins while another is running ends that one, which keeps what it had. When one
+   * ends, by its length, by being stopped, by the next beginning or by its room running out, the page is told how
+   * many frames it has: { type: 'recorded', slot, frames, full }.
+   */
+  const recs = []
+  let recording = null
+  const ended = []
+  let recAt = 0
+  function record([, slot, at, len, source, part, room, channels]) {
+    const none = () => post({ type: 'recorded', slot, frames: 0, full: false, rate: sampleRate })
+    if (!x.synths_record_buffer) { post({ type: 'unsupported', what: 'record' }); return none() }
+    if (!recAt) recAt = x.synths_alloc(16)
+    if (x.synths_record_buffer(engine, slot, Math.max(1, Math.ceil(room * sampleRate)), channels) !== 0) { post({ type: 'problem', what: 'record-memory' }); return none() }
+    kept.set(slot, { channels, base: 60 })
+    const start = frameOf(at)
+    recs.push({ slot, start, end: len == null ? null : start + Math.max(1, Math.round(len * sampleRate)), source, part })
+    recs.sort((a, b) => a.start - b.start)
+  }
+  function recordStop([, at, slot]) {
+    const frame = frameOf(at)
+    if (recording && (slot < 0 || recording.slot === slot)) recording.end = recording.end == null ? frame : Math.min(recording.end, frame)
+    for (let i = recs.length - 1; i >= 0; i--) {
+      if (slot >= 0 && recs[i].slot !== slot) continue
+      // One that was to begin later never begins; one about to begin is as long as the time until the stop.
+      if (recs[i].start >= frame) { post({ type: 'recorded', slot: recs[i].slot, frames: 0, full: false, rate: sampleRate }); recs.splice(i, 1) } else recs[i].end = recs[i].end == null ? frame : Math.min(recs[i].end, frame)
+    }
+  }
+  // The start and stop events that fall before `end`, in the order they happen.
+  function recordEvents(end) {
+    for (;;) {
+      const next = recs[0]
+      const stopAt = recording && recording.end != null ? recording.end : Infinity
+      if (next && next.start < end && next.start <= stopAt) {
+        if (recording) ended.push(recording)
+        recording = recs.shift()
+        add(Math.max(core.time, recording.start), RECORD, recording.part, 1, recording.slot, recording.source)
+      } else if (recording && stopAt < end) {
+        add(Math.max(core.time, stopAt), RECORD, 0, 0, 0, 0)
+        ended.push(recording)
+        recording = null
+      } else return
+    }
+  }
+  // After a render: say which recordings are over. One still running that the engine has stopped ran out of room.
+  function recordEnds() {
+    for (const r of ended.splice(0)) post({ type: 'recorded', slot: r.slot, frames: x.synths_sample_frames(engine, r.slot), full: false, rate: sampleRate })
+    if (!recording || !recAt) return
+    x.synths_record_read(engine, recAt)
+    const state = new Uint32Array(memory.buffer, recAt, 4)
+    if (state[0] === 1 && state[1] === recording.slot) return
+    post({ type: 'recorded', slot: recording.slot, frames: x.synths_sample_frames(engine, recording.slot), full: true, rate: sampleRate })
+    recording = null
+  }
+  // A sample read back out of the engine, to be saved: [, slot, token].
+  function readSample([, slot, token]) {
+    const had = kept.get(slot) || { channels: 1 }
+    const frames = x.synths_sample_read ? x.synths_sample_frames(engine, slot) : 0
+    const at = frames ? x.synths_alloc(frames * had.channels * 4) : 0
+    const pcm = at ? new Float32Array(memory.buffer, at, x.synths_sample_read(engine, slot, 0, at, frames) * had.channels).slice() : new Float32Array(0)
+    if (at) x.synths_free(at)
+    post({ type: 'sample', token, pcm, channels: had.channels, rate: sampleRate })
+  }
+
+  /**
+   * THE LIVE INPUT: a microphone. render() is handed each block's input by a host that has it as the sound card
+   * does (the worklet's own input). A host that has it as frames arriving from elsewhere pushes them here, and they
+   * wait in a ring to be played out a block at a time. Playing begins when a lump and a little more is in hand, and
+   * begins again like that after the ring runs dry, so frames arriving in uneven lumps are not heard as gaps. The latest input is also kept here as it
+   * came, for a scope and a meter to show while the microphone is not being listened to.
+   */
+  const RING = 65536
+  let ring = null, ringAt = 0, ringHas = 0, ringDry = true, ringOn = false
+  function pushInput(frames) {
+    if (!ring) ring = new Float32Array(RING)
+    ringOn = true
+    let n = frames.length, from = 0
+    if (n > RING) { from = n - RING; n = RING }
+    // No room: the oldest frames make way.
+    if (ringHas + n > RING) { const drop = ringHas + n - RING; ringAt = (ringAt + drop) % RING; ringHas -= drop }
+    let to = (ringAt + ringHas) % RING
+    for (let i = 0; i < n; i++) { ring[to] = frames[from + i]; if (++to === RING) to = 0 }
+    ringHas += n
+    // Enough in hand to begin (again) is one lump and a little more, so the next lump can be late.
+    const enough = n + Math.min(n, 2048)
+    // Far more than that waiting is a host that sends faster than the sound card plays: the oldest is let go.
+    if (ringHas > Math.max(sampleRate / 4, 3 * n)) { const drop = ringHas - enough; ringAt = (ringAt + drop) % RING; ringHas -= drop }
+    if (ringDry && ringHas >= enough) ringDry = false
+  }
+  function pullInput(into, n) {
+    if (ringDry || ringHas < n) {
+      ringDry = true
+      into.fill(0, 0, n)
+      return
+    }
+    for (let i = 0; i < n; i++) { into[i] = ring[ringAt]; if (++ringAt === RING) ringAt = 0 }
+    ringHas -= n
+  }
+  const heardInput = new Float32Array(1024)
+  let heardAt = 0, heardPeak = 0
+  function hearInput(block, n) {
+    let top = 0
+    for (let i = 0; i < n; i++) {
+      const v = block[i]
+      heardInput[heardAt] = v
+      heardAt = (heardAt + 1) & 1023
+      if (v > top) top = v
+      else if (-v > top) top = -v
+    }
+    // As the engine's meters do: up at once, and back to 37% in half a second.
+    heardPeak = Math.max(top, heardPeak * Math.exp(-n / (0.5 * sampleRate)))
+  }
+  let input = null
 
   function loadSample([, slot, pcm, channels, rate, base, loopMode, loopStart, loopEnd]) {
     const frames = Math.floor(pcm.length / channels)
     if (!frames) return
+    kept.set(slot, { channels, base })
     const at = x.synths_alloc(pcm.length * 4)
     if (!at) return post({ type: 'problem', what: 'sample-memory' })
     new Float32Array(memory.buffer, at, pcm.length).set(pcm)
@@ -201,6 +334,13 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
     if (!tapAt) return []
     const out = []
     for (const source of sources) {
+      if (source === 0xfffe) {
+        // The microphone as it came in, which is kept here and not in the engine.
+        const samples = new Float32Array(1024)
+        for (let i = 0; i < 1024; i++) samples[i] = heardInput[(heardAt + i) & 1023]
+        out.push([source, samples, heardPeak, heardPeak, new Uint32Array(4)])
+        continue
+      }
       const n = x.synths_scope_read(engine, source, tapAt, Math.min(frames, 4096))
       const samples = new Float32Array(memory.buffer, tapAt, n).slice()
       x.synths_levels_read(engine, source, 1, tapAt)
@@ -266,8 +406,12 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
     }
   }
 
-  /** Make `frames` frames into `outLeft` and `outRight` (which may be missing), starting at `at`. */
-  function render(outLeft, outRight, frames, at = 0) {
+  /**
+   * Make `frames` frames into `outLeft` and `outRight` (which may be missing), starting at `at`. `inLeft` is the
+   * live input that came in over the same frames, if the host has one: one channel, at the engine's sample rate.
+   */
+  function render(outLeft, outRight, frames, at = 0, inLeft = null) {
+    const live = (inLeft || ringOn) && x.synths_render_io
     for (let done = 0; done < frames;) {
       const n = Math.min(outRoom, frames - done)
       const end = core.time + n
@@ -276,8 +420,16 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
         changeTempo(tempos.shift())
       }
       if (tunes.size) playTunes(end)
+      if (recs.length || recording) recordEvents(end)
       if (queue.length) feed(end)
-      const made = x.synths_render(engine, n)
+      if (live) {
+        if (!input || input.buffer !== memory.buffer) input = new Float32Array(memory.buffer, x.synths_input_left(engine), outRoom)
+        if (!inLeft) pullInput(input, n)
+        else if (done + n <= inLeft.length) input.set(done === 0 && n === inLeft.length ? inLeft : inLeft.subarray(done, done + n))
+        else { input.fill(0, 0, n); if (done < inLeft.length) input.set(inLeft.subarray(done)) }
+        hearInput(input, n)
+      }
+      const made = live ? x.synths_render_io(engine, n, 1) : x.synths_render(engine, n)
       if (!made) break
       if (!left || left.buffer !== memory.buffer) {
         left = new Float32Array(memory.buffer, x.synths_output_left(engine), outRoom)
@@ -287,6 +439,7 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
       if (outRight) outRight.set(made === outRoom ? right : right.subarray(0, made), at + done)
       core.time += made
       done += made
+      if (recording || ended.length) recordEnds()
     }
   }
 
@@ -303,6 +456,8 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
       this.watch = null
       this.watchFor = 0
       this.blocks = 0
+      // Whether the node's input is a microphone to be given to the engine. Until it is, the input is not looked at.
+      this.mic = false
       this.port.onmessage = (m) => {
         const core = this.core
         if (!core) return
@@ -322,6 +477,8 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
           this.watch = m.data.watch
           this.watchFor = Math.ceil(sampleRate * 1.5 / 128)
         }
+        if (m.data.mic !== undefined) this.mic = !!m.data.mic
+        if (m.data.input) core.pushInput(m.data.input)
         if (m.data.ask) this.port.postMessage({ type: 'state', ask: m.data.ask, voices: core.voices(), time: core.time, frame: currentFrame })
       }
       try {
@@ -338,7 +495,7 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
       if (!core) return !this.over
       if (!out || !out[0]) return true
       core.delta = core.time - currentFrame
-      core.render(out[0], out[1], out[0].length)
+      core.render(out[0], out[1], out[0].length, 0, (this.mic && inputs[0] && inputs[0][0]) || null)
       if (this.watch && (++this.blocks & 7) === 0) {
         if ((this.watchFor -= 8) <= 0) this.watch = null
         else this.port.postMessage({ type: 'taps', taps: core.taps(this.watch, 1024), song: this.watchSong ? core.songPosition() : null })

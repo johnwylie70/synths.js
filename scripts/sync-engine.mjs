@@ -3,7 +3,7 @@
  * Brings the engine into this package, and keeps what is made from it in step:
  *
  *   synths_core.wasm     the engine, copied from ../synths-core/target/wasm (build it there with scripts/build-wasm.sh)
- *   synths.js            its table of the engine's parameters, between the PARAMS marks, read out of the engine itself
+ *   synths.js            its table of the engine's parameters and voice changers, between the PARAMS marks, read out of the engine itself
  *   synths-worklet.js    the audio worklet's module, which is text taken from synths.js
  *   synths-names.json    every name a binding in another language needs: settings, friendly names, synths, sounds
  *
@@ -52,6 +52,7 @@ const block = [
   '/* PARAMS:BEGIN */',
   `const ENGINE = ${JSON.stringify({ abi: table.abi, version: table.version, parts: table.limits.parts, voices: table.limits.voices, samples: table.limits.samples, events: table.events.map((e) => e.name) })}`,
   'const PARAMS = [', ...rows, ']',
+  `const VOICES = ${JSON.stringify(Object.fromEntries((table.voice_presets || []).map((v) => [v.name, { help: v.help, values: v.values }])))}`,
   '/* PARAMS:END */',
 ].join('\n')
 
