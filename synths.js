@@ -2427,7 +2427,7 @@ function fallbackSize(want, sampleRate) {
  *
  * @param {{ wasm?: ArrayBuffer | Uint8Array | WebAssembly.Module | string | Promise<any>, worklet?: 'auto' | 'blob' | 'file' | string,
  *           latency?: number, context?: AudioContext, destination?: AudioNode, fallback?: boolean | 'always', fallbackBuffer?: 'auto' | number,
- *           buffer?: 'auto' | 'small' | 'medium' | 'large' | number,
+ *           buffer?: 'auto' | 'small' | 'medium' | 'large' | number, core?: (given: { sampleRate: number, post(message): void }) => object,
  *           onState?: (state: string) => void, microphone?: any, save?: (file: { name: string, bytes: Uint8Array, type: string }) => void }} options
  *   `wasm` is the engine, as bytes (for a page that may not fetch it) or an address; without it, `synths_core.wasm` beside this file.
  *   `worklet` is how the worklet's module is loaded: 'blob' from the text inside this file (no second file, no fetch), 'file'
@@ -2440,11 +2440,14 @@ function fallbackSize(want, sampleRate) {
  *   is heard later: everything is scheduled two buffers and a little ahead unless `latency` is given.
  *   `buffer` is what a program's own setSoundBuffer() asked for before the player was made: the same on the fallback, and
  *   on the worklet (which always makes 128 frames at a time) how far ahead everything is scheduled, that many frames.
+ *   `core` is for an app that makes the sound itself, on an audio thread of its own: a function that gives the engine's
+ *   core (docs/core.md is the contract), with `context` then the app's own clock, { currentTime, sampleRate, state,
+ *   resume(), suspend(), close(), addEventListener(), decodeAudioData() }. Nothing is fetched and no Web Audio is needed.
  *   `microphone` is where the microphone comes from when it is not the browser's to ask for: a MediaStream, or
  *   { open({ sampleRate, raw, constraints, push }), close() }, or false for none (docs/microphone.md is the contract).
  *   `save` is given a file that saveSound made, in place of the browser being asked to download it.
  * @returns {{ send(batch): void, read(id?): { samples: Float32Array, level: number[], notes: number[] },
- *             state: 'loading'|'waiting'|'on'|'failed', kind: 'worklet'|'fallback'|null, ready: Promise<void>,
+ *             state: 'loading'|'waiting'|'on'|'failed', kind: 'worklet'|'fallback'|'host'|null, ready: Promise<void>,
  *             fallback?: { buffer: number, underruns: number, reason: 'insecure'|'worklet' },
  *             context: AudioContext, node: AudioNode, unlock(): void, pause(): void, resume(): void, ask(): Promise<object>, close(): void }}
  *   `fallback` is there when `kind` is 'fallback': the frames made at a time now, how many times the page was too busy
@@ -2500,7 +2503,7 @@ export function createPlayer(options = {}) {
     resume() { paused = false; unlock() },
     /** What the engine is doing: { voices, time } (for tests and meters). */
     ask() {
-      if (core) return Promise.resolve({ voices: core.voices(), time: core.time })
+      if (core) return Promise.resolve({ voices: core.voices?.() ?? 0, time: core.time ?? 0 })
       if (!port) return Promise.resolve({ voices: 0, time: 0 })
       return new Promise((yes) => { waiting.set(++asks, yes); port.postMessage({ ask: asks }) })
     },
@@ -2521,7 +2524,8 @@ export function createPlayer(options = {}) {
     waitingSince = s === 'waiting' ? local() : null
     options.onState?.(s)
   }
-  if (!Context) {
+  // A host that makes the sound itself (see `core`) gives its own clock in the place of an AudioContext.
+  if (!Context && !options.context) {
     tell('this browser has no Web Audio, so there will be no sound.')
     state('failed')
     return player
@@ -2550,7 +2554,7 @@ export function createPlayer(options = {}) {
     let lump = frames instanceof Float32Array ? frames : Float32Array.from(frames)
     if (rate > 0 && rate !== context.sampleRate) lump = stretch(lump, rate / context.sampleRate)
     if (port) port.postMessage({ input: lump })
-    else core?.pushInput(lump)
+    else core?.pushInput?.(lump)
   }
   async function openMic(c) {
     const mine = ++micOpen
@@ -2574,6 +2578,8 @@ export function createPlayer(options = {}) {
       if (!stream.getAudioTracks().length) throw { name: 'NotFoundError' }
       micStream = stream
       micOwn = own
+      // A host that makes the sound itself has no graph for a stream to go into: it pushes the frames (docs/microphone.md).
+      if (!context.createMediaStreamSource) throw { kind: 'unsupported' }
       micSource = context.createMediaStreamSource(stream)
       micSource.connect(inlet || player.node)
       micLive = true
@@ -2617,7 +2623,7 @@ export function createPlayer(options = {}) {
   // BROWSERS KEEP A PAGE SILENT until the person has touched it. Every touch asks again; the first one that the
   // browser accepts turns the sound on, and what was held back for it is played then.
   function unlock() {
-    if (!closed && !paused && !resting && context.state !== 'running') context.resume?.().catch(() => {})
+    if (!closed && !paused && !resting && context.state !== 'running') Promise.resolve(context.resume?.()).catch(() => {})
   }
   const GESTURES = ['pointerdown', 'mousedown', 'touchend', 'keydown']
   if (typeof addEventListener === 'function') for (const g of GESTURES) addEventListener(g, unlock, { capture: true, passive: true })
@@ -2736,7 +2742,7 @@ export function createPlayer(options = {}) {
   function read(id, scope) {
     const part = conductor ? conductor.partOf(id, scope) : -1
     if (part < 0 || closed) return NOTHING
-    if (core) { const now = core.taps([part], 1024)[0]; return now ? reading(now, conductor.gain()) : NOTHING }
+    if (core) { const now = core.taps?.([part], 1024)?.[0]; return now ? reading(now, conductor.gain()) : NOTHING }
     if (!port) return NOTHING
     const at = local()
     const fresh = !watched.has(part)
@@ -2747,7 +2753,7 @@ export function createPlayer(options = {}) {
   /** Where the song is now: { state: 'none'|'stopped'|'playing'|'paused', order, pattern, row, tick, speed, tempo, rounds, rows, orders }. It never waits. */
   function songPosition() {
     if (closed) return NO_SONG
-    if (core) return songPlace(core.songPosition())
+    if (core) return songPlace(core.songPosition?.())
     if (!port) return NO_SONG
     const at = local()
     const fresh = at - songWatched > 2
@@ -2767,7 +2773,7 @@ export function createPlayer(options = {}) {
     try { player.node?.disconnect() } catch (e) { /* already gone */ }
     if (processor) { processor.onaudioprocess = null; try { processor.disconnect() } catch (e) { /* already gone */ } }
     if (port) port.postMessage({ close: true })
-    if (core) core.close()
+    if (core) core.close?.()
     if (!options.context) context.close?.().catch(() => {})
     player.state = 'closed'
   }
@@ -2798,7 +2804,7 @@ export function createPlayer(options = {}) {
   // THE BUFFER, as a program sets it (see setSoundBuffer). It may come before the engine is there, and is then
   // how the player starts.
   function bufferNow() {
-    return { frames: processor ? player.fallback.buffer : port ? 128 : 0, delay: Math.round(latency * 1000), thread: processor ? 'page' : port ? 'audio' : null, underruns: player.fallback ? player.fallback.underruns : 0, setting: bufferWant }
+    return { frames: processor ? player.fallback.buffer : port ? 128 : 0, delay: Math.round(latency * 1000), thread: processor ? 'page' : port ? 'audio' : player.kind === 'host' ? 'host' : null, underruns: player.fallback ? player.fallback.underruns : 0, setting: bufferWant }
   }
   function sayBuffer() { if (bufferScopes.size) { const now = { type: 'buffer', ...bufferNow() }; for (const scope of bufferScopes) told.emit(scope, [now]) } }
   function setBuffer(asked) {
@@ -2891,7 +2897,7 @@ export function createPlayer(options = {}) {
   }
 
   async function start() {
-    const wasm = await engineBytes(options.wasm)
+    const wasm = options.core ? null : await engineBytes(options.wasm)
     if (closed) return
     const post = (ops, transfer) => {
       if (port) port.postMessage({ ops }, transfer)
@@ -2905,9 +2911,19 @@ export function createPlayer(options = {}) {
     }
     conductor = makeConductor(post, async (c) => decode(await sampleBytes(c), context), sampleBytes, (scope, event) => told.emit(scope, [event]))
     const destination = options.destination || context.destination
-    const how = options.fallback !== 'always' && context.audioWorklet && typeof AudioWorkletNode !== 'undefined' ? await loadWorklet() : 'none'
+    const how = options.core ? 'host' : options.fallback !== 'always' && context.audioWorklet && typeof AudioWorkletNode !== 'undefined' ? await loadWorklet() : 'none'
     if (closed) return
-    if (how === 'worklet') {
+    if (options.core) {
+      // THE ENGINE IS THE HOST'S (a native app's, on its own audio thread). `core` makes what makeCore makes:
+      // { time, sampleRate, voices(), exec(ops), taps(sources, frames), songPosition(), pushInput(frames), close() },
+      // and is given `post` for what the core says back ('song', 'recorded', 'sample', 'problem'). docs/core.md is
+      // the contract. No engine is fetched, no worklet loaded and no node made.
+      core = await options.core({ sampleRate: context.sampleRate, post: onMessage })
+      if (closed) { core?.close?.(); return }
+      if (!core || typeof core.exec !== 'function') throw new Error('the host\'s core is not one: it needs exec(ops) at least (docs/core.md)')
+      fallbackBegun = true          // the host keeps its own clock: times in ops are seconds of context.currentTime
+      player.kind = 'host'
+    } else if (how === 'worklet') {
       const bytes = wasm instanceof WebAssembly.Module ? wasm : ArrayBuffer.isView(wasm) ? wasm.buffer.slice(wasm.byteOffset, wasm.byteOffset + wasm.byteLength) : wasm
       // Its one input is for a microphone, mixed down to one channel; with nothing connected it is not there at all.
       const node = player.node = new AudioWorkletNode(context, 'synths', { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2], channelCount: 1, channelCountMode: 'explicit', processorOptions: { wasm: bytes } })

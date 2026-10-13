@@ -51,6 +51,8 @@ The first version.
 - `loadSamples({ C2: "piano-C2.wav", C3: "piano-C3.wav" })` (`load_samples`): several recordings as one instrument, each playing the keys nearest the note it was played at. The notes can be read from the files' names (`loadSamples(["piano-C2.wav", "piano-Fs2.wav"])`); `{ kit: true }` is a drum kit; `{ crossfade: 3 }` fades neighbours together; a list of `{ file, note, from, to, loud, tune, volume, release }` gives layers by loudness and everything by hand; several files for one note go in turn. On an ordinary synth: `lead.samples = { … }`, `makeSynth({ samples })`. `piano.zones()` reads it back, and a song's instrument can be given one. It travels as a `zones` command. `examples/piano.js` is a piano of nine real recordings (University of Iowa Musical Instrument Samples).
 - The engine is synths-core 53b5bad, which has sample maps.
 
+- For apps: `createPlayer({ core, context })` takes an engine the app runs itself (a native app's, on its own audio thread) and the app's clock, and then fetches no engine and uses no Web Audio. [docs/core.md](docs/core.md) is the contract: every op the player sends a core, what a core says back, and the timing rule.
+
 ### Fixed
 
 - `voice` is described as a choice, and a control that sets a choice by its place in the list (a select, a rotary switch) made it throw. A voice may now be set by its place or its name, on the microphone, a synth and a player's target; a target describes and reads `voice` too.

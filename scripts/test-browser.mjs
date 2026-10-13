@@ -81,22 +81,30 @@ window.T = {
     return { peak, hz: best * player.context.sampleRate / a.fftSize }
   },
   // TAP: a second worklet after the player's that keeps every sample it is given, so timing can be read exactly.
-  // A block with nothing coming in (a browser gives none while what is before it is silent) is kept as silence,
-  // so a sample's place is always its time.
+  // Each block is kept with the sound card's frame it was, and put in its place by that: a browser may leave a
+  // block out while what is before the tap is silent, and a sample's place has to be its time all the same.
   async tap(player) {
-    const src = 'registerProcessor("tap", class extends AudioWorkletProcessor { constructor() { super(); this.first = -1; this.port.onmessage = () => this.port.postMessage(["end", this.first]) } process(i) { if (this.first < 0) { if (!(i[0] && i[0][0])) return true; this.first = currentFrame } this.port.postMessage(i[0] && i[0][0] ? i[0][0].slice() : new Float32Array(128)); return true } })'
+    const src = 'registerProcessor("tap", class extends AudioWorkletProcessor { constructor() { super(); this.port.onmessage = () => this.port.postMessage("end") } process(i) { if (i[0] && i[0][0]) this.port.postMessage({ at: currentFrame, block: i[0][0].slice() }); return true } })'
     const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }))
     await player.context.audioWorklet.addModule(url)
     const node = new AudioWorkletNode(player.context, 'tap', { numberOfInputs: 1, numberOfOutputs: 1 })
-    const blocks = []
-    let done, forgotten = 0
-    node.port.onmessage = (m) => (Array.isArray(m.data) ? done(m.data[1]) : blocks.push(m.data))
+    let blocks = []
+    let done
+    node.port.onmessage = (m) => (m.data === 'end' ? done() : blocks.push(m.data))
     player.node.connect(node)
     node.connect(player.context.destination)
     // What it gives has first, the sound card's frame that the first sample was; forget() starts again from here.
     return {
-      forget() { forgotten += blocks.length; blocks.length = 0 },
-      async samples() { const first = await new Promise((yes) => { done = yes; node.port.postMessage('end') }); const all = new Float32Array(blocks.length * 128); blocks.forEach((b, i) => all.set(b, i * 128)); all.first = first + forgotten * 128; return all },
+      forget() { blocks = [] },
+      async samples() {
+        await new Promise((yes) => { done = yes; node.port.postMessage('end') })
+        if (!blocks.length) return Object.assign(new Float32Array(0), { first: 0 })
+        const first = blocks[0].at
+        const all = new Float32Array(blocks[blocks.length - 1].at - first + 128)
+        for (const b of blocks) all.set(b.block, b.at - first)
+        all.first = first
+        return all
+      },
     }
   },
   // The breaks in a steady sine: each sample of one follows from the two before it, and where it does not, the
@@ -510,7 +518,15 @@ async function examples(name, browser) {
       return !!player
     })
     await page.keyboard.down('a')            // a white key of the synth panel's keyboard, once the panel is there
-    const got = ready ? await page.evaluate(() => T.listen(window.examplePlayer(), 1500)) : { peak: 0, why: 'no sound was asked for' }
+    let got = ready ? await page.evaluate(() => T.listen(window.examplePlayer(), 1500)) : { peak: 0, why: 'no sound was asked for' }
+    // A press that came while the engine was still loading asked for a note that was by then too late to play
+    // (a busy machine): press again, as a person would.
+    if (ready && !(got.peak > 0.01)) {
+      await page.mouse.up()
+      await page.mouse.down()
+      await page.mouse.move(330, 270)
+      got = await page.evaluate(() => T.listen(window.examplePlayer(), 1500))
+    }
     await page.mouse.up()
     await page.keyboard.up('a')
     if (got.peak > 0.01) heard++

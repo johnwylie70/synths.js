@@ -1095,6 +1095,59 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
   'describe gives labels for the values that mean something else (reverbDecay 0 is "auto" on a synth, on soundOutput() and on a player\'s target; the microphone\'s gate at -100 is "off"), none where 0 is a real zero, and the table of settings carries them', got)
 }
 
+// --- a host that makes the sound itself: createPlayer is given a core and a clock, and needs no Web Audio and no engine
+{
+  const { createPlayer } = synths
+  const clock = { currentTime: 100, sampleRate: 44100, state: 'running', resume: async () => {}, suspend: async () => {}, close: async () => {}, addEventListener() {} }
+  const got = { ops: [], given: null, pushed: 0, closed: false }
+  let post = null
+  const core = {
+    time: 0, sampleRate: 44100,
+    voices: () => 3,
+    exec(ops) { got.ops.push(...ops) },
+    taps: (sources, frames) => sources.map((source) => [source, new Float32Array(frames).fill(0.25), 0.5, 0.25, new Uint32Array([0, 1 << 28, 0, 0])]),
+    songPosition: () => [2, 1, 4, 7, 0, 6, 125, 0, 64, 12],
+    pushInput(frames) { got.pushed += frames.length },
+    close() { got.closed = true },
+  }
+  const states = []
+  const player = createPlayer({ context: clock, onState: (s) => states.push(s), core: (given) => { got.given = given; post = given.post; return core }, wasm: () => { throw new Error('the engine was asked for') } })
+  await player.ready
+  const s = createSound({ sound: player, clock: () => 0, batch: 'manual', read: async () => toWav(new Float32Array(100).fill(0.5), new Float32Array(100).fill(0.5), 44100) })
+  const lead = s.makeSynth('lead')
+  lead.play('A4', 0.5, 0.7)
+  s.flush()
+  const on = got.ops.find((op) => op[0] === 'e' && op[2] === 1)
+  const off = got.ops.find((op) => op[0] === 'e' && op[2] === 2)
+  const params = got.ops.filter((op) => op[0] === 'e' && op[2] === 4)
+  const part = on && on[3]
+  // What the core says back reaches whoever asked: a song that was read, and a recording that is over.
+  s.playSong(new TextEncoder().encode('{"format":"synths-song"}'))
+  const take = s.recordOutput(1)
+  s.flush()
+  await new Promise((yes) => setTimeout(yes, 20))
+  const load = got.ops.find((op) => op[0] === 'songLoad')
+  const rec = got.ops.find((op) => op[0] === 'record')
+  let done = null
+  take.onDone((t) => { done = t })
+  post({ type: 'song', token: load[1], result: 0, error: null, info: [4, 8, 1, 0, 0, 6, 125, 0], patches: [], replaced: false })
+  post({ type: 'recorded', slot: rec[1], frames: 4410, full: false, rate: 44100 })
+  await new Promise((yes) => setTimeout(yes, 5))
+  const started = got.ops.find((op) => op[0] === 'e' && op[2] === 15 && op[4] === 1)
+  const read = player.read(lead._id)
+  const place = player.songPosition()
+  const asked = await player.ask()
+  const buffer = player.buffer()
+  player.close()
+  say(player.kind === 'host' && player.context === clock && player.node === null, 'a player given a core by its host starts with no Web Audio and no engine fetched, on the host\'s clock', player.kind)
+  say(got.given.sampleRate === 44100 && typeof got.given.post === 'function' && states.includes('on') && on && on[0] === 'e' && Math.abs(on[1] - (100 + 0.04)) < 1e-9 && on[5] === 69 && Math.abs(on[6] - 0.7) < 1e-6 && off && Math.abs(off[1] - on[1] - 0.5) < 1e-9 && off[3] === part && off[4] === on[4] && params.length > 3 && params.every((op) => op[3] === part || op[3] === 0),
+    'a note reaches the host\'s exec as the documented ops: ["e", seconds on the host\'s clock (now and the latency), 1 note_on, part, handle, note, velocity], its note_off the note\'s length later, after the params that set the part', [on, off, params.length])
+  say(load && load[2] instanceof Uint8Array && load[4] === 32 && load[5] === 512 && started && rec && rec[3] === 1 && done && Math.abs(done.seconds - 0.1) < 1e-9 && done.frames === 4410 && player.node === null,
+    'a song message from the core starts the song (a song event is sent back to exec) and a recorded message reaches the program that asked, with its length', [load && load.slice(3), started, rec, done && done.seconds])
+  say(read.samples.length === 1024 && Math.abs(read.level[0] - 0.5 * 0.5) < 1e-6 && same(read.notes, [60]) && place.state === 'playing' && place.row === 7 && place.tempo === 125 && asked.voices === 3 && buffer.thread === 'host' && got.closed === true,
+    'read(), songPosition() and ask() are answered by the host\'s core, soundBuffer() says the thread is the host\'s, and close() closes the core', [read.level, read.notes, place, asked, buffer])
+}
+
 // --- the sound buffer: a command like the rest, with the words and the rounding
 {
   const said = []

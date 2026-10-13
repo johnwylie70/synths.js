@@ -648,6 +648,7 @@ player to itself. On each: `pause()`, `resume()` and `close()`.
 | `fallback` | `false` to refuse running the engine on the page's thread when there is no AudioWorklet; `"always"` to insist on it |
 | `buffer` | what a program's `setSoundBuffer` asked for before the player was made (see [`buffer`](#buffer)): frames, `"small"`, `"medium"`, `"large"` or `"auto"`. `createSound` passes it |
 | `fallbackBuffer` | the frames the fallback makes at a time: a power of two from 256 to 16384, or `"auto"` (the default: 2048 at 44.1 and 48 kHz, doubled once if the page keeps being too busy). See below |
+| `core`, with `context` | for an app that makes the sound itself: a function giving the engine's core, and the app's clock in the place of an AudioContext. See [core.md](core.md). `kind` is then `"host"` |
 | `onState` | called with `"waiting"`, `"on"` or `"failed"` |
 | `microphone` | where the microphone comes from when it is not the browser's to ask for: see [microphone.md](microphone.md). `false` for none |
 | `save` | called with `{ name, bytes, type }` for a file `saveSound` made, in place of a download |
