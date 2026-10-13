@@ -259,8 +259,10 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
     if (at) new Uint8Array(memory.buffer, at, bytes.length).set(bytes)
     return at
   }
-  function loadSong([, token, bytes, files, firstPart, firstSlot]) {
+  function loadSong([, token, bytes, files, firstPart, firstSlot, replace]) {
     if (!x.synths_song_load) return post({ type: 'song', token, result: -100 })
+    // To replace is to put an edited song in the place of the one playing, which goes on from where it is.
+    if (replace && !x.synths_song_replace) replace = false
     for (const [name, data] of files || []) {
       const nameAt = put(name), dataAt = put(data)
       if (nameAt && dataAt) x.synths_song_file(nameAt, name.length, dataAt, data.length)
@@ -269,10 +271,11 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
     }
     const at = put(bytes)
     // An engine from before songs were given parts 32 up for good took the first part as well.
-    const result = !at ? -1 : x.synths_song_load.length >= 5 ? x.synths_song_load(engine, at, bytes.length, firstPart, firstSlot) : x.synths_song_load(engine, at, bytes.length, firstSlot)
+    const result = !at ? -1 : replace ? x.synths_song_replace(engine, at, bytes.length, firstSlot) : x.synths_song_load.length >= 5 ? x.synths_song_load(engine, at, bytes.length, firstPart, firstSlot) : x.synths_song_load(engine, at, bytes.length, firstSlot)
     x.synths_free(at)
-    songLoaded = result === 0
-    const said = { type: 'song', token, result, error: null, info: [], patches: [] }
+    // A song that could not take another's place leaves that one as it was.
+    songLoaded = replace ? songLoaded || result === 0 : result === 0
+    const said = { type: 'song', token, result, error: null, info: [], patches: [], replaced: !!replace }
     if (result !== 0) said.error = songError()
     else {
       const room = x.synths_alloc(256)
@@ -280,7 +283,16 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
       said.info = Array.from(new Uint32Array(memory.buffer, room, 8))
       for (let i = 1; i <= said.info[3]; i++) {
         const n = Math.min(256, x.synths_song_patch_name(engine, i, room, 256))
-        if (n) said.patches.push([i, new Uint8Array(memory.buffer, room, n).slice()])
+        if (!n) continue
+        const name = new Uint8Array(memory.buffer, room, n).slice()
+        // What the song itself says the patch is ({ preset, set }), if it does: text, for the page to read.
+        let synth = null
+        const long = x.synths_song_synth ? x.synths_song_synth(engine, i, room, 0) : 0
+        if (long) {
+          const textAt = x.synths_alloc(long)
+          if (textAt) { x.synths_song_synth(engine, i, textAt, long); synth = new Uint8Array(memory.buffer, textAt, long).slice(); x.synths_free(textAt) }
+        }
+        said.patches.push([i, name, synth])
       }
       x.synths_free(room)
     }

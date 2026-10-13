@@ -438,11 +438,11 @@ another replaces it.
 | `id` | the song, for steering it |
 | `do` | `"play"` with a `url` or `bytes`: load this song and start it. Without either: one of the actions below |
 | `url`, `bytes` | the song file: an address the player fetches, or its bytes (a typed array, or base64 text) |
-| `files` | optional, for a JSON song that names WAV files: `{ "the path as the song writes it": bytes }`. Without it the player fetches each one beside `url` |
+| `files` | optional, for a JSON song that names WAV files: `{ "the path as the song writes it": bytes }`. Without it the player fetches each one beside `url`. A song whose samples are inside it (`data`, a WAV file in base64) needs none |
 | `repeat` | `false` to play it once (`true`) |
 | `vol` | 0 to 2 (1) |
 | `raw` | `true`: a sample played faster than it was recorded is left harsh, as old trackers left it; `false`: it is smoothed. Missing: the engine chooses (raw for a MOD or XM as it is, smooth for the engine's own songs) |
-| `patches` | what the song's instruments that are synths by name are: for each name a ready-made synth's name, or settings (with `preset` and `macro` if wanted). A name that is a ready-made synth's needs none; one that nothing says plays as `keys`, and the console says so |
+| `patches` | what the song's instruments that are synths by name are: for each name a ready-made synth's name, or settings (with `preset` and `macro` if wanted). For a name not given here, the player uses what the song itself says under the instrument's `synth` key (`{ preset, set, macro }`); failing that, a name that is a ready-made synth's is that synth; and one that nothing says plays as `keys`, and the console says so |
 | `name` | optional: what to call it in a message |
 
 Steering, each on the exact sample of its `t`:
@@ -453,7 +453,18 @@ Steering, each on the exact sample of its `t`:
 { op: "song", id: "g1", do: "seek", order: 2, row: 16 }
 { op: "song", id: "g1", do: "volume", vol: 0.5 }
 { op: "song", id: "g1", do: "repeat", repeat: false }
+{ op: "song", id: "g1", do: "mute", channel: 2, on: true }      // channels count from 0; no channel: every one
+{ op: "song", id: "g1", do: "solo", channel: 0, on: true }      // while any is soloed, only those are heard
+{ op: "song", id: "g1", do: "loopPattern", on: true }           // stay on the pattern that is playing
+{ op: "song", id: "g1", do: "replace", text: "{ … the edited song's JSON … }" }   // or bytes; `files` and `patches` as for play
 ```
+
+`replace` puts an edited song in the place of the one playing, for an editor. When the two have the same number
+of channels and the same rules, and the new one has no fewer instruments and samples, nothing stops: sounding
+notes carry on, the song keeps its place, and it reads the new song from the next row. Otherwise it is loaded
+afresh and put back where it was, with its volume, mutes, solos and loop. The synths of its instruments keep
+their ids and parts and are set to what the new song says. A song that cannot be read leaves the one playing as
+it was, and the console says why. Mutes, solos and the loop last until they are changed or another song is played.
 
 With no `id` an action is for whatever song is playing; with the `id` of a song that has been replaced it does
 nothing. Loading takes a moment (the file is fetched and read): the song starts when it is ready, and what was
@@ -623,5 +634,4 @@ the answer and begins then. `full` is true for a recording that ran out of room.
 
 ## What is not here yet
 
-- A song that does not repeat leaves the notes it ends on sounding, as the engine has it: a held synth note
-  stays until `stop`.
+- One song at a time for the whole player, and one microphone.

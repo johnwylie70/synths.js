@@ -589,6 +589,63 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
   })
   say(said.length === 0, 'and nothing is said in the console about any of it', said)
 
+  // Steering for an editor: channels muted and soloed, one pattern going round, and an edited song put in its place.
+  const rms = (a) => Math.sqrt(a.reduce((sum, v) => sum + v * v, 0) / a.length)
+  said = await saying(async () => {
+    const json = JSON.parse(new TextDecoder().decode(await read('songs/night_drive.json')))
+    // The song says itself what its "tune" is, so nobody has to.
+    json.instruments.find((i) => i.patch === 'tune').synth = { preset: 'bell', set: { decay: 1.4, echo: 0.2 } }
+    const { player, song, go } = await start(new TextEncoder().encode(JSON.stringify(json)))
+    const whole = await go(1)
+    const tune = player.target('song:tune')
+    say(tune.get('decay') === 1.4 && tune.get('echo') === 0.2 && tune.get('wave') === 'sine', 'a song that carries its own word for a synth ({ preset, set } under the instrument) is set up from it, with no patches given', [tune.get('decay'), tune.get('wave')])
+    song.mute()
+    await go(0.2)
+    const none = await go(0.8)
+    song.mute(1, false)
+    await go(0.2)
+    const bass = await go(0.8)
+    song.unmute()
+    song.solo(1)
+    await go(0.2)
+    const alone = await go(0.8)
+    song.solo('all', false)
+    await go(0.2)
+    const back = await go(0.8)
+    say(rms(none.left) < rms(whole.left) * 0.05 && rms(bass.left) > rms(whole.left) * 0.05 && rms(bass.left) < rms(back.left) * 0.9 && Math.abs(rms(alone.left) - rms(bass.left)) < rms(back.left) * 0.5 && rms(alone.left) < rms(back.left) * 0.9 && rms(back.left) > rms(whole.left) * 0.5,
+      'song.mute() silences every channel, song.mute(1, false) lets the bass back alone, song.solo(1) is the bass alone too, and with both undone the whole song is heard', [rms(whole.left), rms(none.left), rms(bass.left), rms(alone.left), rms(back.left)])
+    song.seek(0, 0)
+    song.loopPattern()
+    await go(6)
+    const stayed = song.position
+    song.loopPattern(false)
+    await go(4)
+    say(stayed.order === 0 && stayed.state === 'playing' && song.position.order > 0, 'song.loopPattern() stays on the pattern that is playing (six seconds on, still the first), and loopPattern(false) carries on through the song', [stayed, song.position])
+    // The same song with every key let go at the top of each pattern and nothing else in it, put in its place:
+    // it keeps its place, and falls silent.
+    const before = song.position
+    const empty = { ...json, patterns: json.patterns.map((p) => ({ ...p, events: [0, 4, 8, 12, 16, 20, 24, 28].flatMap((row) => [0, 1, 2, 3].map((ch) => ({ row, ch, note: 'off' }))) })) }
+    song.replace(empty)
+    await go(2.5)
+    const after = await go(1)
+    const there = song.position
+    say(there.state === 'playing' && (there.order > before.order || there.row > before.row || there.rounds > before.rounds) && rms(after.left) < rms(whole.left) * 0.1, 'song.replace(edited) puts an edited song in its place as it plays: it carries on from where it was, and plays the new notes (here, none)', [before, there, rms(after.left)])
+    song.replace(json)
+    await go(1)
+    const again = await go(1)
+    say(rms(again.left) > rms(whole.left) * 0.3 && player.target('song:tune').get('decay') === 1.4, 'and the first one put back is heard again, on the same synths', rms(again.left))
+  })
+  say(said.length === 0, 'and nothing is said in the console about that either', said)
+  said = await saying(async () => {
+    const { song, go } = await start('songs/night_drive.json', { patches: { tune: 'bell' } })
+    await go(0.5)
+    song.replace('{"format": "synths-song", "version": 1, "channels": 99}')
+    const r = await go(1)
+    say(peak(r.left) > 0.1 && song.position.state === 'playing', 'a song that cannot be read does not take the place of the one playing', peak(r.left))
+    say(thrown(() => song.replace(7)) && /needs the number of a channel, counting from 0/.test(thrown(() => song.mute('drums'))), 'replace and mute say what they need', thrown(() => song.mute('drums')))
+  })
+  say(said.length === 1 && /could not be read, so the one that was playing carries on: /.test(said[0]), 'and one message says so, in the engine\'s words', said)
+
   // A song whose synth is not known plays it as keys and says how to name it; a file that is not a song says why.
   said = await saying(async () => {
     const { go } = await start('songs/night_drive.json')

@@ -955,8 +955,10 @@ function makeCore(wasm, sampleRate, post) {
     if (at) new Uint8Array(memory.buffer, at, bytes.length).set(bytes)
     return at
   }
-  function loadSong([, token, bytes, files, firstPart, firstSlot]) {
+  function loadSong([, token, bytes, files, firstPart, firstSlot, replace]) {
     if (!x.synths_song_load) return post({ type: 'song', token, result: -100 })
+    // To replace is to put an edited song in the place of the one playing, which goes on from where it is.
+    if (replace && !x.synths_song_replace) replace = false
     for (const [name, data] of files || []) {
       const nameAt = put(name), dataAt = put(data)
       if (nameAt && dataAt) x.synths_song_file(nameAt, name.length, dataAt, data.length)
@@ -965,10 +967,11 @@ function makeCore(wasm, sampleRate, post) {
     }
     const at = put(bytes)
     // An engine from before songs were given parts 32 up for good took the first part as well.
-    const result = !at ? -1 : x.synths_song_load.length >= 5 ? x.synths_song_load(engine, at, bytes.length, firstPart, firstSlot) : x.synths_song_load(engine, at, bytes.length, firstSlot)
+    const result = !at ? -1 : replace ? x.synths_song_replace(engine, at, bytes.length, firstSlot) : x.synths_song_load.length >= 5 ? x.synths_song_load(engine, at, bytes.length, firstPart, firstSlot) : x.synths_song_load(engine, at, bytes.length, firstSlot)
     x.synths_free(at)
-    songLoaded = result === 0
-    const said = { type: 'song', token, result, error: null, info: [], patches: [] }
+    // A song that could not take another's place leaves that one as it was.
+    songLoaded = replace ? songLoaded || result === 0 : result === 0
+    const said = { type: 'song', token, result, error: null, info: [], patches: [], replaced: !!replace }
     if (result !== 0) said.error = songError()
     else {
       const room = x.synths_alloc(256)
@@ -976,7 +979,16 @@ function makeCore(wasm, sampleRate, post) {
       said.info = Array.from(new Uint32Array(memory.buffer, room, 8))
       for (let i = 1; i <= said.info[3]; i++) {
         const n = Math.min(256, x.synths_song_patch_name(engine, i, room, 256))
-        if (n) said.patches.push([i, new Uint8Array(memory.buffer, room, n).slice()])
+        if (!n) continue
+        const name = new Uint8Array(memory.buffer, room, n).slice()
+        // What the song itself says the patch is ({ preset, set }), if it does: text, for the page to read.
+        let synth = null
+        const long = x.synths_song_synth ? x.synths_song_synth(engine, i, room, 0) : 0
+        if (long) {
+          const textAt = x.synths_alloc(long)
+          if (textAt) { x.synths_song_synth(engine, i, textAt, long); synth = new Uint8Array(memory.buffer, textAt, long).slice(); x.synths_free(textAt) }
+        }
+        said.patches.push([i, name, synth])
       }
       x.synths_free(room)
     }
@@ -1665,6 +1677,17 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
         return
       }
       if (!song || (c.id != null && c.id !== song.id)) return
+      if (what === 'replace') {
+        // An edited song in the place of the one playing. Its bytes go to the engine when the song is ready for them.
+        const bytes = typeof c.text === 'string' ? new TextEncoder().encode(c.text) : typeof c.bytes === 'string' ? Uint8Array.from(atob(c.bytes), (ch) => ch.charCodeAt(0)) : c.bytes ? new Uint8Array(c.bytes.buffer || c.bytes, c.bytes.byteOffset || 0, c.bytes.byteLength) : null
+        if (!bytes) return
+        if (c.patches) song.patches = { ...song.patches, ...c.patches }
+        const files = Object.entries(c.files || {}).map(([name, data]) => [new TextEncoder().encode(name), new Uint8Array(data.buffer || data, data.byteOffset || 0, data.byteLength)])
+        const put = () => ops.push(['songLoad', song.token, bytes, files, parts.length, SAMPLE_SLOTS, true])
+        if (song.ready) put()
+        else song.waiting.push([put, at])
+        return
+      }
       if (song.ready) steer(c, at)
       else song.waiting.push([c, at])
     },
@@ -1681,16 +1704,11 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
     else if (what === 'pause') event(at, SONG, 0, 2, 0, 0)
     else if (what === 'seek') event(at, SONG, 0, 3, Math.max(0, c.order | 0), Math.max(0, c.row | 0))
     else if (what === 'repeat') event(at, SONG, 0, 4, c.repeat === false ? 0 : 1, 0)
-    else if (what === 'volume' && Number.isFinite(+c.vol)) {
-      // The engine turns the song's own channels; its synth patches are parts of ours, and are turned here.
-      song.vol = clamp(+c.vol, 0, 2)
-      event(at, SONG, 0, 5, song.vol, 0)
-      for (const rec of synths.values()) {
-        if (!rec.ofSong) continue
-        rec.patch.set(VOLUME, clamp(rec.songVolume * song.vol, 0, 2))
-        if (rec.part >= 0) { parts[rec.part].values.set(VOLUME, real(rec, VOLUME, rec.patch.get(VOLUME))); event(at, PARAM, rec.part, VOLUME, parts[rec.part].values.get(VOLUME), 0.02) }
-      }
-    }
+    // The engine turns the whole song: its own channels, and the notes it plays on its synth patches.
+    else if (what === 'volume' && Number.isFinite(+c.vol)) event(at, SONG, 0, 5, song.vol = clamp(+c.vol, 0, 2), 0)
+    // A channel counts from 0; with none, every channel.
+    else if (what === 'mute' || what === 'solo') event(at, SONG, 0, what === 'mute' ? 7 : 8, Number.isInteger(c.channel) && c.channel >= 0 ? c.channel : -1, c.on === false ? 0 : 1)
+    else if (what === 'loopPattern') event(at, SONG, 0, 9, c.on === false ? 0 : 1, 0)
   }
   // The synths a song's instruments were given, which go when the song does.
   function dropSongSynths() {
@@ -1706,38 +1724,57 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
   function songLoaded(m, now) {
     if (!song || m.token !== song.token) return
     const text = (bytes) => new TextDecoder().decode(bytes)
+    if (m.result !== 0 && m.replaced) return tell(`the song put in the place of ${shown(song.name)} could not be read, so the one that was playing carries on: ${(m.error && text(m.error)) || 'it is not a song file this can read'}.`)
     if (m.result !== 0) {
       tell(`the song ${shown(song.name)} could not be played: ${m.result === -100 ? 'this version of the engine does not play songs' : (m.error && text(m.error)) || 'it is not a song file this can read (a .mod, an .xm or a song of its own)'}.`)
       song = null
       return
     }
-    dropSongSynths()
+    // A song put in the place of another keeps the synths its instruments already have.
+    if (!m.replaced) dropSongSynths()
     enter(song.scope.name)
-    for (const [instrument, nameBytes] of m.patches) {
+    for (const [instrument, nameBytes, synthBytes] of m.patches) {
       const name = text(nameBytes)
       let bound = song.patches[name]
+      // With nothing said by the caller, the song's own word for it: { preset, set }.
+      if (bound === undefined && synthBytes) {
+        try { const own = JSON.parse(text(synthBytes)); if (own && typeof own === 'object') bound = { ...(typeof own.preset === 'string' ? { preset: own.preset } : {}), ...(own.set && typeof own.set === 'object' ? own.set : {}), ...(own.macro !== undefined ? { macro: own.macro } : {}) } } catch (e) { /* not ours to read */ }
+      }
       if (bound === undefined && PRESETS[name]) bound = name
       if (bound === undefined) tell(`the song ${shown(song.name)} has an instrument that is a synth called ${shown(name)}, and was not told what that is, so it plays as "keys". Say what it is: playSong(file, { patches: { ${shown(name)}: "bass" } }).`)
       const settings = bound && typeof bound === 'object' ? bound : {}
       const preset = PRESETS[typeof bound === 'string' ? bound : settings.preset] || (settings.preset === undefined && typeof bound === 'object' ? null : PRESETS.keys)
-      const rec = record(prefix + 'song:' + name, patchOf(settings, '', false, patchOf(preset, '', false, plain()), slotFor), 60, macroOf(settings.macro !== undefined ? settings.macro : preset && preset.macro, false))
-      rec.ofSong = true
+      const sid = prefix + 'song:' + name
+      const patch = patchOf(settings, '', false, patchOf(preset, '', false, plain()), slotFor)
+      for (const pid of [...patch.keys()]) if (pid >= 200) patch.delete(pid)
       // A song's channels play at half volume, to leave room for one another; its synths do the same.
-      rec.songVolume = (rec.patch.has(VOLUME) ? rec.patch.get(VOLUME) : 1) * 0.5
-      rec.patch.set(VOLUME, clamp(rec.songVolume * (song.vol ?? 1), 0, 2))
-      rec.used = ++uses
-      seat(rec, now)
+      patch.set(VOLUME, clamp((patch.has(VOLUME) ? patch.get(VOLUME) : 1) * 0.5, 0, 2))
+      const macro = macroOf(settings.macro !== undefined ? settings.macro : preset && preset.macro, false)
+      let rec = synths.get(sid)
+      if (rec && rec.ofSong) {
+        // The same instrument in an edited song: its part is kept and set to what the song says now.
+        rec.patch = patch
+        rec.macro = macro
+        if (rec.part >= 0) dress(rec, now)
+        else seat(rec, now)
+      } else {
+        rec = record(sid, patch, 60, macro)
+        rec.ofSong = true
+        rec.used = ++uses
+        seat(rec, now)
+      }
       event(now, SONG, 0, 6, instrument, rec.part)
     }
-    song.ready = true
     song.info = m.info
+    if (m.replaced) return
+    song.ready = true
     // The song's channels are the engine's parts from 32. Raw: a sample played fast is left harsh, as old trackers
     // left it; not raw: it is smoothed. With nothing said the engine chooses (raw for a .mod or .xm as it is).
     if (song.raw != null) for (let ch = 0; ch < Math.min(32, m.info[0]); ch++) event(now, PARAM, parts.length + ch, id('sample.antialias'), song.raw ? 0 : 1, 0)
     if (song.repeat === false) event(now, SONG, 0, 4, 0, 0)
     if (song.vol != null) steer({ do: 'volume', vol: song.vol }, now)
     event(Math.max(now, song.at ?? now), SONG, 0, 1, 0, 0)
-    for (const [c, at] of song.waiting) steer(c, Math.max(now, at ?? now))
+    for (const [c, at] of song.waiting) { if (typeof c === 'function') c(); else steer(c, Math.max(now, at ?? now)) }
     song.waiting = []
   }
 
@@ -3161,7 +3198,7 @@ export function createSound(options = {}) {
     startLine(o = {}) { lines.set(this._id, Math.max(when(o, 'startLine'), turn ?? -Infinity)); return this }
     start_line(o) { return this.startLine(o) }
 
-    /** Change several settings at once: lead.set({ cutoff: 800, resonance: 0.4 }), and { glide: seconds } to slide there. Or one: lead.set("cutoff", 800). */
+    /** Change several settings at once: lead.set({ cutoff: 800, resonance: 0.4 }), and { glide: seconds } to slide there ({ slide } is understood too). Or one: lead.set("cutoff", 800). */
     set(given, o = {}) {
       if (typeof given === 'string') return this.set({ [given]: o })
       if (!given || typeof given !== 'object') throw new Error(`set needs settings in braces, as in set({ cutoff: 800 }), not ${shown(given)}`)
@@ -3170,7 +3207,9 @@ export function createSound(options = {}) {
       if (!Object.keys(given).length) return this
       patchOf(given, 'set', true, this._patch, () => 0)
       const c = { op: 'set', id: this._id, set: sendable(given), t: at }
-      if (o.glide !== undefined) c.glide = amount(o.glide, 'set: glide', 0, 60)
+      // `slide` is another word for it (the Python library's first spelling).
+      const glide = o.glide !== undefined ? o.glide : o.slide
+      if (glide !== undefined) c.glide = amount(glide, 'set: glide', 0, 60)
       command(c)
       return this
     }
@@ -3610,6 +3649,11 @@ export function createSound(options = {}) {
       }).catch((e) => tell(`playSong(${shown(file)}): the file could not be read (${(e && e.message) || e}), so it will not play.`))
     } else command({ ...c, name: file, url: options.resolve ? options.resolve(file) : typeof document !== 'undefined' ? new URL(file, document.baseURI).href : file })
     const say = (what, more) => { command({ op: 'song', id, do: what, ...more, t: clock() }); return song }
+    const channelOf = (channel, said) => {
+      if (channel === undefined || channel === null || channel === 'all') return {}
+      if (!Number.isInteger(channel) || channel < 0 || channel > 31) throw new Error(`${said} needs the number of a channel, counting from 0, or nothing for every channel, not ${shown(channel)}`)
+      return { channel }
+    }
     const song = {
       stop: () => say('stop'),
       pause: () => say('pause'),
@@ -3618,9 +3662,26 @@ export function createSound(options = {}) {
       seek: (order, row = 0) => say('seek', { order: amount(order, 'seek: the order', 0, 65535), row: amount(row, 'seek: the row', 0, 255) }),
       set volume(v) { say('volume', { vol: amount(v, 'volume', 0, 2) }) },
       set repeat(on) { say('repeat', { repeat: !!on }) },
+      /** Silence one channel of the song (they count from 0), or with no channel all of them: song.mute(2), song.mute(2, false) to hear it again. */
+      mute: (channel, on = true) => say('mute', { ...channelOf(channel, 'mute'), on: !!on }),
+      unmute: (channel) => say('mute', { ...channelOf(channel, 'unmute'), on: false }),
+      /** Hear only the channels that are soloed: song.solo(2), and song.solo(2, false) or song.solo("all", false) to hear the rest again. */
+      solo: (channel, on = true) => say('solo', { ...channelOf(channel, 'solo'), on: !!on }),
+      /** Stay on the pattern that is playing, round and round, until loopPattern(false). */
+      loopPattern: (on = true) => say('loopPattern', { on: !!on }),
+      /**
+       * Put an edited song in the place of this one as it plays: its bytes, its JSON as text, or the song as an
+       * object. When the two have the same shape nothing stops, and the change is heard from the next row.
+       */
+      replace(next, more = {}) {
+        const given = next instanceof ArrayBuffer || ArrayBuffer.isView(next) ? { bytes: next } : typeof next === 'string' ? { text: next } : next && typeof next === 'object' ? { text: JSON.stringify(next) } : null
+        if (!given) throw new Error(`replace needs the new song: its bytes, its JSON as text, or the song itself as an object, not ${shown(next)}`)
+        return say('replace', { ...given, ...(more.files ? { files: more.files } : {}), ...(more.patches ? { patches: more.patches } : {}) })
+      },
       /** Where the song is: { state, order, pattern, row, tick, speed, tempo, rounds, rows, orders }, for drawing it. */
       get position() { return transport?.songPosition?.() || NO_SONG },
     }
+    song.loop_pattern = song.loopPattern
     return song
   }
 
@@ -3725,6 +3786,8 @@ export function describe() {
     choiceWords: CHOICE_WORDS, plain: PLAIN, synths: PRESETS, sounds: SOUNDS, chords: CHORDS, orders: ORDERS, macroWaves: MACRO_WAVES, lengths: LENGTHS, lengthLetters: LENGTH_LETTERS, midi: MIDI,
     // The voice changers (each a list of settings; putting one on first puts back what the last changed), and the microphone.
     voices: VOICES,
+    // What a `song` command may do.
+    song: { does: ['play', 'resume', 'pause', 'stop', 'seek', 'volume', 'repeat', 'mute', 'solo', 'loopPattern', 'replace'], functions: ['stop', 'pause', 'resume', 'seek', 'mute', 'unmute', 'solo', 'loopPattern', 'replace'] },
     microphone: {
       names: MIC_NAMES, gate: MIC_GATE, states: ['asking', 'on', 'refused', 'none', 'busy', 'unavailable', 'off'],
       functions: ['useMicrophone', 'stopMicrophone', 'recordSound', 'startRecording', 'stopRecording', 'recordOutput', 'saveSound', 'receiveSoundEvents', 'voiceNames'],

@@ -31,8 +31,16 @@ The first version.
 - With no microphone (none plugged in, refused, a page that may not ask) nothing throws: one message says why and what to do, and a recording is empty.
 - For apps, the microphone travels as the sound does: `mic`, `record` and `save` commands, what the player says back as plain data (`player.onSoundEvents`, `sound.receiveSoundEvents`), a `microphone` option for a host that supplies a stream or pushes the frames, a `save` option for the files, and sound in a microphone's place for the offline player ([docs/microphone.md](docs/microphone.md)).
 - Three more examples: Voice changer, Sampler, Record a tune.
+- Songs, for an editor: `song.mute(channel)`, `song.solo(channel)`, `song.loopPattern()`, and `song.replace(edited)` to put an edited song in the place of the one playing without stopping it. A song can say itself what its synth instruments are (`synth: { preset, set }`), and can carry its recordings inside itself.
+- `lead.set({ cutoff: 4000 }, { glide: 2 })` also understands `slide`.
+
 - For apps, MIDI travels as the sound does: a `midi` command in the same batches ([docs/midi.md](docs/midi.md)), carried out beside the player, with what is received handed back as plain data (`player.onMidi`, `sound.receiveMidi`, `sound.useMidiHooks(scene)`), and a `midi` option for an app that reaches the devices its own way.
 - Every function in its Python spelling too (`play_sound`, `make_synth`).
 - Mistakes said in plain words, with "Did you mean".
 - Sound waits for the browser's first tap by itself, and says once that it is waiting.
 - For apps: the functions write commands ([docs/commands.md](docs/commands.md)) that a `sound` option can take and a player elsewhere can play; the engine as bytes and the worklet from a Blob, for a page that may fetch nothing; an offline player that renders the same commands to samples or a WAV file, in a browser or in node; and a fallback for a browser with no audio worklet.
+
+### Fixed
+
+- What was asked for while the engine was still loading (a repeating tune, `loopNotes`, a song) could stay silent for as long again as the page had been open: always on the fallback with no audio worklet, and now and then in WebKit. It now starts as soon as the engine is there.
+- A song that does not repeat lets its last notes go at its end.

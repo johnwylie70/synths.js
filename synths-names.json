@@ -2711,6 +2711,32 @@
    }
   }
  },
+ "song": {
+  "does": [
+   "play",
+   "resume",
+   "pause",
+   "stop",
+   "seek",
+   "volume",
+   "repeat",
+   "mute",
+   "solo",
+   "loopPattern",
+   "replace"
+  ],
+  "functions": [
+   "stop",
+   "pause",
+   "resume",
+   "seek",
+   "mute",
+   "unmute",
+   "solo",
+   "loopPattern",
+   "replace"
+  ]
+ },
  "microphone": {
   "names": {
    "pitch": "pitchShift",

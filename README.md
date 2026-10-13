@@ -209,7 +209,7 @@ What a synth does:
 | `lead.stop()`, `lead.stop("E4")` | let go of every note of the synth, or of one |
 | `lead.playNotes("C4 E4 G4", 0.25)` | a tune on this synth |
 | `lead.cutoff = 800` | change a setting; notes already sounding change too |
-| `lead.set({ cutoff: 4000 }, { glide: 2 })` | change several, or slide there over two seconds |
+| `lead.set({ cutoff: 4000 }, { glide: 2 })` | change several, or slide there over two seconds. The word is `glide` in JavaScript and in Python (`slide` is understood too) |
 | `lead.arp("Cm7")`, `lead.startArp("Am")` | a chord as an [arpeggio](#arpeggios) |
 | `lead.macro = [...]` | a [step macro](#step-macros) |
 | `lead.remove()` | finished with it |
@@ -503,7 +503,18 @@ song.stop()
 
 `playSong("tune.xm", { repeat: false })` plays it once, and `{ volume: 0.6 }` starts it quieter. One song plays at a time, and your own notes and game sounds play over it. `song.position` says where it is, for drawing: `{ state, order, pattern, row, tick, speed, tempo, rows, orders }`, where `state` is `"playing"`, `"paused"`, `"stopped"` or `"none"`.
 
-In a song of synths' own, an instrument can be a synth instead of a recording, called by a name. A name that is a ready-made synth's (`"bass"`, `"chipKick"`) plays as that; any other name is told what it is:
+A song is made of channels, counted from 0, and of patterns played in an order:
+
+```js
+song.mute(2)                               // silence the third channel; song.mute(2, false) brings it back, song.unmute() all of them
+song.solo(0)                               // hear only the first; song.solo("all", false) to hear the rest again
+song.loopPattern()                         // stay on the pattern that is playing, round and round; loopPattern(false) carries on
+song.replace(edited)                       // an edited song in its place, as it plays (for an editor)
+```
+
+`replace` takes the song's bytes, its JSON as text, or the song itself as an object. When the edited song has the same shape (as many channels, no fewer instruments and samples) nothing stops: it keeps its place and plays the new notes from the next row.
+
+In a song of synths' own, an instrument can be a synth instead of a recording, called by a name. A song can say itself what the synth is (`"synth": { "preset": "bell", "set": { "decay": 1.4 } }` on the instrument), and then nothing more is needed. A name that is a ready-made synth's (`"bass"`, `"chipKick"`) plays as that; any other name is told what it is, and what you say here comes before what the song says:
 
 ```js
 playSong("songs/night_drive.json", { patches: { tune: "bell", wobble: { preset: "bass", cutoff: 300, wobble: 12 } } })
@@ -511,18 +522,24 @@ playSong("songs/night_drive.json", { patches: { tune: "bell", wobble: { preset: 
 
 A `.mod` or `.xm` sounds as its tracker made it sound, rough edges included; `{ raw: false }` smooths the samples and `{ raw: true }` leaves any song rough. `await packSong(bytes)` turns a song file of any kind into the engine's small packed form, which `playSong` plays (an editor keeps that after importing a module).
 
+A song of synths' own can carry its recordings inside itself (`"data"`, a WAV file as base64 text), so that it is one file with nothing beside it.
+
 [`examples/songs/night_drive.json`](examples/songs/night_drive.json) is a short song written this way, and the format is described in [synths-core](https://github.com/johnwylie70/synths-core/blob/main/docs/song-format.md).
 
 ## With pictures.js
 
-Until sound is built into pictures.js, a scene fetches the sound functions in its first line and then uses them like the drawing ones:
+In a [pictures.js](https://github.com/johnwylie70/pictures.js) scene the sound functions are already there, beside the drawing ones, with nothing to import:
 
 ```js
-const { playSound, playNotes } = await use("synths/synths.js")
-
 function update(dt) {
   if (star.touches(basket)) playSound("coin")
 }
+```
+
+A scene run with a copy of this repository instead (as the examples here are) fetches them in its first line, by the path from the scene to `synths.js`:
+
+```js
+const { playSound, playNotes } = await use("../synths.js")
 ```
 
 [`examples/catch_game.js`](examples/catch_game.js) is a whole game written this way.
