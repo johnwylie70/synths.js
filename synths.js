@@ -2687,6 +2687,7 @@ function fallbackSize(want, sampleRate) {
  * @param {{ wasm?: ArrayBuffer | Uint8Array | WebAssembly.Module | string | Promise<any>, worklet?: 'auto' | 'blob' | 'file' | string,
  *           latency?: number, context?: AudioContext, destination?: AudioNode, fallback?: boolean | 'always', fallbackBuffer?: 'auto' | number,
  *           buffer?: 'auto' | 'small' | 'medium' | 'large' | number, core?: (given: { sampleRate: number, post(message): void }) => object,
+ *           stepped?: boolean | { fps?: number, sampleRate?: number, start?: number },
  *           onState?: (state: string) => void, microphone?: any, save?: (file: { name: string, bytes: Uint8Array, type: string }) => void }} options
  *   `wasm` is the engine, as bytes (for a page that may not fetch it) or an address; without it, `synths_core.wasm` beside this file.
  *   `worklet` is how the worklet's module is loaded: 'blob' from the text inside this file (no second file, no fetch), 'file'
@@ -2705,6 +2706,8 @@ function fallbackSize(want, sampleRate) {
  *   `microphone` is where the microphone comes from when it is not the browser's to ask for: a MediaStream, or
  *   { open({ sampleRate, raw, constraints, push }), close() }, or false for none (docs/microphone.md is the contract).
  *   `save` is given a file that saveSound made, in place of the browser being asked to download it.
+ *   `stepped` makes a player for a page whose clock a video recorder moves a frame at a time: it has no sound card,
+ *   makes sound only when it is told how far the clock has moved, and keeps the samples (see createSteppedPlayer).
  * @returns {{ send(batch): void, read(id?): { samples: Float32Array, level: number[], notes: number[] },
  *             state: 'loading'|'waiting'|'on'|'failed', kind: 'worklet'|'fallback'|'host'|null, ready: Promise<void>,
  *             fallback?: { buffer: number, underruns: number, reason: 'insecure'|'worklet' },
@@ -2716,6 +2719,8 @@ function fallbackSize(want, sampleRate) {
  *   it gives the latest the audio thread has posted, which starts to arrive a moment after the first read.
  */
 export function createPlayer(options = {}) {
+  // Stepped by a recorder: no sound card at all (see createSteppedPlayer).
+  if (options.stepped) return createSteppedPlayer(options)
   const Context = globalThis.AudioContext || globalThis.webkitAudioContext
   let latency = options.latency ?? 0.04
   // THE BUFFER a program or a host asked for: 'auto' or frames. `called` once a program's own setSoundBuffer has
@@ -3336,6 +3341,208 @@ export async function createOfflinePlayer(options = {}) {
   }
 }
 
+// --- the stepped player -----------------------------------------------------------------------
+
+/** Every createSound() that is running: a stepped player has each send what it has written before it makes sound. */
+const writers = new Set()
+/** What senders are still reading before they can send (a song's file, a sample's): a stepped player waits for these. */
+const reading_ = new Set()
+const whileReading = (job) => { reading_.add(job); const done = () => reading_.delete(job); job.then(done, done); return job }
+
+/**
+ * A player for a page that is being recorded a frame at a time. A video recorder moves the page's clock one frame
+ * for each picture, however long the picture took to draw, so sound played by the sound card would not stay with
+ * the pictures. This player has no sound card. Its engine stands still until it is told where the clock now is,
+ * `await player.stepped.advance(seconds)`, and then makes exactly the samples up to there; `player.stepped.take()`
+ * hands over what has been made since the last take. So the sound is in step with the pictures to the sample, and
+ * two recordings of the same scene are the same numbers. Nothing is heard while it runs.
+ *
+ * It is what `createPlayer({ stepped: { fps: 60 } })` gives, and so what a page gets with
+ * `configure({ stepped: { fps: 60 } })` or `createSound({ stepped: … })`: the scene's own code does not change.
+ *
+ * THE CLOCK is the sender's: the times on commands and the times given to `advance` are read on the same clock
+ * (performance.now() / 1000 in a page, which the recorder is stepping). `start` is what that clock reads at the
+ * first sample (0, which is where a recorder's clock begins); `startAt(seconds)` says it again for a clock that
+ * was already running: the clock reads `seconds` at the point the sound has reached.
+ *
+ * A command lands on the sample of the time it names, or of the clock when it was sent, and never before the
+ * point the sound has reached. `advance` first has every sender on the page send what it has written, and waits
+ * for what is still being read (a song's file, a sample), so a song asked for in frame 20 starts on frame 20's
+ * first sample however long its file took. `read()`, `songPosition()` and so a synth's samples(), level() and
+ * notes() are the engine's own at the point the sound has reached, which is the frame being drawn.
+ *
+ * @param {{ stepped?: true | { fps?: number, sampleRate?: number, start?: number }, wasm?: any, onState?: (state: string) => void,
+ *           midi?: any, save?: (file: { name: string, bytes: Uint8Array, type: string }) => void }} options
+ *   `fps` is the video's frames a second (60), for `step()`; `sampleRate` the samples a second (48000).
+ * @returns the same as createPlayer (`kind` is 'stepped', and there is no `context` and no `node`), and `stepped`:
+ *   { fps, sampleRate, time, samples, frame,
+ *     advance(seconds): Promise<number>   make the sound up to where the clock now reads `seconds`; gives the samples made
+ *     step(frames = 1): Promise<number>   the same by counting video frames: after n steps there are round(n × sampleRate / fps) samples
+ *     startAt(seconds): void              the clock reads `seconds` at the point the sound has reached
+ *     take(): { left, right, sampleRate, length, wav() }   the samples made since the last take, and no longer kept
+ *     onAdvance(fn): () => void           `fn(left, right, sampleRate)` is given each stretch as it is made; it gives back a function that stops it }
+ */
+export function createSteppedPlayer(options = {}) {
+  const given = options.stepped && typeof options.stepped === 'object' ? options.stepped : {}
+  const sampleRate = given.sampleRate || options.sampleRate || 48000
+  const fps = given.fps > 0 ? given.fps : 60
+  let start = given.start || 0
+  let core = null, conductor = null, closed = false
+  let made = 0               // samples made so far, also when there is no engine to make them
+  let counted = 0            // video frames stepped, for step()
+  let stepZero = 0           // the samples there were when step() began counting
+  let kept = []              // [left, right] made since the last take
+  let held = []              // batches that came before the engine was there
+  let busy = Promise.resolve()
+  const heardAdvance = new Set()
+  const told = listeners()
+  let isReady
+  const now = () => made / sampleRate
+  const state = (s) => { if (player.state !== s && player.state !== 'closed') { player.state = s; options.onState?.(s) } }
+  const mic = micSide({
+    open() { throw { kind: 'offline' } }, close() {}, emit: told.emit,
+    run(c, at, scope) { conductor.run(c, at, scope); conductor.flush() },
+  })
+  const midi = midiSide(options, {
+    now: () => now() * 1000, look: Infinity, offset: -start, latency: () => 0,
+    play(c, scope) { if (!core) return send({ synths: COMMANDS, scope, cmds: [c] }); conductor.run(c, now(), scope); conductor.flush() },
+  })
+  const bufferNow = () => ({ frames: Math.round(sampleRate / fps), delay: 0, thread: 'stepped', underruns: 0, setting: 'auto' })
+
+  function carry(batch) {
+    for (const c of batch.cmds) {
+      if (!c) continue
+      if (c.op === 'buffer') { told.emit(batch.scope, [{ type: 'buffer', ...bufferNow() }]); continue }
+      // The time it names, or the clock when it was sent, counted from the first sample; with neither, now.
+      const at = typeof c.t === 'number' ? c.t - start : typeof batch.now === 'number' ? batch.now - start : now()
+      if (mic.take(c, batch.scope, at)) conductor.run(c, at, batch.scope)
+    }
+    conductor.flush()
+  }
+  function send(batch) {
+    if (closed || !batch || !Array.isArray(batch.cmds)) return
+    midi.take(batch)
+    if (player.state === 'failed') return
+    if (!core) { held.push(batch); return }
+    carry(batch)
+  }
+
+  // Make the sound up to `target` samples from the first. One at a time, in the order asked.
+  function reach(target) {
+    const job = busy.then(async () => {
+      if (closed) return 0
+      // Everything written so far is sent, and what is still being read is waited for and then sent too.
+      for (;;) {
+        for (const flush of [...writers]) flush()
+        await null
+        if (!reading_.size) break
+        await Promise.allSettled([...reading_])
+      }
+      await loaded
+      if (closed) return 0
+      if (core) { while (conductor.loading.size) await Promise.allSettled([...conductor.loading]) }
+      const frames = Math.max(0, Math.round(target()) - made)
+      if (!frames) return 0
+      const left = new Float32Array(frames), right = new Float32Array(frames)
+      if (core) { midi.pump(); core.render(left, right, frames) }
+      made += frames
+      if (player.stepped.keep) kept.push([left, right])
+      for (const fn of [...heardAdvance]) fn(left, right, sampleRate)
+      return frames
+    })
+    busy = job.catch(() => 0)
+    return job
+  }
+
+  const stepped = {
+    fps, sampleRate,
+    /** false: the samples are not kept for take() (they are still given to onAdvance). */
+    keep: true,
+    /** Seconds of sound made so far. */
+    get time() { return now() },
+    /** Samples made so far. */
+    get samples() { return made },
+    /** Video frames stepped so far with step(). */
+    get frame() { return counted },
+    advance: (seconds) => reach(() => (seconds - start) * sampleRate),
+    step(frames = 1) {
+      if (!counted) stepZero = made
+      counted += frames
+      const n = counted
+      return reach(() => stepZero + n * sampleRate / fps)
+    },
+    startAt(seconds) { start = seconds - now() },
+    take() {
+      const length = kept.reduce((n, [l]) => n + l.length, 0)
+      const left = new Float32Array(length), right = new Float32Array(length)
+      let at = 0
+      for (const [l, r] of kept) { left.set(l, at); right.set(r, at); at += l.length }
+      kept = []
+      return { left, right, sampleRate, length, wav: () => toWav(left, right, sampleRate) }
+    },
+    onAdvance(fn) { heardAdvance.add(fn); return () => heardAdvance.delete(fn) },
+  }
+  const player = {
+    state: 'loading', kind: 'stepped', context: null, node: null, stepped,
+    ready: new Promise((yes) => { isReady = yes }),
+    send, unlock() {}, pause() {}, resume() {},
+    setBuffer: () => bufferNow(), buffer: () => bufferNow(),
+    onSoundEvents: (listener, scope) => told.on(listener, scope),
+    onMidi: (listener, scope) => midi.onMidi(listener, scope),
+    target: (id, scope) => makeTarget(id, (c) => send({ synths: COMMANDS, scope, cmds: [c] }), () => conductor, read, scope),
+    ask: () => Promise.resolve({ voices: core ? core.voices() : 0, time: made }),
+    read, songPosition,
+    close() {
+      if (closed) return
+      closed = true
+      midi.close()
+      mic.close()
+      if (core) core.close()
+      player.state = 'closed'
+    },
+  }
+  /** What a synth (or, with no id, everything) is doing at the point the sound has reached. */
+  function read(id, scope) {
+    const part = core && !closed ? conductor.partOf(id, scope) : -1
+    const tap = part < 0 ? null : core.taps([part], 1024)[0]
+    return tap ? reading(tap, conductor.gain()) : NOTHING
+  }
+  /** Where the song is at the point the sound has reached. */
+  function songPosition() { return core && !closed ? songPlace(core.songPosition()) : NO_SONG }
+
+  const loaded = (async () => {
+    const wasm = await engineBytes(options.wasm)
+    const module = wasm instanceof WebAssembly.Module ? wasm : await WebAssembly.compile(wasm)
+    if (closed) return
+    const mine = makeCore(module, sampleRate, (m) => {
+      if (m.type === 'song') conductor.songLoaded(m, now())
+      else if (m.type === 'recorded') { const say = conductor.recorded(m); if (say) told.emit(say[0], [say[1]]) } else if (m.type === 'sample') {
+        const say = conductor.saved(m)
+        if (!say) return
+        if (say[2]) options.save?.({ name: say[1].name, bytes: say[1].bytes, type: 'audio/wav' })
+        told.emit(say[0], [say[1]])
+      }
+    })
+    conductor = makeConductor((ops) => mine.exec(ops), async (c) => decode(await sampleBytes(c)), sampleBytes, (scope, event) => told.emit(scope, [event]))
+    // The engine has made nothing yet, and the sound may already have been stepped past its beginning in silence.
+    mine.delta = -made
+    core = mine
+    if (made) { const skip = new Float32Array(made); core.render(skip, skip, made) }
+    conductor.begin()
+    if (options.midi) await midi.load()
+    state('on')
+    const waited = held
+    held = []
+    for (const batch of waited) carry(batch)
+    isReady()
+  })().catch((e) => {
+    if (closed) return
+    tell(`the sound engine could not start, so the recording will be silent (${(e && e.message) || e}).`, 'error')
+    state('failed')
+  })
+  return player
+}
+
 /**
  * A song file of any kind (.mod, .xm, or our own JSON) as the engine's packed form: small, quick to load, and what
  * a tracker editor keeps after "import a module". `await packSong(bytes)` gives a Uint8Array that playSong plays.
@@ -3445,6 +3652,7 @@ export function createSound(options = {}) {
     cmds = []
     transport.send(batch)
   }
+  writers.add(flush)
   function command(c) {
     (midiSlot || cmds).push(c)
     if (!waiting && options.batch !== 'manual') { waiting = true; queueMicrotask(flush) }
@@ -3538,7 +3746,7 @@ export function createSound(options = {}) {
       if (name === 'stopMidi') return back
       midiKept = []
       midiLoading = true
-      midiComing = loadMidi(options.midiModule).then((m) => {
+      midiComing = whileReading(loadMidi(options.midiModule).then((m) => {
         const made = m.makeMidiApi({
           command, choices, notesOf, shown, amount, length, tell, api,
           storage: options.midiStorage,
@@ -3567,7 +3775,7 @@ export function createSound(options = {}) {
       }).catch((e) => { midiKept = { push() {} }; midiMissing(e) }).then(() => {
         midiLoading = false
         if (options.batch !== 'manual') flush()
-      })
+      }))
     }
     const slot = []
     cmds.push(slot)
@@ -4178,7 +4386,7 @@ export function createSound(options = {}) {
     if (o.note !== undefined) c.note = noteNumber(o.note)
     if (o.loop) c.loop = Array.isArray(o.loop) ? o.loop : true
     if (options.read) {
-      Promise.resolve().then(() => options.read(path)).then((bytes) => { if (!bytes) throw new Error('it is not there'); command({ ...c, bytes }) })
+      whileReading(Promise.resolve().then(() => options.read(path)).then((bytes) => { if (!bytes) throw new Error('it is not there'); command({ ...c, bytes }) }))
         .catch((e) => tell(`${said}: the file could not be read (${(e && e.message) || e}), so it will be silent.`))
     } else command({ ...c, url: options.resolve ? options.resolve(path) : typeof document !== 'undefined' ? new URL(path, document.baseURI).href : path })
     return sid
@@ -4689,7 +4897,7 @@ export function createSound(options = {}) {
     else if (options.read) {
       // A host whose player cannot fetch reads the song here, and the WAV files one of our own songs names.
       const from = file.includes('/') ? file.slice(0, file.lastIndexOf('/') + 1) : ''
-      Promise.resolve().then(() => options.read(file)).then(async (data) => {
+      whileReading(Promise.resolve().then(() => options.read(file)).then(async (data) => {
         if (!data) throw new Error('it is not there')
         const all = new Uint8Array(data.buffer || data, data.byteOffset || 0, data.byteLength)
         const files = {}
@@ -4699,7 +4907,7 @@ export function createSound(options = {}) {
           for (const name of new Set(named)) files[name] = await options.read(from + name)
         }
         command({ ...c, name: file, bytes: all, files })
-      }).catch((e) => tell(`playSong(${shown(file)}): the file could not be read (${(e && e.message) || e}), so it will not play.`))
+      }).catch((e) => tell(`playSong(${shown(file)}): the file could not be read (${(e && e.message) || e}), so it will not play.`)))
     } else command({ ...c, name: file, url: options.resolve ? options.resolve(file) : typeof document !== 'undefined' ? new URL(file, document.baseURI).href : file })
     const say = (what, more) => { command({ op: 'song', id, do: what, ...more, t: clock() }); return song }
     const channelOf = (channel, said) => {
@@ -4859,6 +5067,7 @@ export function createSound(options = {}) {
       cmds = [...(micSynth ? [{ op: 'mic', id: micSynth._id, do: 'close', t: clock() }] : []), { op: 'stop', t: clock() }, { op: 'close', t: clock() }]
       if (transport) flush()
       closed = true
+      writers.delete(flush)
       if (mine) { if (--mine.users <= 0) { mine.player.close(); if (shared === mine) shared = null } } else player?.close()
     },
   }
@@ -5003,4 +5212,5 @@ export {
   useMicrophone as use_microphone, stopMicrophone as stop_microphone, recordSound as record_sound, startRecording as start_recording,
   stopRecording as stop_recording, recordOutput as record_output, saveSound as save_sound, receiveSoundEvents as receive_sound_events,
   voiceNames as voice_names,
+  createSteppedPlayer as create_stepped_player,
 }
