@@ -12,6 +12,10 @@
  *   lead.cutoff = 800                      every setting is a plain property, and changes the notes already sounding
  *   lead.echo = 0.4                        effects are one word: echo, reverb, chorus, distortion, crush
  *   const note = lead.start("C4")          a note that stays until note.stop(); note.slideTo("G4", 0.5), note.volume = 0.5
+ *   lead.arp("Cm7"), playArp("C4", "minor")   a chord from one voice, as a fast arpeggio (a C64 chord); startArp stays, and changes chord
+ *   lead.play("Cm7")                       a chord by name plays all its notes
+ *   lead.macro = [{ wave: "noise" }, …]    a step macro: chip drums and moving pulse widths
+ *   lead.samples(), .level(), .notes()     what it is doing now, for a scope, a meter and lit keys (controls.js uses these)
  *   const drum = loadSample("kick.wav")    a recorded sound from a file; drum.play(), drum.play("E4") at another pitch
  *   playSong("tune.mod")                   a tracker song (not ready yet in this version)
  *   setVolume(0.5), muteSound(), unmuteSound(), stopSound()

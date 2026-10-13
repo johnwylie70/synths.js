@@ -105,7 +105,8 @@ be `true` or `false`. For the setting `sample` the value is a sample id.
 "did you mean" without the engine: `settings` (id, name, kind, min, max, default, choices, and `scope`: `synth`
 or `all`), `names` (each friendly name, the setting it stands for and its `scale`: `octave` is `transpose` times
 12), `choiceWords`, `plain` (what every synth starts from), `synths` (the ready-made synths, and the `note` each
-plays when none is given) and `sounds` (the ready-made game sounds). `describe()` returns the same.
+plays when none is given, and its `macro` if it has one), `sounds` (the ready-made game sounds), `chords` (each
+kind of chord as semitones above its root), `orders` and `macroWaves`. `describe()` returns the same.
 
 A sender should check names and values and report mistakes where the program is, in its own language. A player
 does not report them: it passes over what it cannot use.
@@ -125,8 +126,9 @@ Make a synth, or replace the settings of one that exists.
 | field | |
 |---|---|
 | `id` | the synth |
-| `preset` | optional: the ready-made synth to start from (`keys`, `bass`, `lead`, `pad`, `pluck`, `organ`, `strings`, `bell`, `flute`, `chip`, `chipLead`, `chipBass`, `chipNoise`, `kick`, `snare`, `hat`, `sample`). Without it the synth starts plain. |
+| `preset` | optional: the ready-made synth to start from (`keys`, `bass`, `lead`, `pad`, `pluck`, `organ`, `strings`, `bell`, `flute`, `chip`, `chipLead`, `chipBass`, `chipNoise`, `chipKick`, `chipSnare`, `chipHat`, `kick`, `snare`, `hat`, `sample`). Without it the synth starts plain. |
 | `set` | optional: settings on top of that |
+| `macro` | optional: a [step macro](#macro), or `null` for none. Missing: the preset's, if it has one |
 
 The patch is: the engine's defaults, then `plain`, then the preset, then `set`. A `note`, `set` or `tune` for an
 id that was never made makes it, as `keys`.
@@ -141,6 +143,24 @@ Change settings. Notes already sounding change too.
 
 `glide`, optional, is the seconds a number takes to slide to its new value. A setting whose scope is `all`
 (the shared effects) may be given here or in `master`; it changes for every synth.
+
+### `macro`
+
+Give a synth a step macro: a list of steps that each of its notes plays through, `macro.rate` (the setting
+`macroRate`, 50) steps a second, inside the engine.
+
+```js
+{ op: "macro", id: "s1", macro: [{ wave: "noise", pitch: 24 }, { wave: "square" }, { pitch: -5, volume: 0.9 }] }
+{ op: "macro", id: "s1", macro: { steps: [{ width: 0.1 }, { width: 0.9 }], loop: true, slide: true, release: 1 } }
+{ op: "macro", id: "s1", macro: null }
+```
+
+A macro is a list of steps, or an object with `steps` and any of `loop` (`true`, or `[first step, step after
+the last]`: those steps go round while the note is held), `slide` (width, cutoff and volume move in a straight
+line between steps) and `release` (the step to jump to when the note is let go). There is room for 64 steps. A
+step is an object with any of `wave` (`"sine"`, `"triangle"`, `"saw"`, `"pulse"`, `"square"`, `"noise"`, or the
+engine's number), `pitch` (semitones), `width` (0 to 1), `cutoff` (semitones) and `volume` (0 to 1); or those five
+as a list. What is left out is left as the synth has it.
 
 ### `note`
 
@@ -158,8 +178,27 @@ Start a note, or several at once.
 | `vel` | loudness, 0 to 1 (0.8) |
 | `pan` | optional, -1 to 1, for this note alone |
 | `h` | optional: a handle for `off` and `voice` |
+| `arp` | optional: an [arpeggio](#an-arpeggio) for this note |
 
 Every note in a list shares the handle and is let go together.
+
+#### An arpeggio
+
+`arp` turns a note into a chord from one voice: the engine steps its pitch through a few offsets, on the exact
+frame of each step.
+
+```js
+{ op: "note", id: "s1", note: [60], len: 0.5, h: 7, arp: { offsets: [0, 3, 7, 10], rate: 50, order: "up" } }
+```
+
+| field | |
+|---|---|
+| `offsets` | up to 8 whole numbers of semitones, each added in turn to the note (-128 to 127). The sender works a chord's name out into these |
+| `rate` | steps a second, 0.1 to 1000 (50) |
+| `order` | `"up"`, `"down"`, `"updown"`, `"written"` or `"random"` (spaces, `-` and `_` do not matter), or the engine's number 0 to 4 (`"up"`) |
+
+Give the note one pitch, the root. To change the chord of a note that is sounding, send `voice` with its handle
+and a new `arp`: the pattern starts again from its first step and nothing else about the note does.
 
 ### `off`
 
@@ -181,7 +220,8 @@ Change a note that is sounding, by its handle.
 ```
 
 `pitch` (a note) or `freq` (in Hz) moves it, over `glide` seconds if given. `vol` is a multiplier, 0 to 4 (1 when
-a note starts). `pan` is -1 to 1. `kill: true` cuts it off at once.
+a note starts). `pan` is -1 to 1. `kill: true` cuts it off at once. `arp` gives it an
+[arpeggio](#an-arpeggio) or changes the one it has, and `arp: null` takes it away.
 
 ### `sound`
 
@@ -191,7 +231,7 @@ Play a ready-made game sound.
 { op: "sound", name: "laser", vol: 0.8, pitch: 3, pan: 0.2 }
 ```
 
-`name` is one of `coin`, `jump`, `laser`, `explosion`, `hit`, `powerup`, `blip`, `click`, `zap`, `bounce`, `pop`,
+`name` is one of `coin`, `jump`, `laser`, `shoot`, `explosion`, `hit`, `powerup`, `blip`, `click`, `zap`, `bounce`, `pop`,
 `win`, `lose`. `vol` is a multiplier (1), `pitch` is semitones up or down (0). A sound is a patch and a few timed
 notes that the player knows; it uses a part of its own, made the first time it is played.
 
@@ -353,7 +393,7 @@ port.onmessage = (m) => player.send(m.data)
 | `fallback` | `false` to refuse running the engine on the page's thread when there is no AudioWorklet; `"always"` to insist on it |
 | `onState` | called with `"waiting"`, `"on"` or `"failed"` |
 
-It returns `send(batch)`, `state`, `kind` (`"worklet"` or `"fallback"`), `ready` (a promise for sound being on),
+It returns `send(batch)`, `read(id)` (see [Reading back](#reading-back)), `state`, `kind` (`"worklet"` or `"fallback"`), `ready` (a promise for sound being on),
 `pause()`, `resume()`, `unlock()` (call it from a tap of your own), `ask()` (a promise of `{ voices, time }`),
 `context`, `node` and `close()`.
 
@@ -368,9 +408,25 @@ worklet from a Blob ("Cross-origin script load denied"), and loads it from `synt
 is in the frame's `script-src` and is served with `Access-Control-Allow-Origin: *`; with neither, the fallback
 plays. WebKit also keeps such a frame silent until it is tapped itself.
 
+## Reading back
+
+Commands are never answered, and stay that way. What a display needs (a scope, a meter, the keys that are lit)
+is read from the **player**, by whoever is beside it:
+
+```js
+player.read("s1")     // { samples: Float32Array of the synth's latest 1024 frames, level: [left, right], notes: [60, 64] }
+player.read()         // the same for all the sound together
+```
+
+`samples` are from -1 to 1 and `level` is the peak, from 0 to 1, both as loud as they are heard; `notes` are the
+notes sounding, as whole numbers. A read never waits: it gives the latest the audio thread has posted (about 40
+times a second, beginning a moment after the first read of that synth, and stopping when nothing has read for a
+second and a half). Before anything has arrived, and for a synth that has no part, it gives empty lists and zeros.
+
+A transport may offer the same as `read(id)` beside its `send(batch)`; the library's synths use it for
+`samples()`, `level()` and `notes()`, and give nothing when it is not there. A sender in another place (Python, a
+worker) asks its host, however the host chooses to carry it: once a frame is plenty.
+
 ## What is not here yet
 
 - **Songs** (`song`): the replayer is being added to the engine.
-- **Reading back.** Levels, a scope and which notes are sounding are being added to the engine. They will come
-  as a separate reading the player offers its host, not as answers to commands: this format stays one-way.
-- **Chip-sound macros** (a pattern of steps inside one note) will be new settings and one new command.

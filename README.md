@@ -18,7 +18,7 @@ import { playSound } from "./synths.js"
 playSound("coin")
 ```
 
-There are thirteen ready-made game sounds: `coin`, `jump`, `laser`, `explosion`, `hit`, `powerup`, `blip`, `click`, `zap`, `bounce`, `pop`, `win` and `lose`. In a game it is one line where the thing happens:
+There are fourteen ready-made game sounds: `coin`, `jump`, `laser`, `shoot`, `explosion`, `hit`, `powerup`, `blip`, `click`, `zap`, `bounce`, `pop`, `win` and `lose`. In a game it is one line where the thing happens:
 
 ```js
 if (star.touches(basket)) playSound("coin")
@@ -91,8 +91,15 @@ playNote("C4")                       // half a second
 playNote("C4", 2)                    // two seconds
 playNote("C4", 2, 0.3)               // and quiet: loudness goes from 0 to 1
 playNote(["C4", "E4", "G4"])         // a chord
+playNote("Cm7")                      // a chord by name: C minor seventh
 playNote("C4", { length: 2, volume: 0.3, pan: -1, after: 0.5 })   // the same things by name; pan -1 is left, 1 is right
 ```
+
+### Chords by name
+
+A chord is a note and a kind: `"C"`+`"m7"` is `"Cm7"`. The kinds are `major` (or `maj`), `minor` (or `m`), `dim`, `aug`, `sus2`, `sus4`, `5`, `6`, `m6`, `7`, `maj7`, `m7`, `dim7`, `m7b5`, `add9`, `9`, `maj9`, `m9` and `octave`. Wherever a note is played, a chord's name plays all its notes: `lead.play("Fmaj7", 1)`, `playNotes("Am F C G", 0.5)`. `chordNotes("Cm7")` gives the notes as numbers.
+
+A letter followed by a number is always a note, so `"C7"` is the note C in octave 7. For the seventh chord write `"Cdom7"`. For a chord in another octave put the octave after the letter: `"C3m7"`.
 
 ## Tunes
 
@@ -105,6 +112,22 @@ The notes are text with spaces between, or a list: `["C4", null, ["C4", "E4"]]`,
 
 Every synth has `playNotes` too: `makeSynth("bass").playNotes("C2 C2 G2 C2", 0.25)`.
 
+## Arpeggios
+
+An arpeggio is a chord played one note at a time, very fast, on a single voice: the shimmering chords of a Commodore 64 tune, which had only three voices to spend.
+
+```js
+playArp("Cm7")                             // half a second of C minor seventh
+playArp("C4", "minor", 2)                  // a note and a kind, for two seconds
+playArp(["C4", "E4", "G4", "C5"], 1, { speed: 12, order: "up-down" })
+
+const chord = startArp("Am")               // one that stays
+chord.change("F")                          // another chord: the note carries on, it does not start again
+chord.stop()
+```
+
+`speed` is steps a second: 50 unless you say, which is the speed chip music was written at; at 12 you can hear each step. `order` is `"up"`, `"down"`, `"up-down"`, `"as written"` or `"random"`. A chord has room for eight notes. Every synth has `arp` and `startArp` too (`lead.arp("Cm7")`); with no synth they play on a plain square wave. An arpeggio takes `volume`, `pan`, `after`, `at` and `beat` like any note, and `chord.change("F", { after: 2 })` changes it later.
+
 ## Synths
 
 ```js
@@ -113,7 +136,7 @@ const soft = makeSynth("lead", { cutoff: 900 })      // a ready-made one, change
 const mine = makeSynth({ wave: "square", attack: 0.2 })   // one from nothing
 ```
 
-The ready-made synths: `keys` (what `playNote` uses), `bass`, `lead`, `pad`, `pluck`, `organ`, `strings`, `bell`, `flute`; the chip sounds `chip`, `chipLead`, `chipBass` and `chipNoise`; and the drums `kick`, `snare` and `hat`. All of them are settings of the same engine, not recordings, so every one can be changed.
+The ready-made synths: `keys` (what `playNote` uses), `bass`, `lead`, `pad`, `pluck`, `organ`, `strings`, `bell`, `flute`; the chip sounds `chip`, `chipLead`, `chipBass`, `chipNoise`, `chipKick`, `chipSnare` and `chipHat`; and the drums `kick`, `snare` and `hat`. All of them are settings of the same engine, not recordings, so every one can be changed.
 
 What a synth does:
 
@@ -126,6 +149,8 @@ What a synth does:
 | `lead.playNotes("C4 E4 G4", 0.25)` | a tune on this synth |
 | `lead.cutoff = 800` | change a setting; notes already sounding change too |
 | `lead.set({ cutoff: 4000 }, { glide: 2 })` | change several, or slide there over two seconds |
+| `lead.arp("Cm7")`, `lead.startArp("Am")` | a chord as an [arpeggio](#arpeggios) |
+| `lead.macro = [...]` | a [step macro](#step-macros) |
 | `lead.remove()` | finished with it |
 
 ### Settings
@@ -153,6 +178,37 @@ Every setting is a plain property, and reads back what you set: `lead.cutoff = 8
 | `distortion`, `crush` | grit (0 to 1), and the bits each sample keeps (16 is clean, 4 is an old games console) |
 
 There are more: `settingNames()` lists every one, and each also answers to the engine's own name for it, written any way you like (`filterCutoff`, `filter_cutoff`, `"filter.cutoff"`).
+
+### Step macros
+
+A macro is a short list of steps that every note of a synth plays through, 50 a second, each step changing the wave, the pitch, the pulse width, the cutoff or the volume. It is how a sound chip made a drum from one voice: a burst of noise, then a tone, then noise again.
+
+```js
+const snare = makeSynth("chip", { decay: 0.16, sustain: 0, macro: [
+  { wave: "noise", pitch: 24 },            // noise, tuned high
+  { wave: "square" },                      // then the note itself
+  { pitch: -5, volume: 0.9 },              // five semitones lower
+  { wave: "noise", pitch: 18, volume: 0.6 },
+] })
+snare.play("A3")
+```
+
+A step is `{ wave, pitch, width, cutoff, volume }` with any of them left out: `wave` is `"sine"`, `"triangle"`, `"saw"`, `"pulse"`, `"square"` or `"noise"`; `pitch` and `cutoff` are semitones from the note; `width` is the pulse width; `volume` is 0 to 1. The last step holds. For more, give `{ steps: [...], loop: true }` (the steps go round while the note is held; `loop: [2, 6]` for some of them), `slide: true` (width, cutoff and volume move smoothly between steps) and `release: 4` (the step to jump to when the note is let go). The setting `macroRate` is the steps a second. `lead.macro = null` takes a macro away. `chipKick`, `chipSnare`, `chipHat` and `chipBass` are made this way.
+
+## Dials, keyboards and scopes
+
+Every synth can be tied to the controls of [controls.js](https://github.com/johnwylie70/controls.js), with nothing in between:
+
+```js
+const lead = makeSynth("lead")
+
+dial("cutoff", lead, "cutoff")       // the dial takes its range from the synth, and turning it sets it
+scope(lead)                          // the wave it is making
+meter(lead)                          // how loud it is
+keyboard(lead)                       // piano keys that play it, and light up as it plays
+```
+
+[`examples/synth_panel.js`](examples/synth_panel.js) is a whole one. What the controls use is there for your own drawing too: `lead.samples()` is the wave the synth is making now (numbers from -1 to 1), `lead.level()` is how loud it is (`[left, right]`, 0 to 1) and `lead.notes()` is the notes it is sounding. `lead.noteOn("C4")` and `lead.noteOff("C4")` press and let go of a key; `lead.set("cutoff", 800)`, `lead.get("cutoff")` and `lead.describe("cutoff")` (its range, unit and kind) work by name. `soundOutput()` has the same for all the sound together, and `mainSynth()` is the synth that `playNote` plays.
 
 ## Effects
 
@@ -230,7 +286,7 @@ function update(dt) {
 
 ## The Python spellings
 
-Every function has its Python spelling too, so a program comes across from one language to the other with little more than its syntax changed: `play_sound`, `play_note`, `play_notes`, `make_synth`, `load_sample`, `play_song`, `stop_sound`, `set_volume`, `mute_sound`, `set_effects`, `set_tempo`, `sound_time`. Settings too: `lead.vibrato_rate = 6`.
+Every function has its Python spelling too, so a program comes across from one language to the other with little more than its syntax changed: `play_sound`, `play_note`, `play_notes`, `play_arp`, `start_arp`, `make_synth`, `load_sample`, `play_song`, `stop_sound`, `set_volume`, `mute_sound`, `set_effects`, `set_tempo`, `sound_time`. Settings too: `lead.vibrato_rate = 6`.
 
 ## Mistakes
 
@@ -270,6 +326,7 @@ port.onmessage = (m) => player.send(m.data)
 - **No network needed.** `createPlayer({ wasm: bytes })` takes the engine as bytes, and the worklet's module is made from text inside `synths.js` (a Blob), so a page that may fetch nothing still has sound. `worklet: "file"` loads `synths-worklet.js` instead, for a page whose policy refuses Blobs; `"auto"`, the default, tries the Blob and then the file.
 - **The engine runs on the audio thread**, in an AudioWorklet. Where there is none (a page not served over https or from localhost has none), the same engine runs on the page's thread through a ScriptProcessorNode: the same sound, which may crackle when the page is busy. The console says so once. `fallback: false` refuses it.
 - **Offline.** `createOfflinePlayer()` is the same player with no sound card: send it the same batches and `render(seconds)` gives the samples, and `wav()` a WAV file. It works in node too. `renderSound((s) => { s.playNote("C4") }, { seconds: 1 })` does it in one line. This is how a recorded video gets its soundtrack, and how the tests listen.
+- **Reading back.** `player.read(id)` gives what a synth is doing now, `{ samples, level, notes }` (no id: all the sound), for scopes, meters and lit keys. It never waits: the audio thread posts it about 40 times a second while something is reading. A `sound` transport may have a `read(id)` of its own, and a synth's `samples()`, `level()` and `notes()` use it.
 - **Pausing.** `player.pause()` and `player.resume()`, for a scene that is paused or out of view; `player.close()` when it is over. `player.state` is `"loading"`, `"waiting"` (for a tap), `"on"` or `"failed"`.
 
 ## Tests
