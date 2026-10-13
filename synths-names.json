@@ -1,0 +1,1797 @@
+{
+ "version": "0.1.0",
+ "commands": 1,
+ "engine": {
+  "abi": 1,
+  "version": "0.0.0",
+  "parts": 64,
+  "voices": 64,
+  "samples": 1024
+ },
+ "settings": [
+  {
+   "id": 0,
+   "name": "volume",
+   "kind": "float",
+   "min": 0,
+   "max": 2,
+   "default": 1,
+   "scope": "synth"
+  },
+  {
+   "id": 1,
+   "name": "pan",
+   "kind": "float",
+   "min": -1,
+   "max": 1,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 2,
+   "name": "transpose",
+   "kind": "float",
+   "min": -48,
+   "max": 48,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 3,
+   "name": "tune",
+   "kind": "float",
+   "min": -100,
+   "max": 100,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 4,
+   "name": "bend",
+   "kind": "float",
+   "min": -1,
+   "max": 1,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 5,
+   "name": "bend_range",
+   "kind": "float",
+   "min": 0,
+   "max": 48,
+   "default": 2,
+   "scope": "synth"
+  },
+  {
+   "id": 6,
+   "name": "glide",
+   "kind": "float",
+   "min": 0,
+   "max": 10,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 7,
+   "name": "mode",
+   "kind": "choice",
+   "min": 0,
+   "max": 2,
+   "default": 0,
+   "choices": [
+    "poly",
+    "mono",
+    "legato"
+   ],
+   "scope": "synth"
+  },
+  {
+   "id": 8,
+   "name": "unison.voices",
+   "kind": "int",
+   "min": 1,
+   "max": 8,
+   "default": 1,
+   "scope": "synth"
+  },
+  {
+   "id": 9,
+   "name": "unison.detune",
+   "kind": "float",
+   "min": 0,
+   "max": 100,
+   "default": 20,
+   "scope": "synth"
+  },
+  {
+   "id": 10,
+   "name": "unison.spread",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "scope": "synth"
+  },
+  {
+   "id": 11,
+   "name": "velocity",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 1,
+   "scope": "synth"
+  },
+  {
+   "id": 16,
+   "name": "osc1.wave",
+   "kind": "choice",
+   "min": 0,
+   "max": 4,
+   "default": 1,
+   "choices": [
+    "sine",
+    "triangle",
+    "saw",
+    "pulse",
+    "sample"
+   ],
+   "scope": "synth"
+  },
+  {
+   "id": 17,
+   "name": "osc1.level",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 1,
+   "scope": "synth"
+  },
+  {
+   "id": 18,
+   "name": "osc1.coarse",
+   "kind": "float",
+   "min": -48,
+   "max": 48,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 19,
+   "name": "osc1.fine",
+   "kind": "float",
+   "min": -100,
+   "max": 100,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 20,
+   "name": "osc1.pulse_width",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "scope": "synth"
+  },
+  {
+   "id": 21,
+   "name": "osc1.sample",
+   "kind": "int",
+   "min": 0,
+   "max": 1023,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 22,
+   "name": "osc1.start",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 23,
+   "name": "osc1.keytrack",
+   "kind": "bool",
+   "min": 0,
+   "max": 1,
+   "default": 1,
+   "scope": "synth"
+  },
+  {
+   "id": 24,
+   "name": "osc2.wave",
+   "kind": "choice",
+   "min": 0,
+   "max": 4,
+   "default": 2,
+   "choices": [
+    "sine",
+    "triangle",
+    "saw",
+    "pulse",
+    "sample"
+   ],
+   "scope": "synth"
+  },
+  {
+   "id": 25,
+   "name": "osc2.level",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 26,
+   "name": "osc2.coarse",
+   "kind": "float",
+   "min": -48,
+   "max": 48,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 27,
+   "name": "osc2.fine",
+   "kind": "float",
+   "min": -100,
+   "max": 100,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 28,
+   "name": "osc2.pulse_width",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "scope": "synth"
+  },
+  {
+   "id": 29,
+   "name": "osc2.sample",
+   "kind": "int",
+   "min": 0,
+   "max": 1023,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 30,
+   "name": "osc2.start",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 31,
+   "name": "osc2.keytrack",
+   "kind": "bool",
+   "min": 0,
+   "max": 1,
+   "default": 1,
+   "scope": "synth"
+  },
+  {
+   "id": 32,
+   "name": "osc2.sync",
+   "kind": "bool",
+   "min": 0,
+   "max": 1,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 33,
+   "name": "osc2.ring",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 36,
+   "name": "sub.level",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 37,
+   "name": "sub.wave",
+   "kind": "choice",
+   "min": 0,
+   "max": 2,
+   "default": 0,
+   "choices": [
+    "sine",
+    "square",
+    "triangle"
+   ],
+   "scope": "synth"
+  },
+  {
+   "id": 38,
+   "name": "sub.octave",
+   "kind": "int",
+   "min": -2,
+   "max": -1,
+   "default": -1,
+   "scope": "synth"
+  },
+  {
+   "id": 40,
+   "name": "noise.level",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 41,
+   "name": "noise.type",
+   "kind": "choice",
+   "min": 0,
+   "max": 3,
+   "default": 0,
+   "choices": [
+    "white",
+    "pink",
+    "lfsr",
+    "lfsr_short"
+   ],
+   "scope": "synth"
+  },
+  {
+   "id": 42,
+   "name": "noise.pitch",
+   "kind": "float",
+   "min": -48,
+   "max": 48,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 48,
+   "name": "filter.type",
+   "kind": "choice",
+   "min": 0,
+   "max": 7,
+   "default": 0,
+   "choices": [
+    "off",
+    "lowpass",
+    "highpass",
+    "bandpass",
+    "notch",
+    "low_band",
+    "band_high",
+    "all"
+   ],
+   "scope": "synth"
+  },
+  {
+   "id": 49,
+   "name": "filter.slope",
+   "kind": "choice",
+   "min": 0,
+   "max": 1,
+   "default": 0,
+   "choices": [
+    "12db",
+    "24db"
+   ],
+   "scope": "synth"
+  },
+  {
+   "id": 50,
+   "name": "filter.cutoff",
+   "kind": "float",
+   "min": 20,
+   "max": 20000,
+   "default": 2000,
+   "scope": "synth"
+  },
+  {
+   "id": 51,
+   "name": "filter.resonance",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 0.15,
+   "scope": "synth"
+  },
+  {
+   "id": 52,
+   "name": "filter.keytrack",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 53,
+   "name": "filter.env",
+   "kind": "float",
+   "min": -96,
+   "max": 96,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 54,
+   "name": "filter.velocity",
+   "kind": "float",
+   "min": -96,
+   "max": 96,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 56,
+   "name": "amp.attack",
+   "kind": "float",
+   "min": 0,
+   "max": 20,
+   "default": 0.005,
+   "scope": "synth"
+  },
+  {
+   "id": 57,
+   "name": "amp.decay",
+   "kind": "float",
+   "min": 0,
+   "max": 20,
+   "default": 0.1,
+   "scope": "synth"
+  },
+  {
+   "id": 58,
+   "name": "amp.sustain",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 0.8,
+   "scope": "synth"
+  },
+  {
+   "id": 59,
+   "name": "amp.release",
+   "kind": "float",
+   "min": 0,
+   "max": 20,
+   "default": 0.15,
+   "scope": "synth"
+  },
+  {
+   "id": 60,
+   "name": "amp.curve",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "scope": "synth"
+  },
+  {
+   "id": 64,
+   "name": "filter_env.attack",
+   "kind": "float",
+   "min": 0,
+   "max": 20,
+   "default": 0.005,
+   "scope": "synth"
+  },
+  {
+   "id": 65,
+   "name": "filter_env.decay",
+   "kind": "float",
+   "min": 0,
+   "max": 20,
+   "default": 0.2,
+   "scope": "synth"
+  },
+  {
+   "id": 66,
+   "name": "filter_env.sustain",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 0.3,
+   "scope": "synth"
+  },
+  {
+   "id": 67,
+   "name": "filter_env.release",
+   "kind": "float",
+   "min": 0,
+   "max": 20,
+   "default": 0.2,
+   "scope": "synth"
+  },
+  {
+   "id": 68,
+   "name": "filter_env.curve",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "scope": "synth"
+  },
+  {
+   "id": 72,
+   "name": "mod_env.attack",
+   "kind": "float",
+   "min": 0,
+   "max": 20,
+   "default": 0.005,
+   "scope": "synth"
+  },
+  {
+   "id": 73,
+   "name": "mod_env.decay",
+   "kind": "float",
+   "min": 0,
+   "max": 20,
+   "default": 0.2,
+   "scope": "synth"
+  },
+  {
+   "id": 74,
+   "name": "mod_env.sustain",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 75,
+   "name": "mod_env.release",
+   "kind": "float",
+   "min": 0,
+   "max": 20,
+   "default": 0.2,
+   "scope": "synth"
+  },
+  {
+   "id": 76,
+   "name": "mod_env.curve",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "scope": "synth"
+  },
+  {
+   "id": 77,
+   "name": "mod_env.pitch",
+   "kind": "float",
+   "min": -48,
+   "max": 48,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 78,
+   "name": "mod_env.osc2_pitch",
+   "kind": "float",
+   "min": -48,
+   "max": 48,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 79,
+   "name": "mod_env.pulse_width",
+   "kind": "float",
+   "min": -1,
+   "max": 1,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 80,
+   "name": "lfo1.wave",
+   "kind": "choice",
+   "min": 0,
+   "max": 4,
+   "default": 0,
+   "choices": [
+    "sine",
+    "triangle",
+    "saw",
+    "square",
+    "random"
+   ],
+   "scope": "synth"
+  },
+  {
+   "id": 81,
+   "name": "lfo1.rate",
+   "kind": "float",
+   "min": 0.01,
+   "max": 50,
+   "default": 5,
+   "scope": "synth"
+  },
+  {
+   "id": 82,
+   "name": "lfo1.delay",
+   "kind": "float",
+   "min": 0,
+   "max": 10,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 83,
+   "name": "lfo1.fade",
+   "kind": "float",
+   "min": 0,
+   "max": 10,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 84,
+   "name": "lfo1.sync",
+   "kind": "bool",
+   "min": 0,
+   "max": 1,
+   "default": 1,
+   "scope": "synth"
+  },
+  {
+   "id": 85,
+   "name": "lfo1.pitch",
+   "kind": "float",
+   "min": -48,
+   "max": 48,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 86,
+   "name": "lfo1.pulse_width",
+   "kind": "float",
+   "min": -1,
+   "max": 1,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 87,
+   "name": "lfo1.cutoff",
+   "kind": "float",
+   "min": -96,
+   "max": 96,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 88,
+   "name": "lfo1.amp",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 89,
+   "name": "lfo1.pan",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 96,
+   "name": "lfo2.wave",
+   "kind": "choice",
+   "min": 0,
+   "max": 4,
+   "default": 1,
+   "choices": [
+    "sine",
+    "triangle",
+    "saw",
+    "square",
+    "random"
+   ],
+   "scope": "synth"
+  },
+  {
+   "id": 97,
+   "name": "lfo2.rate",
+   "kind": "float",
+   "min": 0.01,
+   "max": 50,
+   "default": 0.5,
+   "scope": "synth"
+  },
+  {
+   "id": 98,
+   "name": "lfo2.delay",
+   "kind": "float",
+   "min": 0,
+   "max": 10,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 99,
+   "name": "lfo2.fade",
+   "kind": "float",
+   "min": 0,
+   "max": 10,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 100,
+   "name": "lfo2.sync",
+   "kind": "bool",
+   "min": 0,
+   "max": 1,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 101,
+   "name": "lfo2.pitch",
+   "kind": "float",
+   "min": -48,
+   "max": 48,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 102,
+   "name": "lfo2.pulse_width",
+   "kind": "float",
+   "min": -1,
+   "max": 1,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 103,
+   "name": "lfo2.cutoff",
+   "kind": "float",
+   "min": -96,
+   "max": 96,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 104,
+   "name": "lfo2.amp",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 105,
+   "name": "lfo2.pan",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 112,
+   "name": "fx.drive",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 113,
+   "name": "fx.bits",
+   "kind": "float",
+   "min": 1,
+   "max": 16,
+   "default": 16,
+   "scope": "synth"
+  },
+  {
+   "id": 114,
+   "name": "fx.downsample",
+   "kind": "int",
+   "min": 1,
+   "max": 64,
+   "default": 1,
+   "scope": "synth"
+  },
+  {
+   "id": 115,
+   "name": "send.delay",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 116,
+   "name": "send.reverb",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 117,
+   "name": "send.chorus",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 120,
+   "name": "macro.rate",
+   "kind": "float",
+   "min": 1,
+   "max": 1000,
+   "default": 50,
+   "scope": "synth"
+  },
+  {
+   "id": 121,
+   "name": "macro.sync",
+   "kind": "bool",
+   "min": 0,
+   "max": 1,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 200,
+   "name": "master.volume",
+   "kind": "float",
+   "min": 0,
+   "max": 2,
+   "default": 0.35,
+   "scope": "all"
+  },
+  {
+   "id": 201,
+   "name": "master.limiter",
+   "kind": "bool",
+   "min": 0,
+   "max": 1,
+   "default": 1,
+   "scope": "all"
+  },
+  {
+   "id": 202,
+   "name": "delay.time",
+   "kind": "float",
+   "min": 0.001,
+   "max": 2,
+   "default": 0.3,
+   "scope": "all"
+  },
+  {
+   "id": 203,
+   "name": "delay.feedback",
+   "kind": "float",
+   "min": 0,
+   "max": 0.95,
+   "default": 0.4,
+   "scope": "all"
+  },
+  {
+   "id": 204,
+   "name": "delay.tone",
+   "kind": "float",
+   "min": 200,
+   "max": 20000,
+   "default": 6000,
+   "scope": "all"
+  },
+  {
+   "id": 205,
+   "name": "delay.pingpong",
+   "kind": "bool",
+   "min": 0,
+   "max": 1,
+   "default": 0,
+   "scope": "all"
+  },
+  {
+   "id": 208,
+   "name": "reverb.size",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 0.6,
+   "scope": "all"
+  },
+  {
+   "id": 209,
+   "name": "reverb.damping",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 0.4,
+   "scope": "all"
+  },
+  {
+   "id": 212,
+   "name": "chorus.rate",
+   "kind": "float",
+   "min": 0.05,
+   "max": 10,
+   "default": 0.8,
+   "scope": "all"
+  },
+  {
+   "id": 213,
+   "name": "chorus.depth",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "scope": "all"
+  },
+  {
+   "id": 216,
+   "name": "voices",
+   "kind": "int",
+   "min": 1,
+   "max": 64,
+   "default": 64,
+   "scope": "all"
+  }
+ ],
+ "names": {
+  "wave": {
+   "setting": "osc1.wave",
+   "scale": 1
+  },
+  "level": {
+   "setting": "osc1.level",
+   "scale": 1
+  },
+  "width": {
+   "setting": "osc1.pulse_width",
+   "scale": 1
+  },
+  "pulseWidth": {
+   "setting": "osc1.pulse_width",
+   "scale": 1
+  },
+  "sample": {
+   "setting": "osc1.sample",
+   "scale": 1
+  },
+  "octave": {
+   "setting": "transpose",
+   "scale": 12
+  },
+  "pitch": {
+   "setting": "transpose",
+   "scale": 1
+  },
+  "maxVoices": {
+   "setting": "voices",
+   "scale": 1
+  },
+  "voices": {
+   "setting": "unison.voices",
+   "scale": 1
+  },
+  "detune": {
+   "setting": "unison.detune",
+   "scale": 1
+  },
+  "spread": {
+   "setting": "unison.spread",
+   "scale": 1
+  },
+  "wave2": {
+   "setting": "osc2.wave",
+   "scale": 1
+  },
+  "level2": {
+   "setting": "osc2.level",
+   "scale": 1
+  },
+  "pitch2": {
+   "setting": "osc2.coarse",
+   "scale": 1
+  },
+  "detune2": {
+   "setting": "osc2.fine",
+   "scale": 1
+  },
+  "width2": {
+   "setting": "osc2.pulse_width",
+   "scale": 1
+  },
+  "sync": {
+   "setting": "osc2.sync",
+   "scale": 1
+  },
+  "ring": {
+   "setting": "osc2.ring",
+   "scale": 1
+  },
+  "sub": {
+   "setting": "sub.level",
+   "scale": 1
+  },
+  "noise": {
+   "setting": "noise.level",
+   "scale": 1
+  },
+  "filter": {
+   "setting": "filter.type",
+   "scale": 1
+  },
+  "slope": {
+   "setting": "filter.slope",
+   "scale": 1
+  },
+  "cutoff": {
+   "setting": "filter.cutoff",
+   "scale": 1
+  },
+  "resonance": {
+   "setting": "filter.resonance",
+   "scale": 1
+  },
+  "keytrack": {
+   "setting": "filter.keytrack",
+   "scale": 1
+  },
+  "sweep": {
+   "setting": "filter.env",
+   "scale": 1
+  },
+  "sweepAttack": {
+   "setting": "filter_env.attack",
+   "scale": 1
+  },
+  "sweepDecay": {
+   "setting": "filter_env.decay",
+   "scale": 1
+  },
+  "sweepSustain": {
+   "setting": "filter_env.sustain",
+   "scale": 1
+  },
+  "sweepRelease": {
+   "setting": "filter_env.release",
+   "scale": 1
+  },
+  "attack": {
+   "setting": "amp.attack",
+   "scale": 1
+  },
+  "decay": {
+   "setting": "amp.decay",
+   "scale": 1
+  },
+  "sustain": {
+   "setting": "amp.sustain",
+   "scale": 1
+  },
+  "release": {
+   "setting": "amp.release",
+   "scale": 1
+  },
+  "curve": {
+   "setting": "amp.curve",
+   "scale": 1
+  },
+  "pitchSweep": {
+   "setting": "mod_env.pitch",
+   "scale": 1
+  },
+  "pitchSweepAttack": {
+   "setting": "mod_env.attack",
+   "scale": 1
+  },
+  "pitchSweepDecay": {
+   "setting": "mod_env.decay",
+   "scale": 1
+  },
+  "vibrato": {
+   "setting": "lfo1.pitch",
+   "scale": 1
+  },
+  "vibratoRate": {
+   "setting": "lfo1.rate",
+   "scale": 1
+  },
+  "vibratoDelay": {
+   "setting": "lfo1.delay",
+   "scale": 1
+  },
+  "tremolo": {
+   "setting": "lfo1.amp",
+   "scale": 1
+  },
+  "wobble": {
+   "setting": "lfo2.cutoff",
+   "scale": 1
+  },
+  "wobbleRate": {
+   "setting": "lfo2.rate",
+   "scale": 1
+  },
+  "autopan": {
+   "setting": "lfo2.pan",
+   "scale": 1
+  },
+  "distortion": {
+   "setting": "fx.drive",
+   "scale": 1
+  },
+  "drive": {
+   "setting": "fx.drive",
+   "scale": 1
+  },
+  "crush": {
+   "setting": "fx.bits",
+   "scale": 1
+  },
+  "bits": {
+   "setting": "fx.bits",
+   "scale": 1
+  },
+  "downsample": {
+   "setting": "fx.downsample",
+   "scale": 1
+  },
+  "echo": {
+   "setting": "send.delay",
+   "scale": 1
+  },
+  "delay": {
+   "setting": "send.delay",
+   "scale": 1
+  },
+  "reverb": {
+   "setting": "send.reverb",
+   "scale": 1
+  },
+  "chorus": {
+   "setting": "send.chorus",
+   "scale": 1
+  },
+  "masterVolume": {
+   "setting": "master.volume",
+   "scale": 1
+  },
+  "limiter": {
+   "setting": "master.limiter",
+   "scale": 1
+  },
+  "echoTime": {
+   "setting": "delay.time",
+   "scale": 1
+  },
+  "echoFeedback": {
+   "setting": "delay.feedback",
+   "scale": 1
+  },
+  "echoTone": {
+   "setting": "delay.tone",
+   "scale": 1
+  },
+  "echoBounce": {
+   "setting": "delay.pingpong",
+   "scale": 1
+  },
+  "reverbSize": {
+   "setting": "reverb.size",
+   "scale": 1
+  },
+  "reverbDamping": {
+   "setting": "reverb.damping",
+   "scale": 1
+  },
+  "chorusRate": {
+   "setting": "chorus.rate",
+   "scale": 1
+  },
+  "chorusDepth": {
+   "setting": "chorus.depth",
+   "scale": 1
+  }
+ },
+ "choiceWords": {
+  "square": "pulse",
+  "sawtooth": "saw",
+  "tri": "triangle",
+  "sin": "sine",
+  "low": "lowpass",
+  "high": "highpass",
+  "band": "bandpass",
+  "none": "off",
+  "hiss": "white",
+  "chip": "lfsr",
+  "buzz": "lfsr_short"
+ },
+ "plain": {
+  "filter": "lowpass",
+  "cutoff": 20000,
+  "resonance": 0.1
+ },
+ "synths": {
+  "keys": {
+   "wave": "triangle",
+   "wave2": "sine",
+   "level2": 0.35,
+   "pitch2": 12,
+   "cutoff": 3500,
+   "sweep": 18,
+   "sweepDecay": 0.3,
+   "sweepSustain": 0.2,
+   "keytrack": 0.5,
+   "attack": 0.003,
+   "decay": 0.45,
+   "sustain": 0.3,
+   "release": 0.35,
+   "reverb": 0.12
+  },
+  "bass": {
+   "wave": "saw",
+   "sub": 0.6,
+   "cutoff": 320,
+   "resonance": 0.3,
+   "sweep": 30,
+   "sweepDecay": 0.18,
+   "sweepSustain": 0.15,
+   "attack": 0.003,
+   "decay": 0.2,
+   "sustain": 0.75,
+   "release": 0.12,
+   "note": 36
+  },
+  "lead": {
+   "wave": "saw",
+   "wave2": "square",
+   "level2": 0.6,
+   "detune2": 9,
+   "cutoff": 2800,
+   "resonance": 0.25,
+   "keytrack": 0.5,
+   "attack": 0.01,
+   "decay": 0.15,
+   "sustain": 0.7,
+   "release": 0.2,
+   "vibrato": 0.15,
+   "vibratoDelay": 0.25,
+   "vibratoRate": 5.5,
+   "echo": 0.2
+  },
+  "pad": {
+   "wave": "saw",
+   "voices": 4,
+   "detune": 22,
+   "spread": 0.8,
+   "cutoff": 1600,
+   "attack": 0.5,
+   "decay": 0.5,
+   "sustain": 0.8,
+   "release": 1.2,
+   "chorus": 0.4,
+   "reverb": 0.4
+  },
+  "pluck": {
+   "wave": "saw",
+   "cutoff": 500,
+   "resonance": 0.2,
+   "sweep": 48,
+   "sweepDecay": 0.12,
+   "sweepSustain": 0,
+   "keytrack": 0.5,
+   "attack": 0.001,
+   "decay": 0.3,
+   "sustain": 0,
+   "release": 0.25
+  },
+  "organ": {
+   "wave": "sine",
+   "wave2": "sine",
+   "level2": 0.6,
+   "pitch2": 12,
+   "sub": 0.5,
+   "attack": 0.008,
+   "decay": 0.01,
+   "sustain": 1,
+   "release": 0.06,
+   "chorus": 0.3
+  },
+  "strings": {
+   "wave": "saw",
+   "voices": 3,
+   "detune": 14,
+   "spread": 0.6,
+   "cutoff": 3200,
+   "attack": 0.25,
+   "decay": 0.3,
+   "sustain": 0.85,
+   "release": 0.6,
+   "vibrato": 0.08,
+   "vibratoDelay": 0.4,
+   "reverb": 0.3
+  },
+  "bell": {
+   "wave": "sine",
+   "wave2": "sine",
+   "level2": 0.45,
+   "pitch2": 19,
+   "detune2": 2,
+   "attack": 0.001,
+   "decay": 1.4,
+   "sustain": 0,
+   "release": 1.2,
+   "reverb": 0.3
+  },
+  "flute": {
+   "wave": "triangle",
+   "noise": 0.03,
+   "cutoff": 3000,
+   "attack": 0.06,
+   "decay": 0.1,
+   "sustain": 0.9,
+   "release": 0.15,
+   "vibrato": 0.1,
+   "vibratoDelay": 0.3
+  },
+  "chip": {
+   "wave": "square",
+   "filter": "off",
+   "attack": 0,
+   "decay": 0,
+   "sustain": 1,
+   "release": 0.02
+  },
+  "chipLead": {
+   "wave": "pulse",
+   "width": 0.25,
+   "filter": "off",
+   "attack": 0,
+   "decay": 0,
+   "sustain": 1,
+   "release": 0.02,
+   "vibrato": 0.2,
+   "vibratoDelay": 0.15,
+   "vibratoRate": 6
+  },
+  "chipBass": {
+   "wave": "triangle",
+   "filter": "off",
+   "attack": 0,
+   "decay": 0,
+   "sustain": 1,
+   "release": 0.02,
+   "note": 36
+  },
+  "chipNoise": {
+   "level": 0,
+   "noise": 1,
+   "noise.type": "lfsr",
+   "filter": "off",
+   "attack": 0,
+   "decay": 0.12,
+   "sustain": 0,
+   "release": 0.05
+  },
+  "kick": {
+   "wave": "sine",
+   "filter": "off",
+   "pitchSweep": 30,
+   "pitchSweepDecay": 0.06,
+   "pitchSweepAttack": 0,
+   "attack": 0,
+   "decay": 0.3,
+   "sustain": 0,
+   "release": 0.1,
+   "note": 36
+  },
+  "snare": {
+   "wave": "triangle",
+   "level": 0.6,
+   "noise": 1,
+   "filter": "highpass",
+   "cutoff": 500,
+   "resonance": 0.05,
+   "pitchSweep": 12,
+   "pitchSweepDecay": 0.04,
+   "pitchSweepAttack": 0,
+   "attack": 0,
+   "decay": 0.17,
+   "sustain": 0,
+   "release": 0.08,
+   "note": 52
+  },
+  "hat": {
+   "level": 0,
+   "noise": 1,
+   "filter": "highpass",
+   "cutoff": 7000,
+   "attack": 0,
+   "decay": 0.05,
+   "sustain": 0,
+   "release": 0.03,
+   "note": 60
+  },
+  "sample": {
+   "wave": "sample",
+   "filter": "off",
+   "attack": 0,
+   "decay": 0,
+   "sustain": 1,
+   "release": 0.03
+  }
+ },
+ "sounds": {
+  "coin": {
+   "patch": {
+    "wave": "square",
+    "filter": "off",
+    "attack": 0,
+    "decay": 0.3,
+    "sustain": 0,
+    "release": 0.2
+   },
+   "notes": [
+    [
+     0,
+     83,
+     0.07,
+     0.8
+    ],
+    [
+     0.07,
+     88,
+     0.4,
+     0.8
+    ]
+   ]
+  },
+  "jump": {
+   "patch": {
+    "wave": "square",
+    "width": 0.3,
+    "filter": "off",
+    "attack": 0,
+    "decay": 0.25,
+    "sustain": 0,
+    "release": 0.05
+   },
+   "notes": [
+    [
+     0,
+     57,
+     0.22,
+     0.8,
+     78,
+     0.2
+    ]
+   ]
+  },
+  "laser": {
+   "patch": {
+    "wave": "saw",
+    "cutoff": 6000,
+    "attack": 0,
+    "decay": 0.24,
+    "sustain": 0,
+    "release": 0.05
+   },
+   "notes": [
+    [
+     0,
+     98,
+     0.24,
+     0.8,
+     58,
+     0.22
+    ]
+   ]
+  },
+  "explosion": {
+   "patch": {
+    "wave": "sine",
+    "level": 0.9,
+    "noise": 1,
+    "cutoff": 180,
+    "sweep": 50,
+    "sweepAttack": 0,
+    "sweepDecay": 0.55,
+    "sweepSustain": 0,
+    "pitchSweep": 24,
+    "pitchSweepDecay": 0.25,
+    "pitchSweepAttack": 0,
+    "distortion": 0.5,
+    "attack": 0,
+    "decay": 0.9,
+    "sustain": 0,
+    "release": 0.3
+   },
+   "notes": [
+    [
+     0,
+     30,
+     0.9,
+     1
+    ]
+   ]
+  },
+  "hit": {
+   "patch": {
+    "wave": "square",
+    "level": 0.7,
+    "noise": 0.8,
+    "cutoff": 2500,
+    "attack": 0,
+    "decay": 0.1,
+    "sustain": 0,
+    "release": 0.05
+   },
+   "notes": [
+    [
+     0,
+     50,
+     0.1,
+     0.9,
+     36,
+     0.08
+    ]
+   ]
+  },
+  "powerup": {
+   "patch": {
+    "wave": "square",
+    "filter": "off",
+    "attack": 0,
+    "decay": 0.2,
+    "sustain": 0.5,
+    "release": 0.15,
+    "vibrato": 0.3,
+    "vibratoRate": 12
+   },
+   "notes": [
+    [
+     0,
+     72,
+     0.06,
+     0.7
+    ],
+    [
+     0.06,
+     76,
+     0.06,
+     0.7
+    ],
+    [
+     0.12,
+     79,
+     0.06,
+     0.7
+    ],
+    [
+     0.18,
+     84,
+     0.06,
+     0.7
+    ],
+    [
+     0.24,
+     88,
+     0.3,
+     0.7
+    ]
+   ]
+  },
+  "blip": {
+   "patch": {
+    "wave": "square",
+    "filter": "off",
+    "attack": 0,
+    "decay": 0.06,
+    "sustain": 0,
+    "release": 0.02
+   },
+   "notes": [
+    [
+     0,
+     81,
+     0.06,
+     0.7
+    ]
+   ]
+  },
+  "click": {
+   "patch": {
+    "wave": "sine",
+    "noise": 0.4,
+    "filter": "off",
+    "attack": 0,
+    "decay": 0.015,
+    "sustain": 0,
+    "release": 0.01
+   },
+   "notes": [
+    [
+     0,
+     96,
+     0.02,
+     0.8
+    ]
+   ]
+  },
+  "zap": {
+   "patch": {
+    "wave": "saw",
+    "cutoff": 5000,
+    "vibrato": 7,
+    "vibratoRate": 32,
+    "attack": 0,
+    "decay": 0.3,
+    "sustain": 0,
+    "release": 0.05
+   },
+   "notes": [
+    [
+     0,
+     84,
+     0.3,
+     0.8,
+     55,
+     0.3
+    ]
+   ]
+  },
+  "bounce": {
+   "patch": {
+    "wave": "sine",
+    "filter": "off",
+    "attack": 0,
+    "decay": 0.14,
+    "sustain": 0,
+    "release": 0.04
+   },
+   "notes": [
+    [
+     0,
+     55,
+     0.14,
+     0.9,
+     69,
+     0.07
+    ]
+   ]
+  },
+  "pop": {
+   "patch": {
+    "wave": "sine",
+    "filter": "off",
+    "attack": 0,
+    "decay": 0.07,
+    "sustain": 0,
+    "release": 0.02
+   },
+   "notes": [
+    [
+     0,
+     70,
+     0.07,
+     0.9,
+     86,
+     0.04
+    ]
+   ]
+  },
+  "win": {
+   "patch": {
+    "wave": "square",
+    "wave2": "square",
+    "level2": 0.5,
+    "pitch2": 12,
+    "filter": "off",
+    "attack": 0,
+    "decay": 0.3,
+    "sustain": 0.4,
+    "release": 0.2,
+    "echo": 0.2
+   },
+   "notes": [
+    [
+     0,
+     72,
+     0.1,
+     0.7
+    ],
+    [
+     0.11,
+     76,
+     0.1,
+     0.7
+    ],
+    [
+     0.22,
+     79,
+     0.1,
+     0.7
+    ],
+    [
+     0.33,
+     84,
+     0.45,
+     0.8
+    ]
+   ]
+  },
+  "lose": {
+   "patch": {
+    "wave": "triangle",
+    "wave2": "square",
+    "level2": 0.3,
+    "cutoff": 2500,
+    "attack": 0,
+    "decay": 0.3,
+    "sustain": 0.5,
+    "release": 0.2
+   },
+   "notes": [
+    [
+     0,
+     67,
+     0.16,
+     0.8
+    ],
+    [
+     0.17,
+     63,
+     0.16,
+     0.8
+    ],
+    [
+     0.34,
+     60,
+     0.16,
+     0.8
+    ],
+    [
+     0.51,
+     55,
+     0.5,
+     0.8,
+     43,
+     0.5
+    ]
+   ]
+  }
+ }
+}
