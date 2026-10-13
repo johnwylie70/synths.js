@@ -282,7 +282,7 @@ const lead = makeSynth("lead")
 lead.playFromMidi()
 ```
 
-It follows the notes, how hard you hit each key, the pitch wheel, the modulation wheel and the sustain pedal. The first time a program uses MIDI the browser asks whether the page may use your MIDI devices: say yes. `lead.playFromMidi({ channel: 2 })` listens to one channel alone, and `lead.playFromMidi(false)` stops.
+It follows the notes, how hard you hit each key, the pitch wheel, the modulation wheel and the sustain pedal. The first time a program uses MIDI the browser asks whether the page may use your MIDI devices: say yes. `lead.playFromMidi({ channel: 2 })` listens to one channel alone (`{ channel: "all" }` to every one again), and `lead.playFromMidi(false)` stops.
 
 MIDI works in Chrome, Edge and Firefox on a computer. Safari, iPhones and iPads have no MIDI for web pages. Where there is none your program still runs: the console says so once, and everything else carries on.
 
@@ -309,7 +309,7 @@ lead.learn("cutoff")                     // the next knob you turn is the cutoff
 lead.mapMidi(74, "cutoff")               // or say which knob, by its number
 ```
 
-The knob goes through the setting's whole range, from its least to its most, so nothing has to be worked out. `lead.cutoff` reads back what the knob has set. A function is called with each new value, which is how a dial on the screen turns with the knob: `lead.learn("cutoff", (value) => { cutoffDial.value = value })`. `{ min: 200, max: 4000 }` narrows the range, and `lead.unmapMidi("cutoff")` lets it go. [`examples/midi_dials.js`](examples/midi_dials.js) is a whole synth panel worked by a controller.
+The knob goes through the setting's whole range, from its least to its most, so nothing has to be worked out. `lead.cutoff` reads back what the knob has set. A function is called with each new value, which is how a dial on the screen turns with the knob: `lead.learn("cutoff", (value) => { cutoffDial.value = value })`. `{ min: 200, max: 4000 }` narrows the range, and `lead.unmapMidi("cutoff")` lets it go. [`examples/midi_dials.js`](examples/midi_dials.js) is a whole synth panel worked by a controller, with the device and the channel chosen on the screen.
 
 ### Sending
 
@@ -339,7 +339,34 @@ useMidiInput("Keystation 49")           // listen to this one alone (otherwise: 
 useMidiOutput("Minilogue")              // send to this one (otherwise: the first)
 ```
 
-`midiDevices()` gives the same `{ inputs, outputs, available }` at any time; it is empty until the browser has answered, which is why `onMidiDevices` is there. `available` is `false` when there is no MIDI. `stopMidi()` forgets every function you gave and stops everything MIDI is doing.
+`midiDevices()` gives the same `{ inputs, outputs, available }` at any time; it is empty until the browser has answered, which is why `onMidiDevices` is there. `available` is `false` when there is no MIDI. A device that is not plugged in is waited for: until it appears every input is listened to (or the first output is sent to), and the console says so once. `stopMidi()` forgets every function you gave and stops everything MIDI is doing.
+
+### Choosing the device and channel on screen
+
+`midiInput()` is the input your program listens to, as something the controls of [dials.js](https://github.com/johnwylie70/dials.js) can be tied to, the way a dial is tied to a synth:
+
+```js
+const midiIn = midiInput()
+
+select("midi in", midiIn, "device")      // "all", then every device that is plugged in
+select("channel", midiIn, "channel")     // "all", or 1 to 16
+meter(midiIn)                            // a light that flashes when a key is hit
+```
+
+What is chosen is what plays your synths, what `learn` listens for and what `onMidiNote` and the others hear, from that moment. The choices follow the devices: one that is plugged in later is among them, with nothing plugged in the one choice is `"no devices"`, and where there is no MIDI it is `"no MIDI here"`. If the chosen device is pulled out the choice goes back to `"all"` (the console says so once), and it is chosen again when it comes back. The device chosen on the screen is remembered for the next time the page is opened, where the page may remember things.
+
+The choice works in code too, and is the same choice: `midiIn.device = "Keystation 49"` is `useMidiInput("Keystation 49")`, `midiIn.channel = 2`, and `midiIn.device` and `midiIn.channel` read them back. `midiIn.level()` is how hard the last key was hit, fading away, `midiIn.notes()` is the keys held down, and `midiIn.onChange((name) => { ... })` is called when the choices or the choice change.
+
+Every synth has one of its own, `lead.midiInput()`, for the keys that play it. That is how one keyboard is split between two synths, or two keyboards play one each:
+
+```js
+const lead = makeSynth("lead").playFromMidi({ channel: 1 })
+const bass = makeSynth("bass").playFromMidi({ channel: 2 })
+
+select("bass channel", bass.midiInput(), "channel")     // it shows 2, and changes it
+```
+
+A synth's own choice is made from what the program's lets through. `midiOutput()` and `lead.midiOutput()` are the same for what is sent: `"device"` is one of the outputs (the first, until you choose) and `"channel"` is the channel that `sendMidiNote` and `lead.sendToMidi()` use when they are not given one.
 
 The four MIDI examples are [a keyboard](examples/midi_keyboard.js), [a scene](examples/midi_scene.js), [a sequencer](examples/midi_sequencer.js) and [dials](examples/midi_dials.js). Each still plays with nothing plugged in.
 

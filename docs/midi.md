@@ -9,6 +9,7 @@ which `synths.js` fetches the first time a MIDI function is used.
 - [Where MIDI exists](#where-midi-exists)
 - [The `midi` command](#the-midi-command)
 - [What is handed back](#what-is-handed-back)
+- [The device and the channel](#the-device-and-the-channel)
 - [Time](#time)
 - [The `midi` option: a host's own transport](#the-midi-option-a-hosts-own-transport)
 - [A program in a worker, another frame or Python](#a-program-in-a-worker-another-frame-or-python)
@@ -57,11 +58,11 @@ does not know. Ids are the sender's synth ids; channels are 1 to 16.
 |---|---|---|
 | `"devices"` | | Nothing but "MIDI is in use": the desk opens, and the sender is told the devices |
 | `"listen"` | `on` | Hand this sender every message that arrives (`on: false` stops) |
-| `"input"` | `name` | Listen to this input alone: a name, a list of names, or `null` for all (the default). For the whole player |
-| `"output"` | `name` | Send to this output unless a message names its own: a name, or `null` for the first there is (the default) |
+| `"input"` | `name`, `channel`, `id` | What this sender hears. `name`: one input, a list of them, or `null` for all (the default). `channel`: 1 to 16, or `null` for all (the default). With `id`, what plays that synth alone. A field that is left out stays as it was: see below |
+| `"output"` | `name`, `channel`, `id` | Where this sender's messages go unless one names its own: a name, or `null` for the first there is (the default). `channel` (1 to 16, or `null`) and `id` are for synths that send their notes on: see below |
 | `"send"` | `bytes`, `output` | Send one whole message, as a list of numbers from 0 to 255 beginning with its status byte, at `t` |
-| `"play"` | `id`, `channel`, `vibrato`, `on` | A keyboard plays this synth: see below. `channel` narrows it to one; `on: false` stops and lets go |
-| `"through"` | `id`, `channel`, `note`, `output`, `on` | What this synth is asked to play also goes out as MIDI on `channel` (1). `note` is the synth's own note (60), for a note with none |
+| `"play"` | `id`, `channel`, `vibrato`, `on` | A keyboard plays this synth: see below. `channel` narrows it to one (it sets the synth's own input channel, and with none every channel plays it); `on: false` stops and lets go |
+| `"through"` | `id`, `channel`, `note`, `output`, `on` | What this synth is asked to play also goes out as MIDI. `channel` and `output` set the synth's own (with none, the sender's are used: channel 1 of the first output unless it has chosen). `note` is the synth's own note (60), for a note with none |
 | `"map"` | `id`, `control`, `channel`, `setting`, `min`, `max`, `curve`, `kind` | Control `control` (0 to 119) turns `setting` of the synth |
 | `"learn"` | `id`, `setting`, `min`, `max`, `curve`, `kind` | The same, for the next control that is moved and is not already mapped by this sender |
 | `"unmap"` | `id`, `setting` | No control turns it any more; with no `setting`, none of the synth's |
@@ -92,6 +93,22 @@ range, and `"exp"` for one in Hz that spans a hundred times or more.
 **`through`.** The desk reads the sender's own `note`, `off`, `voice` (`kill`), `tune`, `stop` and `free`
 commands for that synth and writes the MIDI: so a tune that repeats goes out for as long as it plays, and `stop`
 takes it back. Notes are rounded to whole ones; an arpeggio goes out as its root.
+
+**`input` and `output`.** Each sender has its own choice, and so two programs that share a player may listen to
+different devices. A sender's `input` decides what it is handed when it `listen`s, which controls its `map` and
+`learn` answer to, and what may play its synths at all; an `input` with an `id` narrows further what plays that
+one synth (a split keyboard is two synths with `channel` 1 and 2). Messages with no channel (the clock) are
+heard whatever the channel. When an `input` changes, the keys held on the synths it touches are let go, since
+their coming up may never be heard. An `output` with an `id` is where that synth's `through` notes go, and its
+`channel`; a synth with neither uses the sender's `output`. When one changes, the notes the synth has sounding are
+let go where they were sent. The desk takes a name at its word: a device that is not there is heard from, or
+sent to, by nobody. It is the sender that falls back ([below](#the-device-and-the-channel)).
+
+```js
+{ op: "midi", do: "input", name: "Keystation 49" }       // useMidiInput("Keystation 49"), or the select
+{ op: "midi", do: "input", channel: 2, id: "s2" }        // bass.midiInput().channel = 2
+{ op: "midi", do: "output", name: null, channel: 10 }    // the first output again, and channel 10
+```
 
 **`stop` with no id** (the sound command) also takes back this sender's MIDI still to be sent and lets go of the
 notes it has sounding, and `close` ends everything of the sender's.
@@ -128,6 +145,40 @@ Made by the desk:
 
 The bytes are read with running status, a real-time byte may come in the middle of another message, and a
 system exclusive message is kept whole however many pieces it arrives in.
+
+## The device and the channel
+
+`midiInput()`, `lead.midiInput()`, `midiOutput()` and `lead.midiOutput()` give a **target**: what
+[dials.js](https://github.com/johnwylie70/dials.js) ties a control to, known only by what it can do. synths.js
+draws nothing and dials.js knows nothing of MIDI.
+
+| | |
+|---|---|
+| `get("device")` | The device chosen, as its name. For an input `"all"` when none is; for an output the first there is. `"no devices"` with nothing plugged in, `"no MIDI here"` where there is no MIDI |
+| `get("channel")` | `"1"` to `"16"`, as text, and for an input `"all"` |
+| `set(name, value)` | Chooses. A channel may be a number. `"all"`, `null` and the two words above un-choose a device. It gives the target back |
+| `describe(name)` | `{ name, kind: "text", choices, default }`. `choices` is the list as it is **now**: for a device `["all", …inputs]`, or the outputs, or one of the two words alone |
+| `onChange(listener)` | `listener(name)` is called when the value or the choices of `"device"` or `"channel"` change, however that came about. It gives back a function that stops it |
+| `level()`, `notes()` | An input's: how hard the last note was hit (0 to 1; anything else that arrives is 0.25), halving every 90 ms, and the keys held. Asking is what makes the sender `listen` |
+| `device`, `channel`, `names` | The same as plain properties (`channel` is a number, or `"all"`), and `["device", "channel"]` |
+
+The values are text, not a place in the list, because the list changes under a control that has already been made.
+
+- **One choice.** `useMidiInput(name)` and `midiInput().set("device", name)` set the same thing, and
+  `playFromMidi({ channel })` sets what `lead.midiInput()` shows. A synth's input narrows the program's; a
+  synth's output and channel, when it has none of its own, are the program's. The program's output channel is the
+  one `sendMidiNote` and the others use when they are given none.
+- **Falling back is the sender's work.** It tells the desk a name only while that device is among the latest
+  `devices` (until the first `devices` arrives, it tells it at once). A chosen device that is not there, or is
+  pulled out, makes the sender send `name: null`, read back `"all"` (or the first output) and say so once; when
+  the device appears it sends the name again.
+- **Kept for next time.** A device chosen with `set` on the program's own `midiInput()` or `midiOutput()` is
+  kept under `synths.midi.input` or `synths.midi.output`, and is the choice the next time one is asked for,
+  unless the program has chosen in code. The page's `localStorage` is used; `createSound({ midiStorage })` gives
+  another, of the same shape (`getItem`, `setItem`, `removeItem`), and `midiStorage: false` none. Storage that
+  is missing or refuses is no trouble. A synth's own choice, a choice made in code and the channel are not kept.
+- **Before MIDI has loaded** the target is already there: it reads `"no devices"`, and what is set on it waits
+  with the other MIDI calls. Asking for one counts as using MIDI, so the browser asks its permission.
 
 ## Time
 
@@ -212,10 +263,14 @@ with the events the host hands over.
 - `sendMidiNote` is two `send` commands, a note-on at `t` and a note-off at `t + length`. Velocity 0 to 1 becomes
   1 to 127 (never 0, which would be a note-off).
 - Keep the devices from the latest `devices` event for `midiDevices()`; it is empty until the first arrives.
+- For `midi_input()` and `midi_output()`, keep what was chosen for the program and for each synth, write an
+  `input` or `output` command when it changes, and do [the falling back](#the-device-and-the-channel) on every
+  `devices` event. `level()` is worked out from the `noteOn` events handed over.
 - For `learn` and `mapMidi`, send the setting's `min`, `max` and `kind` from `synths-names.json`, and on a `set`
   event update the setting you remember for that synth, so that reading it back is right.
-- `synths-names.json` has `midi`: `types` (every `type` above), `does` (every `do`), and `functions` and
-  `synthFunctions`, the names synths.js gives its own, to be spelt the Python way.
+- `synths-names.json` has `midi`: `types` (every `type` above), `does` (every `do`), `functions` and
+  `synthFunctions`, the names synths.js gives its own, to be spelt the Python way, and `choices`: the two
+  settings of a target and the words `all`, `none` and `unavailable` as they are shown.
 - Check what the person wrote and say what is wrong where they wrote it: a note from 0 to 127, a channel from
   1 to 16, a control from 0 to 127.
 

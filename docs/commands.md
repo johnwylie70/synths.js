@@ -616,7 +616,9 @@ to a setting. A player carries it out with a desk it loads when the first one ar
 back what was received through `player.onMidi(listener, scope)`: lists of plain objects, which is the one other
 thing besides [reading back](#reading-back) that comes from a player. A player without it passes `midi` over like
 any command it does not know. The `midi` option of `createPlayer` is a host's own way to the devices, for a
-browser that has no MIDI. All of it is in [midi.md](midi.md).
+browser that has no MIDI. Which device and which channel a sender hears and sends to are `midi` commands too
+(`do: "input"` and `do: "output"`, with an `id` for one synth's own), so a select on the screen that chooses
+them needs nothing more. All of it is in [midi.md](midi.md).
 
 ## The microphone, recording and saving
 
