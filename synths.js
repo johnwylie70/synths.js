@@ -262,10 +262,11 @@ const setting = (name) => (typeof name === 'string' ? allSettings().get(key(name
 function nearest(word, names) {
   const a = key(word)
   let best = null
-  let bestCost = Math.max(2, Math.floor(a.length / 3)) + 1
+  // A short word has to be very near: one slip in four letters, two in eight, three in anything longer.
+  let bestCost = (a.length <= 4 ? 1 : a.length <= 8 ? 2 : 3) + 1
   for (const name of names) {
     const b = key(name)
-    if (b.startsWith(a) && a.length >= 3) return name
+    if (b.startsWith(a) && a.length >= 4) return name
     const row = Array.from({ length: b.length + 1 }, (_, i) => i)
     for (let i = 1; i <= a.length; i++) {
       let last = row[0]
@@ -294,7 +295,8 @@ function settingValue(entry, value, said) {
       if (i < 0) i = entry.choices.indexOf(CHOICE_WORDS[word])
       if (i < 0) i = entry.choices.indexOf(word + 'db')
       if (i >= 0) return i
-      throw new Error(`${said}: ${shown(value)} is not one of its choices.${meant(value, entry.choices)} They are: ${entry.choices.join(', ')}`)
+      const words = Object.keys(CHOICE_WORDS).filter((w) => entry.choices.includes(CHOICE_WORDS[w]))
+      throw new Error(`${said}: ${shown(value)} is not one of its choices.${meant(value, [...entry.choices, ...words])} They are: ${entry.choices.join(', ')}`)
     }
     if (typeof value === 'number' && entry.choices.includes(value + 'db')) return entry.choices.indexOf(value + 'db')
   }
