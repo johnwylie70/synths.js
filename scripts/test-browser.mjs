@@ -1200,10 +1200,39 @@ async function late(name, browser) {
   await context.close()
 }
 
-const ALLOWED = { chromium: { args: ['--autoplay-policy=no-user-gesture-required'] }, webkit: {} }
+/**
+ * THE TESTS MAKE NO SOUND IN THE ROOM. Chromium is started with its output muted. WebKit has no such switch, so in
+ * every page and frame (Chromium's too) whatever is connected to the loudspeaker is connected to a gain of nothing
+ * that is connected to it instead: the sound card still pulls the graph along, and every measurement is taken
+ * from the nodes before it, so nothing that is measured changes.
+ */
+const QUIET = `(() => {
+  if (typeof AudioNode === 'undefined' || typeof AudioDestinationNode === 'undefined') return
+  const connect = AudioNode.prototype.connect
+  const silent = new WeakMap()
+  AudioNode.prototype.connect = function (to, ...rest) {
+    if (!(to instanceof AudioDestinationNode)) return connect.call(this, to, ...rest)
+    let gain = silent.get(to)
+    if (!gain) {
+      gain = to.context.createGain()
+      gain.gain.value = 0
+      connect.call(gain, to)
+      silent.set(to, gain)
+    }
+    connect.call(this, gain, ...rest)
+    return to
+  }
+})()`
+const ALLOWED = { chromium: { args: ['--autoplay-policy=no-user-gesture-required', '--mute-audio'] }, webkit: {} }
+async function launch(name, options) {
+  const browser = await playwright[name].launch(options)
+  const newContext = browser.newContext.bind(browser)
+  browser.newContext = async (...a) => { const context = await newContext(...a); await context.addInitScript(QUIET); return context }
+  return browser
+}
 for (const name of ['chromium', 'webkit']) {
   let browser
-  try { browser = await playwright[name].launch(ALLOWED[name]) } catch { console.log(`${name}: not installed, skipped`); continue }
+  try { browser = await launch(name, ALLOWED[name]) } catch { console.log(`${name}: not installed, skipped`); continue }
   try {
     if (!ONLY) await withSound(name, browser)
     if (!ONLY || ONLY === 'examples') await examples(name, browser)
@@ -1215,18 +1244,18 @@ for (const name of ['chromium', 'webkit']) {
 
   if (name === 'chromium' && (!ONLY || ONLY === 'voice')) {
     // Chromium's own pretend microphone (a beep every second), with its question answered yes.
-    browser = await playwright[name].launch({ args: [...ALLOWED[name].args, '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] })
+    browser = await launch(name, { args: [...ALLOWED[name].args, '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] })
     try { await voice(name, browser, true) } catch (e) { say(false, name, 'the pretend-microphone tests ran to the end', String(e?.stack || e)) }
     await browser.close()
   }
 
-  browser = await playwright[name].launch(ALLOWED[name])
+  browser = await launch(name, ALLOWED[name])
   try { if (!ONLY) await waitingForATap(name, browser) } catch (e) { say(false, name, 'the tap tests ran to the end', String(e?.stack || e)) }
   await browser.close()
 
   if (name === 'chromium' && (!ONLY || ONLY === 'insecure')) {
     // A name that is not localhost, pointed at this machine: the same page, not a secure context.
-    browser = await playwright[name].launch({ args: [...ALLOWED[name].args, `--host-resolver-rules=MAP plain.test 127.0.0.1`] })
+    browser = await launch(name, { args: [...ALLOWED[name].args, `--host-resolver-rules=MAP plain.test 127.0.0.1`] })
     try { await notSecure(name, browser) } catch (e) { say(false, name, 'the not-secure tests ran to the end', String(e?.stack || e)) }
     await browser.close()
   }
