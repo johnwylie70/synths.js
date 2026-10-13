@@ -3363,7 +3363,9 @@ const whileReading = (job) => { reading_.add(job); const done = () => reading_.d
  * THE CLOCK is the sender's: the times on commands and the times given to `advance` are read on the same clock
  * (performance.now() / 1000 in a page, which the recorder is stepping). `start` is what that clock reads at the
  * first sample (0, which is where a recorder's clock begins); `startAt(seconds)` says it again for a clock that
- * was already running: the clock reads `seconds` at the point the sound has reached.
+ * was already running: the clock reads `seconds` at the point the sound has reached. Nothing is carried out until
+ * the first advance or step, so what a scene asked for before its recording began is on the recording's clock
+ * too: anything from before the first sample starts on the first sample.
  *
  * A command lands on the sample of the time it names, or of the clock when it was sent, and never before the
  * point the sound has reached. `advance` first has every sender on the page send what it has written, and waits
@@ -3392,7 +3394,8 @@ export function createSteppedPlayer(options = {}) {
   let counted = 0            // video frames stepped, for step()
   let stepZero = 0           // the samples there were when step() began counting
   let kept = []              // [left, right] made since the last take
-  let held = []              // batches that came before the engine was there
+  let held = []              // batches that came before the engine was there, or before the first step
+  let begun = false          // stepping has begun: until then nothing is carried out, since the clock may yet be set (startAt)
   let busy = Promise.resolve()
   const heardAdvance = new Set()
   const told = listeners()
@@ -3423,8 +3426,15 @@ export function createSteppedPlayer(options = {}) {
     if (closed || !batch || !Array.isArray(batch.cmds)) return
     midi.take(batch)
     if (player.state === 'failed') return
-    if (!core) { held.push(batch); return }
+    if (!core || !begun) { held.push(batch); return }
     carry(batch)
+  }
+  // What was kept is carried out, in the order it came, once there is an engine and the clock is settled.
+  function unhold() {
+    if (!core || !begun) return
+    const waited = held
+    held = []
+    for (const batch of waited) carry(batch)
   }
 
   // Make the sound up to `target` samples from the first. One at a time, in the order asked.
@@ -3440,6 +3450,8 @@ export function createSteppedPlayer(options = {}) {
       }
       await loaded
       if (closed) return 0
+      begun = true
+      unhold()
       if (core) { while (conductor.loading.size) await Promise.allSettled([...conductor.loading]) }
       const frames = Math.max(0, Math.round(target()) - made)
       if (!frames) return 0
@@ -3531,9 +3543,7 @@ export function createSteppedPlayer(options = {}) {
     conductor.begin()
     if (options.midi) await midi.load()
     state('on')
-    const waited = held
-    held = []
-    for (const batch of waited) carry(batch)
+    unhold()
     isReady()
   })().catch((e) => {
     if (closed) return

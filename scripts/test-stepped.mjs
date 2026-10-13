@@ -253,6 +253,29 @@ const song = new Uint8Array(await readFile(join(ROOT, 'examples', 'songs', 'nigh
   player.close()
 }
 
+// --- what was asked for before the recording began
+{
+  // A scene that ran for a while on the machine's clock: a song and a note asked for before the recorder took over.
+  const { clock, sound, stepped, player } = stage({ fps: 60 })
+  clock.now = 3.21
+  sound.playSong(song)
+  sound.makeSynth(CLICK).play('A4', { after: 1, length: 0.02 })
+  sound.flush()
+  await new Promise((done) => setTimeout(done, 30))
+  clock.now = 3.7
+  stepped.startAt(clock.now)
+  for (let n = 1; n <= 60; n++) { clock.now = 3.7 + n / 60; await stepped.advance(clock.now) }
+  const got = stepped.take()
+  const offline = await createOfflinePlayer()
+  const o = createSound({ sound: offline, clock: () => 0 })
+  o.playSong(song)
+  o.makeSynth(CLICK).play('A4', { at: 0.51, length: 0.02 })
+  o.flush()
+  const want = await offline.render(1)
+  say(got.length === 48000 && differ(got.left, want.left)[0] === 0, 'a song asked for before the recording began starts on its first sample, and a note asked for a second ahead of then keeps its time (0.51 s in), since nothing is carried out before the first step', differ(got.left, want.left))
+  player.close()
+}
+
 // --- the page's own sound, with nothing but an option
 {
   // createSound with no transport makes the page's player from its options: stepped is one of them.
