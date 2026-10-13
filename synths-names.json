@@ -21,7 +21,8 @@
    "voice_kill",
    "macro_tick",
    "arp",
-   "arp_more"
+   "arp_more",
+   "song"
   ]
  },
  "settings": [

@@ -418,14 +418,15 @@ async function examples(name, browser) {
     await page.mouse.move(300, 300)
     await page.mouse.down()
     await page.mouse.move(320, 280)
-    await page.keyboard.down('a')            // a white key of the synth panel's keyboard
-    const got = await page.evaluate(async () => {
+    const ready = await page.evaluate(async () => {
       for (let i = 0; i < 300 && !window.examplePlayer?.(); i++) await T.wait(10)
       const player = window.examplePlayer?.()
-      if (!player) return { peak: 0, why: 'no sound was asked for' }
-      for (let i = 0; i < 300 && player.state !== 'on'; i++) await T.wait(10)
-      return T.listen(player, 1500)
+      for (let i = 0; player && i < 300 && player.state !== 'on'; i++) await T.wait(10)
+      await T.wait(200)
+      return !!player
     })
+    await page.keyboard.down('a')            // a white key of the synth panel's keyboard, once the panel is there
+    const got = ready ? await page.evaluate(() => T.listen(window.examplePlayer(), 1500)) : { peak: 0, why: 'no sound was asked for' }
     await page.mouse.up()
     await page.keyboard.up('a')
     if (got.peak > 0.01) heard++

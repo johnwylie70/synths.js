@@ -43,7 +43,9 @@ const { exports: x } = new WebAssembly.Instance(module, { wasi_snapshot_preview1
   proc_exit: (code) => { throw new Error(`synths-core stopped (${code})`) },
 } })
 memory = x.memory
-const table = JSON.parse(new TextDecoder().decode(new Uint8Array(memory.buffer, x.synths_param_table(), x.synths_param_table_len())))
+// The first call builds the text and may grow the memory, so the pointer is taken before the memory is looked at.
+const tableAt = x.synths_param_table()
+const table = JSON.parse(new TextDecoder().decode(new Uint8Array(memory.buffer, tableAt, x.synths_param_table_len())))
 
 const rows = table.params.map((p) => '  ' + JSON.stringify([p.id, p.name, p.kind === 'choice' ? 'c' : p.kind[0], p.min, p.max, p.default, p.unit || '', ...(p.choices ? [p.choices] : [])]) + ',')
 const block = [

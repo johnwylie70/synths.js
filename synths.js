@@ -52,7 +52,7 @@ const COMMANDS = 1
 // The engine's parameter table, written here by scripts/sync-engine.mjs from the engine itself. Do not edit by hand.
 // Each row: id, name, kind (f float, i whole number, b on or off, c a choice), least, most, default, unit, the choices.
 /* PARAMS:BEGIN */
-const ENGINE = {"abi":1,"version":"0.0.0","parts":64,"voices":64,"samples":1024,"events":["note_on","note_off","all_notes_off","param","pitch_bend","voice_pitch","voice_freq","voice_volume","voice_pan","voice_position","voice_kill","macro_tick","arp","arp_more"]}
+const ENGINE = {"abi":1,"version":"0.0.0","parts":64,"voices":64,"samples":1024,"events":["note_on","note_off","all_notes_off","param","pitch_bend","voice_pitch","voice_freq","voice_volume","voice_pan","voice_position","voice_kill","macro_tick","arp","arp_more","song"]}
 const PARAMS = [
   [0,"volume","f",0,2,1,"gain"],
   [1,"pan","f",-1,1,0,"pan"],
