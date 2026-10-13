@@ -1151,6 +1151,55 @@ async function voice(name, browser, pretend) {
   await context.close()
 }
 
+/**
+ * An engine that takes ten seconds to arrive (a slow connection, a preview that is handed its bytes late). What
+ * was asked for meanwhile and goes on (a tune that repeats, a section that goes round, a song) starts when the
+ * engine is there; a single note from long before does not.
+ */
+async function late(name, browser) {
+  const context = await browser.newContext()
+  const page = await context.newPage()
+  if (name === 'chromium') await letWorkletsRun(page)
+  const said = []
+  page.on('console', (m) => said.push(m.text()))
+  page.on('pageerror', (e) => said.push('ERROR ' + e.message))
+  for (const how of ['own', 'transport', 'fallback']) {
+    await fresh(page)
+    const got = await page.evaluate(async (how) => {
+      const synths = await import('/synths.js')
+      const bytes = await (await fetch('/synths_core.wasm')).arrayBuffer()
+      const wasm = new Promise((yes) => setTimeout(() => yes(bytes), 10000))
+      // Either the program has the player itself, or (as a preview does) it sends its batches to a player elsewhere.
+      let player = null
+      const s = how === 'own' ? synths.createSound({ wasm }) : how === 'fallback' ? synths.createSound({ wasm, fallback: 'always', share: false }) : synths.createSound({ sound: { send: (batch) => (player = player || synths.createPlayer({ wasm })).send(JSON.parse(JSON.stringify(batch))) } })
+      const the = () => player || s.player
+      const a = s.makeSynth(T.CLICK), b = s.makeSynth(T.CLICK), c = s.makeSynth(T.CLICK)
+      a.playNotes('A4 A4', 0.25, { repeat: true })
+      s.loopNotes(() => { b.note('A5', 'quarter'); b.rest('quarter') })
+      c.play(114.23, 0.5)                    // 6000 Hz, where nothing else is
+      s.playSong('/examples/songs/' + (await (await fetch('/examples/song.js')).text()).match(/playSong\("songs\/([^"]+)"/)[1])
+      await T.wait(9000)
+      const before = the().state
+      await T.on(the)
+      for (let i = 0; i < 600 && the().state !== 'on'; i++) await T.wait(10)
+      await T.wait(500)
+      const a2 = the().context.createAnalyser()
+      a2.fftSize = 16384
+      the().node.connect(a2)
+      await T.wait(1200)
+      const bins = new Float32Array(a2.frequencyBinCount)
+      a2.getFloatFrequencyData(bins)
+      const width = the().context.sampleRate / a2.fftSize
+      const at = (hz) => { let most = -200; for (let i = Math.round(hz / width) - 2; i <= Math.round(hz / width) + 2; i++) most = Math.max(most, bins[i]); return most }
+      const song = how !== 'transport' ? the().songPosition() : null
+      await T.wait(200)
+      return { before, state: the().state, tune: at(440), loop: at(880), note: at(6000), song: how !== 'transport' ? the().songPosition().state : 'not asked', voices: (await the().ask()).voices }
+    }, how)
+    say(got.before === 'loading' && got.state === 'on' && got.tune > -60 && got.loop > -60 && got.note < got.tune - 20 && (how === 'transport' || got.song === 'playing'), name, `with the engine ten seconds late (${how === 'own' ? 'the page\'s own player' : how === 'fallback' ? 'the fallback, with no worklet' : 'a player sent the batches'}): the repeating tune, the section that goes round and the song all play once it is there, and the single note from ten seconds before does not`, { got, said })
+  }
+  await context.close()
+}
+
 const ALLOWED = { chromium: { args: ['--autoplay-policy=no-user-gesture-required'] }, webkit: {} }
 for (const name of ['chromium', 'webkit']) {
   let browser
@@ -1160,6 +1209,7 @@ for (const name of ['chromium', 'webkit']) {
     if (!ONLY || ONLY === 'examples') await examples(name, browser)
     if (!ONLY || ONLY === 'midi') await midi(name, browser)
     if (!ONLY || ONLY === 'voice') await voice(name, browser, false)
+    if (!ONLY || ONLY === 'late') await late(name, browser)
   } catch (e) { say(false, name, 'the tests ran to the end', String(e?.stack || e)) }
   await browser.close()
 

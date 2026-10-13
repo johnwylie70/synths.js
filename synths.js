@@ -1156,6 +1156,8 @@ function registerSynths(makeCore) {
       this.blocks = 0
       // Whether the node's input is a microphone to be given to the engine. Until it is, the input is not looked at.
       this.mic = false
+      this.begun = false
+      this.early = []
       this.port.onmessage = (m) => {
         const core = this.core
         if (!core) return
@@ -1167,8 +1169,14 @@ function registerSynths(makeCore) {
           return
         }
         if (m.data.ops) {
-          core.delta = core.time - currentFrame
-          core.exec(m.data.ops)
+          // Before the first block is made this thread's clock may not have been brought up to the sound card's
+          // (in WebKit it is brought up only as blocks are made), and the engine's own starts at 0: what arrives
+          // then is kept for the first block, or it would be put as far into the future as the sound card is old.
+          if (!this.begun) this.early.push(m.data.ops)
+          else {
+            core.delta = core.time - currentFrame
+            core.exec(m.data.ops)
+          }
         }
         if (m.data.watch) {
           this.watchSong = !!m.data.song
@@ -1193,6 +1201,10 @@ function registerSynths(makeCore) {
       if (!core) return !this.over
       if (!out || !out[0]) return true
       core.delta = core.time - currentFrame
+      if (!this.begun) {
+        this.begun = true
+        for (const ops of this.early.splice(0)) core.exec(ops)
+      }
       core.render(out[0], out[1], out[0].length, 0, (this.mic && inputs[0] && inputs[0][0]) || null)
       if (this.watch && (++this.blocks & 7) === 0) {
         if ((this.watchFor -= 8) <= 0) this.watch = null
@@ -2196,6 +2208,7 @@ export function createPlayer(options = {}) {
   const context = player.context = options.context || new Context({ latencyHint: 'interactive' })
   let engineReady = false
   const live = () => engineReady && context.state === 'running'
+  let fallbackBegun = false
   let engineUp
   const engineIsUp = new Promise((yes) => { engineUp = yes })
 
@@ -2449,7 +2462,13 @@ export function createPlayer(options = {}) {
     if (closed) return
     const post = (ops, transfer) => {
       if (port) port.postMessage({ ops }, transfer)
-      else core.exec(ops)
+      else {
+        // Until the fallback has made its first block, nothing has said how the engine's clock (which starts at 0)
+        // stands to the sound card's (which may have been running for a long time). Without this, what was asked
+        // for while the engine was loading would be put that long into the future.
+        if (!fallbackBegun) core.delta = core.time - Math.round(context.currentTime * context.sampleRate)
+        core.exec(ops)
+      }
     }
     conductor = makeConductor(post, async (c) => decode(await sampleBytes(c), context), sampleBytes, (scope, event) => told.emit(scope, [event]))
     const destination = options.destination || context.destination
@@ -2479,6 +2498,7 @@ export function createPlayer(options = {}) {
       const node = player.node = context.createScriptProcessor(1024, 1, 2)
       node.onaudioprocess = (e) => {
         const out = e.outputBuffer
+        fallbackBegun = true
         core.delta = core.time - Math.round(e.playbackTime * context.sampleRate)
         core.render(out.getChannelData(0), out.getChannelData(1), out.length, 0, micLive ? e.inputBuffer.getChannelData(0) : null)
       }
