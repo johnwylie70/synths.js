@@ -237,6 +237,7 @@ Every setting is a plain property, and reads back what you set: `lead.cutoff = 8
 | `pwm`, `pwmRate` | the pulse wave's width moving in and out (0 to 1: how far) and how fast, in Hz: the thick, shifting sound of a `"pulse"` or `"square"` wave. It does nothing to the other waves. `pwmRate` and `wobbleRate` are one speed under two names: the slow wobbler does both, and `autopan` too, so the vibrato keeps its own speed |
 | `pitchSweep`, `pitchSweepDecay` | each note begins that many semitones off and falls into place: a drum's thump, a laser |
 | `echo`, `reverb`, `chorus` | how much of the synth goes to each effect (0 to 1) |
+| `reverbType`, `reverbSize`, `reverbDecay` | what kind of space the reverb is (`"room"`, `"hall"`, `"plate"`, `"cathedral"`, `"spring"`), how big, and how many seconds it rings. Every synth shares them: see [Effects](#effects) |
 | `distortion`, `crush` | grit (0 to 1), and the bits each sample keeps (16 is clean, 4 is an old games console) |
 
 There are more: `settingNames()` lists every one, and each also answers to the engine's own name for it, written any way you like (`filterCutoff`, `filter_cutoff`, `"filter.cutoff"`).
@@ -375,14 +376,29 @@ The four MIDI examples are [a keyboard](examples/midi_keyboard.js), [a scene](ex
 A synth sends some of its sound to an effect with one word: `lead.echo = 0.4`, `lead.reverb = 0.3`, `lead.chorus = 0.5`. `distortion` and `crush` belong to the synth alone. The echo, the reverb and the chorus are shared by every synth, and are shaped with `setEffects`:
 
 ```js
-setEffects({ echoTime: 0.3, echoFeedback: 0.5, echoBounce: true, reverbSize: 0.8 })
+setEffects({ echoTime: 0.3, echoFeedback: 0.5, echoBounce: true, reverbType: "hall", reverbSize: 0.8 })
 ```
 
 | | |
 |---|---|
 | `echoTime`, `echoFeedback`, `echoTone`, `echoBounce` | seconds between echoes, how much each feeds the next (0 to 0.95), how much treble survives, and whether they bounce left and right |
-| `reverbSize`, `reverbDamping` | how big the room is, and how soon its treble dies |
+| `reverbType` | what kind of space the reverb is: one of the five below |
+| `reverbSize`, `reverbDamping` | how big the space is (0 to 1; bigger also rings longer), and how soon its treble dies |
+| `reverbDecay`, `reverbPredelay` | how many seconds the tail takes to die away (0 leaves it to the type and the size), and a gap before the reverb begins (up to 0.2 seconds), which keeps a sound clear of its own reverb |
+| `reverbLowCut` | for fine tuning: bass below this many Hz is kept out of the reverb, so that it does not turn to mud (120 to begin with) |
 | `chorusRate`, `chorusDepth` | how fast and how far the chorus wobbles |
+
+The reverb is one room that every synth sends into, so its type and shape are one setting for everything: `lead.reverbType = "hall"` and `setEffects({ reverbType: "hall" })` do the same thing, and every synth reads the same value back. A synth's own part is how much it sends, `lead.reverb`.
+
+| `reverbType` | |
+|---|---|
+| `"room"` | a small room: a short, soft tail of about a second. The one to begin with |
+| `"hall"` | a concert hall: big, smooth and warm, about two and a half seconds. Good for pads, strings and bells |
+| `"plate"` | a big sheet of metal, as recording studios used: bright, and thick from the first moment. Good on drums and voices |
+| `"cathedral"` | enormous: it swells slowly and goes on and on, six seconds and more |
+| `"spring"` | the spring in a guitar amp: it twangs, and boings on anything sudden |
+
+No ready-made synth changes the type, because it would change it for all the others: the pad, the strings and the bell send to whatever room there is, and sound grander when you choose `"hall"`. With dials.js the type is a control like any other, `select("reverb", lead, "reverbType")`: `lead.describe("reverbType").choices` is the five names.
 
 ## Samples
 
@@ -429,7 +445,7 @@ mic.listen()                      // now you hear yourself, as a robot. mic.mute
 | `robot` | a machine, ringing in a metal pipe |
 | `chipmunk` | small and squeaky: seven semitones higher |
 | `monster` | huge and deep: seven semitones lower, with a growl |
-| `cave` | far inside a cave: long echoes in a very big room |
+| `cave` | far inside a cave: long echoes in an enormous, dark space (it makes the shared reverb a cathedral while it is worn) |
 | `telephone` | down an old phone line |
 | `alien` | not from here: higher, with a slow metallic sweep |
 | `whisper` | hoarse and breathy, with no pitch at all |

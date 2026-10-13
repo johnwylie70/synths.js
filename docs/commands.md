@@ -402,7 +402,16 @@ Things that are for all the sound.
 { op: "master", volume: 0.5 }                              // 1 is normal, up to 4
 { op: "master", mute: true }
 { op: "master", set: { echoTime: 0.3, reverbSize: 0.8 } }  // settings whose scope is "all"
+{ op: "master", set: { reverbType: "hall", reverbDecay: 3 } }
 ```
+
+**The reverb is one, shared by every synth.** Its settings have the scope `"all"`: `reverb.type` (`reverbType`: a
+choice of `room`, the default, `hall`, `plate`, `cathedral` and `spring`, by name or by its place in that list),
+`reverb.size` (`reverbSize`, 0.5), `reverb.damping`, `reverb.decay` (`reverbDecay`: the seconds the tail takes to
+fall by 60 dB, or 0 for the type's own), `reverb.predelay` (`reverbPredelay`, 0 to 0.2 seconds) and
+`reverb.low_cut` (`reverbLowCut`, 20 to 1000 Hz, 120). A setting with the scope `"all"` may be sent in a `master`
+command or in the `set` of any synth, and does the same either way. A sender keeps ONE value of each, whichever
+way it was set, and that is what every synth of its reads back.
 
 `{ op: "master", pause: true }` silences the sender's own sound with everything kept as it is (a scene that is
 out of view), and `pause: false` brings it back. When every scope of a player is paused, the sound card rests.
