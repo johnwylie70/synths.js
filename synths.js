@@ -2202,13 +2202,27 @@ const TOO_LATE = 0.25
 const KEPT_FOR_A_TAP = 0.35
 const KEPT_WHILE_LOADING = 10
 
+// The fallback's buffer. "auto" is the power of two that lasts at least 40 ms (2048 frames at 44.1 and 48 kHz),
+// and may be doubled once when the page keeps being too busy for it.
+const FALLBACK_MARGIN = 0.008
+const GROW_AFTER = 4          // this many under-runs
+const GROW_WITHIN = 10        // within this many seconds
+const GROW_LIMIT = 0.1        // and never to a buffer longer than this, in seconds
+const fallbackAuto = (asked) => asked === undefined || asked === null || asked === 'auto'
+function fallbackSize(asked, sampleRate) {
+  const want = fallbackAuto(asked) || !(asked > 0) ? 0.04 * sampleRate : asked
+  let size = 256
+  while (size < want && size < 16384) size *= 2
+  return size
+}
+
 /**
  * A player: it owns the AudioContext and the engine's worklet, and plays the batches of commands it is sent.
  * The API makes one for itself the first time a sound is asked for. A host that takes a scene's commands through
  * the `sound` option makes its own, in a page that is allowed to make sound, and passes each batch to `send`.
  *
  * @param {{ wasm?: ArrayBuffer | Uint8Array | WebAssembly.Module | string | Promise<any>, worklet?: 'auto' | 'blob' | 'file' | string,
- *           latency?: number, context?: AudioContext, destination?: AudioNode, fallback?: boolean | 'always',
+ *           latency?: number, context?: AudioContext, destination?: AudioNode, fallback?: boolean | 'always', fallbackBuffer?: 'auto' | number,
  *           onState?: (state: string) => void, microphone?: any, save?: (file: { name: string, bytes: Uint8Array, type: string }) => void }} options
  *   `wasm` is the engine, as bytes (for a page that may not fetch it) or an address; without it, `synths_core.wasm` beside this file.
  *   `worklet` is how the worklet's module is loaded: 'blob' from the text inside this file (no second file, no fetch), 'file'
@@ -2216,12 +2230,18 @@ const KEPT_WHILE_LOADING = 10
  *   `latency` is how far ahead of the sound card everything is scheduled, in seconds (0.04).
  *   `context` and `destination` put the sound into an AudioContext and a node of your own (a recorder, an analyser).
  *   `fallback: false` refuses the slower way of working when the browser has no audio worklet; 'always' uses it regardless.
+ *   `fallbackBuffer` is how many frames that way makes at a time: a power of two from 256 to 16384, or 'auto' (the default:
+ *   2048 at 44.1 and 48 kHz, doubled once if the page keeps being too busy for it). Bigger rides over a busier page, and
+ *   is heard later: everything is scheduled two buffers and a little ahead unless `latency` is given.
  *   `microphone` is where the microphone comes from when it is not the browser's to ask for: a MediaStream, or
  *   { open({ sampleRate, raw, constraints, push }), close() }, or false for none (docs/microphone.md is the contract).
  *   `save` is given a file that saveSound made, in place of the browser being asked to download it.
  * @returns {{ send(batch): void, read(id?): { samples: Float32Array, level: number[], notes: number[] },
  *             state: 'loading'|'waiting'|'on'|'failed', kind: 'worklet'|'fallback'|null, ready: Promise<void>,
+ *             fallback?: { buffer: number, underruns: number, reason: 'insecure'|'worklet' },
  *             context: AudioContext, node: AudioNode, unlock(): void, pause(): void, resume(): void, ask(): Promise<object>, close(): void }}
+ *   `fallback` is there when `kind` is 'fallback': the frames made at a time now, how many times the page was too busy
+ *   to make them in time (each is a click), and why there is no worklet (the page is not secure, or it would not load).
  *   `state` is 'waiting' while the browser keeps the page silent until a tap. `ready` resolves when sound is on.
  *   `read(id)` is what a synth is doing now, for a scope, a meter and lit keys (no id: all the sound). It never waits:
  *   it gives the latest the audio thread has posted, which starts to arrive a moment after the first read.
@@ -2290,6 +2310,7 @@ export function createPlayer(options = {}) {
   let engineReady = false
   const live = () => engineReady && context.state === 'running'
   let fallbackBegun = false
+  let inlet = null         // the fallback's way in, for a microphone
   let engineUp
   const engineIsUp = new Promise((yes) => { engineUp = yes })
 
@@ -2330,7 +2351,7 @@ export function createPlayer(options = {}) {
       micStream = stream
       micOwn = own
       micSource = context.createMediaStreamSource(stream)
-      micSource.connect(player.node)
+      micSource.connect(inlet || player.node)
       micLive = true
       port?.postMessage({ mic: true })
     } else if (!got) throw { kind: 'nothing' }
@@ -2510,7 +2531,7 @@ export function createPlayer(options = {}) {
     mic.close()
     if (typeof removeEventListener === 'function') for (const g of GESTURES) removeEventListener(g, unlock, { capture: true })
     try { player.node?.disconnect() } catch (e) { /* already gone */ }
-    if (player.node) player.node.onaudioprocess = null
+    if (processor) { processor.onaudioprocess = null; try { processor.disconnect() } catch (e) { /* already gone */ } }
     if (port) port.postMessage({ close: true })
     if (core) core.close()
     if (!options.context) context.close?.().catch(() => {})
@@ -2538,6 +2559,56 @@ export function createPlayer(options = {}) {
       if (say[2]) saveFile(say[1])
       told.emit(say[0], [say[1]])
     } else if (m.type === 'problem') tell(m.what === 'record-memory' ? 'there was not enough memory for a recording, so it will be empty.' : 'there was not enough memory for a sample, so it will be silent.')
+  }
+
+  // THE FALLBACK'S NODE. A ScriptProcessorNode asks the page's thread for one buffer at a time, and the sound card
+  // plays the one before meanwhile: when the page is busy for longer than a buffer lasts, the answer comes too
+  // late and there is a click. So the buffer is long enough to ride over a busy moment (about 43 ms; 21 ms was
+  // not), and everything is asked for two buffers and a little ahead, which is how far ahead the engine has
+  // already made the sound when a command arrives, so times stay exact. A buffer that keeps coming late is
+  // doubled, once, and never made smaller again: more would be heard as a slow keyboard.
+  let processor = null
+  let lateAt = []
+  function makeFallbackNode(size) {
+    if (processor) { processor.onaudioprocess = null; try { processor.disconnect() } catch (e) { /* already gone */ } }
+    const node = processor = context.createScriptProcessor(size, 1, 2)
+    const length = size / context.sampleRate
+    // A callback gives the time its buffer will play as "now and one buffer", so one that comes late says a later
+    // time than is true, though no buffer is ever left out: the buffers are a buffer apart, and the earliest any
+    // has said is where they stand. The engine's clock goes by that, so a busy moment that was ridden over does
+    // not move the notes inside it; how much later than that a callback says is how late it came.
+    let count = 0, first = null, wasLate = false, off = 0
+    node.onaudioprocess = (e) => {
+      if (node !== processor) return
+      const out = e.outputBuffer
+      const said = Math.round(e.playbackTime * context.sampleRate) - count * size
+      // Late every time for a second or more is not lateness: the clock has moved (a browser that leaves buffers out).
+      if (first === null || said < first || ++off > 1 / length) first = said
+      const late = said - first
+      if (late <= size / 4) off = 0
+      fallbackBegun = true
+      core.delta = core.time - (first + count * size)
+      count++
+      core.render(out.getChannelData(0), out.getChannelData(1), out.length, 0, micLive ? e.inputBuffer.getChannelData(0) : null)
+      // More than a buffer late, the sound card has gone on without it. The buffers that pile up behind one busy
+      // moment are one under-run, not several.
+      if (late > size && !wasLate) underrun(e.playbackTime, size)
+      wasLate = late > size
+    }
+    inlet.connect(node)
+    node.connect(player.node)
+    player.fallback.buffer = size
+    if (options.latency === undefined) latency = 2 * length + FALLBACK_MARGIN
+  }
+  function underrun(at, size) {
+    player.fallback.underruns++
+    if (!fallbackAuto(options.fallbackBuffer)) return
+    lateAt = lateAt.filter((t) => at - t < GROW_WITHIN)
+    lateAt.push(at)
+    if (lateAt.length < GROW_AFTER || size * 2 / context.sampleRate > GROW_LIMIT) return
+    lateAt = []
+    makeFallbackNode(size * 2)
+    tell(`the page is busy for longer than the sound was made ahead, so it is now made ${Math.round(size * 2000 / context.sampleRate)} ms at a time, and a key is heard ${Math.round(latency * 1000)} ms after it is pressed. An https address has neither the clicks nor the wait.`, 'info')
   }
 
   async function start() {
@@ -2574,21 +2645,18 @@ export function createPlayer(options = {}) {
       player.kind = 'worklet'
     } else {
       // THE FALLBACK. With no audio worklet (a page that is not served securely has none) the same engine runs on
-      // the page's own thread through a ScriptProcessorNode. It is the same sound, but a busy page can make it crackle.
+      // the page's own thread through a ScriptProcessorNode. It is the same sound, later, and a page that is busy for
+      // longer than a buffer lasts makes it click.
       if (options.fallback === false || !context.createScriptProcessor) throw new Error(context.audioWorklet ? 'the audio worklet could not be loaded' : 'this page has no audio worklet: it needs an https address, or localhost')
-      if (options.fallback !== 'always') tell(`this page cannot run sound on its own thread (${context.audioWorklet ? `the audio worklet could not be loaded: ${player.workletProblem}` : 'that needs an https address, or localhost'}), so the sound is made on the page's thread instead. It is the same sound, but it may crackle when the page is busy.`, 'info')
       core = makeCore(wasm instanceof WebAssembly.Module ? wasm : await WebAssembly.compile(wasm), context.sampleRate, onMessage)
-      const node = player.node = context.createScriptProcessor(1024, 1, 2)
-      node.onaudioprocess = (e) => {
-        const out = e.outputBuffer
-        fallbackBegun = true
-        core.delta = core.time - Math.round(e.playbackTime * context.sampleRate)
-        core.render(out.getChannelData(0), out.getChannelData(1), out.length, 0, micLive ? e.inputBuffer.getChannelData(0) : null)
-      }
-      node.connect(destination)
+      // What others connect to stays the same node while the one that makes the sound is changed for a bigger one.
+      inlet = context.createGain()
+      player.node = context.createGain()
+      player.node.connect(destination)
       player.kind = 'fallback'
-      // It makes sound 1024 frames at a time, so it has to be asked a little further ahead to stay exact.
-      if (options.latency === undefined) latency = 0.08
+      player.fallback = { buffer: 0, underruns: 0, reason: context.audioWorklet ? 'worklet' : 'insecure' }
+      makeFallbackNode(fallbackSize(options.fallbackBuffer, context.sampleRate))
+      if (options.fallback !== 'always') tell(`this page cannot run sound on its own thread (${context.audioWorklet ? `the audio worklet could not be loaded: ${player.workletProblem}` : 'that needs an https address, or localhost'}), so the sound is made on the page's thread instead, ${Math.round(player.fallback.buffer * 1000 / context.sampleRate)} ms at a time. It is the same sound, but a key is heard about ${Math.round(latency * 1000)} ms after it is pressed, and it may stutter or click when the page is busy for longer than that. An https address has neither.`, 'info')
     }
     engineReady = true
     engineUp()
