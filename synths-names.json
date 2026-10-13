@@ -152,6 +152,20 @@
    "scope": "synth"
   },
   {
+   "id": 12,
+   "name": "pan.law",
+   "kind": "choice",
+   "min": 0,
+   "max": 1,
+   "default": 0,
+   "unit": "",
+   "choices": [
+    "equal_power",
+    "square_root"
+   ],
+   "scope": "synth"
+  },
+  {
    "id": 16,
    "name": "osc1.wave",
    "kind": "choice",

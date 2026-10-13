@@ -49,6 +49,7 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
     render,
     taps,
     songPosition,
+    packSong,
     close() { x.synths_destroy(engine) },
   }
 
@@ -127,17 +128,13 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
       x.synths_free(dataAt)
     }
     const at = put(bytes)
-    const result = at ? x.synths_song_load(engine, at, bytes.length, firstPart, firstSlot) : -1
+    // An engine from before songs were given parts 32 up for good took the first part as well.
+    const result = !at ? -1 : x.synths_song_load.length >= 5 ? x.synths_song_load(engine, at, bytes.length, firstPart, firstSlot) : x.synths_song_load(engine, at, bytes.length, firstSlot)
     x.synths_free(at)
     songLoaded = result === 0
     const said = { type: 'song', token, result, error: null, info: [], patches: [] }
-    if (result !== 0) {
-      const from = x.synths_song_error()
-      const all = new Uint8Array(memory.buffer)
-      let end = from
-      while (from && all[end]) end++
-      said.error = all.slice(from, end)
-    } else {
+    if (result !== 0) said.error = songError()
+    else {
       const room = x.synths_alloc(256)
       x.synths_song_info(engine, room)
       said.info = Array.from(new Uint32Array(memory.buffer, room, 8))
@@ -148,6 +145,21 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
       x.synths_free(room)
     }
     post(said)
+  }
+  function songError() {
+    const from = x.synths_song_error()
+    const all = new Uint8Array(memory.buffer)
+    let end = from
+    while (from && all[end]) end++
+    return all.slice(from, end)
+  }
+  /** A song file of any kind as the engine's packed form: { bytes } or { error: why not, as bytes of text }. */
+  function packSong(bytes) {
+    if (!x.synths_song_pack) return { error: null }
+    const at = put(bytes)
+    const length = at ? x.synths_song_pack(at, bytes.length) : -1
+    x.synths_free(at)
+    return length > 0 ? { bytes: new Uint8Array(memory.buffer, x.synths_song_packed(), length).slice() } : { error: songError() }
   }
   /** Where the song is, ten numbers (see the engine's document), or null with an engine that plays no songs. */
   let positionAt = 0

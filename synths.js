@@ -75,6 +75,7 @@ const PARAMS = [
   [9,"unison.detune","f",0,100,20,"cents"],
   [10,"unison.spread","f",0,1,0.5,""],
   [11,"velocity","f",0,1,1,""],
+  [12,"pan.law","c",0,1,0,"",["equal_power","square_root"]],
   [16,"osc1.wave","c",0,4,1,"",["sine","triangle","saw","pulse","sample"]],
   [17,"osc1.level","f",0,1,1,"gain"],
   [18,"osc1.coarse","f",-48,48,0,"semitones"],
@@ -610,6 +611,7 @@ function makeCore(wasm, sampleRate, post) {
     render,
     taps,
     songPosition,
+    packSong,
     close() { x.synths_destroy(engine) },
   }
 
@@ -688,17 +690,13 @@ function makeCore(wasm, sampleRate, post) {
       x.synths_free(dataAt)
     }
     const at = put(bytes)
-    const result = at ? x.synths_song_load(engine, at, bytes.length, firstPart, firstSlot) : -1
+    // An engine from before songs were given parts 32 up for good took the first part as well.
+    const result = !at ? -1 : x.synths_song_load.length >= 5 ? x.synths_song_load(engine, at, bytes.length, firstPart, firstSlot) : x.synths_song_load(engine, at, bytes.length, firstSlot)
     x.synths_free(at)
     songLoaded = result === 0
     const said = { type: 'song', token, result, error: null, info: [], patches: [] }
-    if (result !== 0) {
-      const from = x.synths_song_error()
-      const all = new Uint8Array(memory.buffer)
-      let end = from
-      while (from && all[end]) end++
-      said.error = all.slice(from, end)
-    } else {
+    if (result !== 0) said.error = songError()
+    else {
       const room = x.synths_alloc(256)
       x.synths_song_info(engine, room)
       said.info = Array.from(new Uint32Array(memory.buffer, room, 8))
@@ -709,6 +707,21 @@ function makeCore(wasm, sampleRate, post) {
       x.synths_free(room)
     }
     post(said)
+  }
+  function songError() {
+    const from = x.synths_song_error()
+    const all = new Uint8Array(memory.buffer)
+    let end = from
+    while (from && all[end]) end++
+    return all.slice(from, end)
+  }
+  /** A song file of any kind as the engine's packed form: { bytes } or { error: why not, as bytes of text }. */
+  function packSong(bytes) {
+    if (!x.synths_song_pack) return { error: null }
+    const at = put(bytes)
+    const length = at ? x.synths_song_pack(at, bytes.length) : -1
+    x.synths_free(at)
+    return length > 0 ? { bytes: new Uint8Array(memory.buffer, x.synths_song_packed(), length).slice() } : { error: songError() }
   }
   /** Where the song is, ten numbers (see the engine's document), or null with an engine that plays no songs. */
   let positionAt = 0
@@ -1183,7 +1196,7 @@ function makeConductor(post, load, bytesOf) {
       const what = c.do || 'play'
       if (what === 'play' && (c.url || c.bytes)) {
         if (!ENGINE.events.includes('song')) return tell('tracker songs are not ready yet in this version, so playSong plays nothing. The rest of your sound is not affected.')
-        const mine = song = { id: c.id, scope, token: ++songs, ready: false, waiting: [], patches: c.patches || {}, name: c.name || c.url || 'given as bytes', at, vol: c.vol, repeat: c.repeat ?? c.loop }
+        const mine = song = { id: c.id, scope, token: ++songs, ready: false, waiting: [], raw: c.raw, patches: c.patches || {}, name: c.name || c.url || 'given as bytes', at, vol: c.vol, repeat: c.repeat ?? c.loop }
         const job = (async () => {
           const bytes = new Uint8Array(await bytesOf(c))
           const files = []
@@ -1271,6 +1284,9 @@ function makeConductor(post, load, bytesOf) {
     }
     song.ready = true
     song.info = m.info
+    // The song's channels are the engine's parts from 32. Raw: a sample played fast is left harsh, as old trackers
+    // left it; not raw: it is smoothed. With nothing said the engine chooses (raw for a .mod or .xm as it is).
+    if (song.raw != null) for (let ch = 0; ch < Math.min(32, m.info[0]); ch++) event(now, PARAM, parts.length + ch, id('sample.antialias'), song.raw ? 0 : 1, 0)
     if (song.repeat === false) event(now, SONG, 0, 4, 0, 0)
     if (song.vol != null) steer({ do: 'volume', vol: song.vol }, now)
     event(Math.max(now, song.at ?? now), SONG, 0, 1, 0, 0)
@@ -1716,7 +1732,8 @@ export function createPlayer(options = {}) {
       let made = null
       try {
         const url = way === 'blob' ? (made = URL.createObjectURL(new Blob([workletSource], { type: 'text/javascript' }))) : way === 'file' ? new URL('synths-worklet.js', BASE).href : new URL(way, document.baseURI).href
-        await context.audioWorklet.addModule(url)
+        // A worklet that never answers (it happens under some test drivers) is given five seconds, then the next way is tried.
+        await Promise.race([context.audioWorklet.addModule(url), new Promise((yes, no) => setTimeout(() => no(new Error('the audio worklet did not answer')), 5000))])
         player.worklet = way
         return 'worklet'
       } catch (e) {
@@ -1779,6 +1796,22 @@ export async function createOfflinePlayer(options = {}) {
     },
     close() { core.close() },
   }
+}
+
+/**
+ * A song file of any kind (.mod, .xm, or our own JSON) as the engine's packed form: small, quick to load, and what
+ * a tracker editor keeps after "import a module". `await packSong(bytes)` gives a Uint8Array that playSong plays.
+ * A JSON song that names WAV files gives them in `files`: { "the path as the song writes it": bytes }.
+ * It throws, in the engine's words, for a file that is not a song.
+ */
+export async function packSong(bytes, options = {}) {
+  const wasm = await engineBytes(options.wasm)
+  const core = makeCore(wasm instanceof WebAssembly.Module ? wasm : await WebAssembly.compile(wasm), 8000, () => {})
+  try {
+    const packed = core.packSong(new Uint8Array(bytes.buffer || bytes, bytes.byteOffset || 0, bytes.byteLength))
+    if (packed.bytes) return packed.bytes
+    throw new Error(packed.error ? `That could not be packed: ${new TextDecoder().decode(packed.error)}` : 'This version of the engine cannot pack songs')
+  } finally { core.close() }
 }
 
 /**
@@ -2234,6 +2267,7 @@ export function createSound(options = {}) {
     const id = prefix + 'g' + ++ids
     const c = { op: 'song', id, do: 'play', repeat: (o.repeat ?? o.loop) !== false, t: when(o, 'playSong') }
     if (o.volume !== undefined) c.vol = amount(o.volume, 'playSong: volume', 0, 2)
+    if (o.raw !== undefined) c.raw = !!o.raw
     if (o.patches !== undefined) {
       if (!o.patches || typeof o.patches !== 'object') throw new Error(`playSong: patches needs names and what each is, as in { patches: { "wobble": "bass" } }, not ${shown(o.patches)}`)
       const names = Object.keys(PRESETS).filter((n) => n !== 'sample')
@@ -2391,6 +2425,6 @@ export {
   playSong as play_song, stopSong as stop_song, stopSound as stop_sound, setVolume as set_volume, muteSound as mute_sound,
   unmuteSound as unmute_sound, setEffects as set_effects, setTempo as set_tempo, soundTime as sound_time,
   soundNames as sound_names, synthNames as synth_names, settingNames as setting_names, noteNumber as note_number,
-  createSound as create_sound, renderSound as render_sound, playArp as play_arp, startArp as start_arp, mainSynth as main_synth,
+  createSound as create_sound, renderSound as render_sound, packSong as pack_song, playArp as play_arp, startArp as start_arp, mainSynth as main_synth,
   soundOutput as sound_output, chordNotes as chord_notes,
 }

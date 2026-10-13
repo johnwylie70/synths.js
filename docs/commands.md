@@ -339,7 +339,7 @@ it takes a part again.
 ### `song`
 
 A tracker song: a MOD or XM file, or a song in the engine's own JSON format (`synths-core/docs/song-format.md`).
-The engine plays it by itself, on parts 32 to 63 (one for each channel) and sample slots 512 and up, so it never
+A file of any of these kinds is given as it is. The engine plays it by itself, on parts 32 to 63 (one for each channel, so at most 32) and sample slots 512 and up, so it never
 meets the synths and samples of the other commands. There is one song at a time for the whole player: playing
 another replaces it.
 
@@ -356,6 +356,7 @@ another replaces it.
 | `files` | optional, for a JSON song that names WAV files: `{ "the path as the song writes it": bytes }`. Without it the player fetches each one beside `url` |
 | `repeat` | `false` to play it once (`true`) |
 | `vol` | 0 to 2 (1) |
+| `raw` | `true`: a sample played faster than it was recorded is left harsh, as old trackers left it; `false`: it is smoothed. Missing: the engine chooses (raw for a MOD or XM as it is, smooth for the engine's own songs) |
 | `patches` | what the song's instruments that are synths by name are: for each name a ready-made synth's name, or settings (with `preset` and `macro` if wanted). A name that is a ready-made synth's needs none; one that nothing says plays as `keys`, and the console says so |
 | `name` | optional: what to call it in a message |
 

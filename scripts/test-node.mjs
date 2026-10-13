@@ -562,6 +562,19 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
     const hz = crossings(r.left, 0.2, 0.8) / 0.6
     say(Math.abs(hz - 259) < 4 && peak(r.left) > 0.05 && song.position.state === 'playing' && song.position.tempo === 125 && player.songPosition().rows === 64, 'a .mod file given as bytes plays: its one note comes out at 259 Hz, as an Amiga would play it', [hz, peak(r.left), song.position])
   }
+  {
+    const mod = new Uint8Array(1084 + 1024 + 64)
+    mod[20 + 23] = 32; mod[20 + 25] = 64; mod[20 + 29] = 16; mod[950] = 1; mod[951] = 127
+    mod.set(new TextEncoder().encode('M.K.'), 1080)
+    mod.set([0x01, 0xac, 0x10, 0x00], 1084)
+    for (let i = 0; i < 64; i++) mod[1084 + 1024 + i] = (i % 32) < 16 ? 100 : 156
+    const packed = await synths.packSong(mod)
+    const { go, song } = await start(packed, { raw: true })
+    const r = await go(1)
+    const hz = crossings(r.left, 0.2, 0.8) / 0.6
+    const why = await synths.packSong(new TextEncoder().encode('not a song at all')).catch((e) => e.message)
+    say(packed instanceof Uint8Array && packed.length > 60 && Math.abs(hz - 259) < 4 && song.position.state === 'playing' && /^That could not be packed: /.test(why), `packSong turns a .mod into the packed form (${packed.length} bytes here), which plays the same note; something that is not a song says why`, [packed.length, hz, why])
+  }
   const cmds = commands((s) => { const song = s.playSong('tune.xm', { repeat: false, volume: 0.8, patches: { lead: { preset: 'lead', cutoff: 900 } } }); song.seek(3); song.volume = 0.5; song.pause(); s.stopSong() }, { read: undefined })
   say(same(cmds.map((c) => { const { t, ...rest } = c; return rest }), [{ op: 'song', id: 'g1', do: 'play', repeat: false, vol: 0.8, patches: { lead: { preset: 'lead', cutoff: 900 } }, name: 'tune.xm', url: 'tune.xm' },
     { op: 'song', id: 'g1', do: 'seek', order: 3, row: 0 }, { op: 'song', id: 'g1', do: 'volume', vol: 0.5 }, { op: 'song', id: 'g1', do: 'pause' }, { op: 'song', do: 'stop' }]), 'a song is commands like everything else: play with its address, then seek, volume, pause and stop', cmds)

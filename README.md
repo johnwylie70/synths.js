@@ -284,6 +284,8 @@ In a song of synths' own, an instrument can be a synth instead of a recording, c
 playSong("songs/night_drive.json", { patches: { tune: "bell", wobble: { preset: "bass", cutoff: 300, wobble: 12 } } })
 ```
 
+A `.mod` or `.xm` sounds as its tracker made it sound, rough edges included; `{ raw: false }` smooths the samples and `{ raw: true }` leaves any song rough. `await packSong(bytes)` turns a song file of any kind into the engine's small packed form, which `playSong` plays (an editor keeps that after importing a module).
+
 [`examples/songs/night_drive.json`](examples/songs/night_drive.json) is a short song written this way, and the format is described in [synths-core](https://github.com/johnwylie70/synths-core/blob/main/docs/song-format.md).
 
 ## With pictures.js
