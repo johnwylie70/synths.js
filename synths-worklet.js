@@ -67,7 +67,12 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
   function exec(ops) {
     for (const op of ops) {
       const kind = op[0]
-      if (kind === 'e') add(frameOf(op[1]), op[2], op[3], op[4], op[5], op[6] || 0)
+      if (kind === 'e') {
+        // A note that reaches this thread more than a quarter of a second after it was due is not started:
+        // a page that was stuck would otherwise have all its late notes at once.
+        if (op[2] === NOTE_ON && op[1] != null && op[1] * sampleRate + core.delta < core.time - sampleRate / 4) continue
+        add(frameOf(op[1]), op[2], op[3], op[4], op[5], op[6] || 0)
+      }
       else if (kind === 'sample') loadSample(op)
       else if (kind === 'unsample') x.synths_sample_free(engine, op[1])
       else if (kind === 'tune') {

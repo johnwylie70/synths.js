@@ -1,0 +1,86 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>synths.js</title>
+<style>
+  body { margin: 0; padding: 24px; background: #0e1116; color: #e6e6e6; font: 15px system-ui, sans-serif; }
+  h1 { margin: 0 0 4px; }
+  p { color: #9aa4b2; margin: 0 0 16px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+  button { font: inherit; color: #e6e6e6; background: #1b2230; border: 1px solid #2c3648; border-radius: 8px; padding: 10px 16px; cursor: pointer; }
+  button:hover { background: #243047; }
+  button.on { background: #2f6feb; border-color: #2f6feb; }
+  #scene { height: 360px; border-radius: 8px; overflow: hidden; background: #000; margin-bottom: 16px; display: none; touch-action: none; }
+  pre { background: #151a23; border-radius: 8px; padding: 16px; overflow: auto; font: 13px ui-monospace, Menlo, monospace; line-height: 1.5; margin: 0; }
+  body.full { padding: 0; overflow: hidden; }
+  body.full > :not(#scene) { display: none; }
+  body.full #scene { position: absolute; inset: 0; height: auto; border-radius: 0; margin: 0; }
+</style>
+</head>
+<body>
+<h1>synths.js</h1>
+<p>Press one to hear it. Each is a short file in this folder; its code is shown below.</p>
+<div class="row" id="buttons"></div>
+<div id="scene"></div>
+<pre id="code">// press an example</pre>
+<script type="module">
+// Runs the examples. A plain example is a module that imports synths.js and plays; Catch is a pictures.js scene,
+// which needs pictures.js: from ?pictures=<address>, or from a copy of its repository beside this one.
+import * as synths from "../synths.js"
+
+const EXAMPLES = [
+  ["hello.js", "Hello"], ["game_sounds.js", "Game sounds"], ["my_synth.js", "My synth"], ["drum_beat.js", "Drum beat"],
+  ["samples.js", "Samples"], ["theremin.js", "Theremin"], ["catch_game.js", "Catch"],
+]
+const query = new URLSearchParams(location.search)
+const picturesAt = query.get("pictures") || "../../pictures.js/pictures.js"
+const scene = document.getElementById("scene")
+const code = document.getElementById("code")
+let running = null
+let runs = 0
+
+// For the tests: the player that is making the sound, once there is one.
+window.examplePlayer = () => synths.soundPlayer()
+
+async function run(file) {
+  running?.stop()
+  running = null
+  synths.stopSound()
+  scene.style.display = "none"
+  const source = await (await fetch(file)).text()
+  code.textContent = source
+  for (const b of document.querySelectorAll("#buttons button")) b.classList.toggle("on", b.dataset.file === file)
+  if (/^function draw\(\)/m.test(source)) {
+    scene.style.display = "block"
+    try {
+      const { runScene } = await import(picturesAt)
+      running = runScene(scene, { src: file, keyboard: true, onError: (message, line) => { code.textContent = `line ${line}: ${message}\n\n${source}` } })
+    } catch (e) {
+      code.textContent = `// This one is drawn with pictures.js, which was not found at ${picturesAt}.\n// Put a copy of https://github.com/johnwylie70/pictures.js beside this repository.\n\n${source}`
+    }
+  } else await import(`./${file}?run=${++runs}`)
+}
+
+const buttons = document.getElementById("buttons")
+for (const [file, title] of EXAMPLES) {
+  const b = document.createElement("button")
+  b.textContent = title
+  b.dataset.file = file
+  b.onclick = () => run(file)
+  buttons.append(b)
+}
+const stop = document.createElement("button")
+stop.textContent = "Stop"
+stop.onclick = () => { running?.stop(); running = null; synths.stopSound() }
+buttons.append(stop)
+
+// ?run=hello.js runs one straight away, filling the page (sound still waits for the first tap, as browsers insist).
+if (query.get("run")) {
+  document.body.classList.add("full")
+  run(query.get("run"))
+}
+</script>
+</body>
+</html>

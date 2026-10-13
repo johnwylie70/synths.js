@@ -499,7 +499,12 @@ function makeCore(wasm, sampleRate, post) {
   function exec(ops) {
     for (const op of ops) {
       const kind = op[0]
-      if (kind === 'e') add(frameOf(op[1]), op[2], op[3], op[4], op[5], op[6] || 0)
+      if (kind === 'e') {
+        // A note that reaches this thread more than a quarter of a second after it was due is not started:
+        // a page that was stuck would otherwise have all its late notes at once.
+        if (op[2] === NOTE_ON && op[1] != null && op[1] * sampleRate + core.delta < core.time - sampleRate / 4) continue
+        add(frameOf(op[1]), op[2], op[3], op[4], op[5], op[6] || 0)
+      }
       else if (kind === 'sample') loadSample(op)
       else if (kind === 'unsample') x.synths_sample_free(engine, op[1])
       else if (kind === 'tune') {
@@ -920,10 +925,17 @@ async function decode(bytes, context) {
 
 // --- the real-time player --------------------------------------------------------------------
 
-/** Commands that make a sound once. One that could not be played when it was asked for is dropped, never played late. */
+/** Commands that make a sound once. One that could not be played near the time it was asked for is dropped, never played late. */
 const ONE_SHOTS = new Set(['note', 'sound', 'off', 'voice'])
 /** How late a one-shot may be and still be played, in seconds. */
 const TOO_LATE = 0.25
+/**
+ * How long a one-shot is kept for sound that is not on yet. While the browser waits for a tap: a third of a second,
+ * which is enough for the sound the tap itself asks for. While the engine is only still loading: ten seconds, so the
+ * first line of a program is heard however slow the connection is.
+ */
+const KEPT_FOR_A_TAP = 0.35
+const KEPT_WHILE_LOADING = 10
 
 /**
  * A player: it owns the AudioContext and the engine's worklet, and plays the batches of commands it is sent.
@@ -947,7 +959,7 @@ export function createPlayer(options = {}) {
   const Context = globalThis.AudioContext || globalThis.webkitAudioContext
   const latency = options.latency ?? 0.04
   let held = []
-  let asked = false
+  let saidWaiting = false
   let offset = null
   let lastBatch = 0
   let conductor = null
@@ -956,6 +968,8 @@ export function createPlayer(options = {}) {
   let asks = 0
   let closed = false
   let paused = false
+  let waitingSince = null
+  const local = () => performance.now() / 1000
   const waiting = new Map()
   let ready
   const player = {
@@ -975,6 +989,7 @@ export function createPlayer(options = {}) {
   const state = (s) => {
     if (player.state === s) return
     player.state = s
+    waitingSince = s === 'waiting' ? local() : null
     options.onState?.(s)
   }
   if (!Context) {
@@ -1003,11 +1018,20 @@ export function createPlayer(options = {}) {
       if (engineReady) state('waiting')
       return
     }
+    // What was held is carried out now, each thing as far ahead as it still has to go. A single note or sound
+    // effect that is overdue is let go, because played late it would be wrong: by a third of a second if the wait
+    // was for a tap (so the sound the tap itself asked for is heard), by much longer if only the engine was loading.
+    const here = local()
+    const patience = waitingSince !== null && here - waitingSince > KEPT_FOR_A_TAP ? KEPT_FOR_A_TAP : KEPT_WHILE_LOADING
     state('on')
     const now = context.currentTime + latency
     const waited = held
     held = []
-    for (const c of waited) conductor.run(c, now)
+    for (const { c, asked, ahead } of waited) {
+      const still = ahead - (here - asked)
+      if (ONE_SHOTS.has(c.op) && still < -patience) continue
+      conductor.run(c, now + Math.max(0, still))
+    }
     conductor.flush()
     ready()
   }
@@ -1015,15 +1039,17 @@ export function createPlayer(options = {}) {
   function send(batch) {
     if (closed || player.state === 'failed' || !batch || !Array.isArray(batch.cmds)) return
     if (!live()) {
-      // Not able to play yet. What sets things up is kept in order; a tune or a song waits and starts when the
-      // sound comes on; a single note or sound effect is let go, because played late it would be wrong.
+      // Not able to play yet: everything is kept in order, with when it was asked for (see settle).
+      const at = local()
+      if (held.length > 1000) held = held.filter((h) => !ONE_SHOTS.has(h.c.op) || h.ahead - (at - h.asked) > -KEPT_WHILE_LOADING)
       for (const c of batch.cmds) {
-        if (!c || ONE_SHOTS.has(c.op)) continue
-        if (c.op === 'stop') held = held.filter((h) => !((h.op === 'tune' || h.op === 'song') && (c.id == null || h.id === c.id)))
-        if (c.op !== 'stop' || c.id == null) held.push(c)
+        if (!c) continue
+        if (c.op === 'stop') held = held.filter((h) => !(ONE_SHOTS.has(h.c.op) || h.c.op === 'tune' || h.c.op === 'song') || (c.id != null && h.c.id !== c.id))
+        const ahead = typeof c.t === 'number' && typeof batch.now === 'number' ? c.t - batch.now : 0
+        if (c.op !== 'stop' || c.id == null) held.push({ c, asked: at, ahead })
       }
-      if (!asked && batch.cmds.some((c) => c && (ONE_SHOTS.has(c.op) || c.op === 'tune' || c.op === 'song'))) {
-        asked = true
+      if (!saidWaiting && batch.cmds.some((c) => c && (ONE_SHOTS.has(c.op) || c.op === 'tune' || c.op === 'song'))) {
+        saidWaiting = true
         setTimeout(() => { if (!closed && !paused && context.state !== 'running' && player.state !== 'failed') tell('sound is waiting for a tap, a click or a key press. Browsers keep a page silent until the person using it has touched it.', 'info') }, 400)
       }
       return
@@ -1098,7 +1124,7 @@ export function createPlayer(options = {}) {
       // THE FALLBACK. With no audio worklet (a page that is not served securely has none) the same engine runs on
       // the page's own thread through a ScriptProcessorNode. It is the same sound, but a busy page can make it crackle.
       if (options.fallback === false || !context.createScriptProcessor) throw new Error(context.audioWorklet ? 'the audio worklet could not be loaded' : 'this page has no audio worklet: it needs an https address, or localhost')
-      if (options.fallback !== 'always') tell('this page cannot run sound on its own thread (that needs an https address, or localhost), so the sound is made on the page\'s thread instead. It is the same sound, but it may crackle when the page is busy.', 'info')
+      if (options.fallback !== 'always') tell(`this page cannot run sound on its own thread (${context.audioWorklet ? `the audio worklet could not be loaded: ${player.workletProblem}` : 'that needs an https address, or localhost'}), so the sound is made on the page's thread instead. It is the same sound, but it may crackle when the page is busy.`, 'info')
       core = makeCore(wasm instanceof WebAssembly.Module ? wasm : await WebAssembly.compile(wasm), context.sampleRate, onMessage)
       const node = player.node = context.createScriptProcessor(1024, 0, 2)
       node.onaudioprocess = (e) => {
