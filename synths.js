@@ -2208,11 +2208,28 @@ const FALLBACK_MARGIN = 0.008
 const GROW_AFTER = 4          // this many under-runs
 const GROW_WITHIN = 10        // within this many seconds
 const GROW_LIMIT = 0.1        // and never to a buffer longer than this, in seconds
-const fallbackAuto = (asked) => asked === undefined || asked === null || asked === 'auto'
-function fallbackSize(asked, sampleRate) {
-  const want = fallbackAuto(asked) || !(asked > 0) ? 0.04 * sampleRate : asked
+const BUFFER_WORDS = { small: 1024, medium: 2048, large: 4096 }
+/**
+ * A sound buffer as it may be asked for: "auto", a word (small, medium, large) or a number of frames, which is
+ * brought to the nearest power of two from 256 to 16384. It gives { size: 'auto' | frames, exact } or null.
+ */
+function bufferSize(asked) {
+  if (asked === undefined || asked === null) return { size: 'auto', exact: true }
+  if (typeof asked === 'string') {
+    const word = asked.toLowerCase().trim()
+    if (word === 'auto') return { size: 'auto', exact: true }
+    if (BUFFER_WORDS[word]) return { size: BUFFER_WORDS[word], exact: true }
+    asked = Number(word)
+  }
+  if (typeof asked !== 'number' || !(asked > 0) || !Number.isFinite(asked)) return null
+  const size = 2 ** clamp(Math.round(Math.log2(asked)), 8, 14)
+  return { size, exact: size === asked }
+}
+// "auto" on the fallback is the power of two that lasts at least 40 ms.
+function fallbackSize(want, sampleRate) {
+  if (want !== 'auto') return want
   let size = 256
-  while (size < want && size < 16384) size *= 2
+  while (size < 0.04 * sampleRate && size < 16384) size *= 2
   return size
 }
 
@@ -2223,6 +2240,7 @@ function fallbackSize(asked, sampleRate) {
  *
  * @param {{ wasm?: ArrayBuffer | Uint8Array | WebAssembly.Module | string | Promise<any>, worklet?: 'auto' | 'blob' | 'file' | string,
  *           latency?: number, context?: AudioContext, destination?: AudioNode, fallback?: boolean | 'always', fallbackBuffer?: 'auto' | number,
+ *           buffer?: 'auto' | 'small' | 'medium' | 'large' | number,
  *           onState?: (state: string) => void, microphone?: any, save?: (file: { name: string, bytes: Uint8Array, type: string }) => void }} options
  *   `wasm` is the engine, as bytes (for a page that may not fetch it) or an address; without it, `synths_core.wasm` beside this file.
  *   `worklet` is how the worklet's module is loaded: 'blob' from the text inside this file (no second file, no fetch), 'file'
@@ -2233,6 +2251,8 @@ function fallbackSize(asked, sampleRate) {
  *   `fallbackBuffer` is how many frames that way makes at a time: a power of two from 256 to 16384, or 'auto' (the default:
  *   2048 at 44.1 and 48 kHz, doubled once if the page keeps being too busy for it). Bigger rides over a busier page, and
  *   is heard later: everything is scheduled two buffers and a little ahead unless `latency` is given.
+ *   `buffer` is what a program's own setSoundBuffer() asked for before the player was made: the same on the fallback, and
+ *   on the worklet (which always makes 128 frames at a time) how far ahead everything is scheduled, that many frames.
  *   `microphone` is where the microphone comes from when it is not the browser's to ask for: a MediaStream, or
  *   { open({ sampleRate, raw, constraints, push }), close() }, or false for none (docs/microphone.md is the contract).
  *   `save` is given a file that saveSound made, in place of the browser being asked to download it.
@@ -2249,6 +2269,11 @@ function fallbackSize(asked, sampleRate) {
 export function createPlayer(options = {}) {
   const Context = globalThis.AudioContext || globalThis.webkitAudioContext
   let latency = options.latency ?? 0.04
+  // THE BUFFER a program or a host asked for: 'auto' or frames. `called` once a program's own setSoundBuffer has
+  // said so, which then wins over a host's `latency` too.
+  let bufferWant = (bufferSize(options.buffer ?? options.fallbackBuffer) || { size: 'auto' }).size
+  let bufferCalled = options.buffer != null
+  const bufferScopes = new Set()
   let held = []
   let saidWaiting = false
   /** For each sender's clock (a batch may name its own): [how far it is from the sound card's, when that was last seen]. */
@@ -2269,6 +2294,14 @@ export function createPlayer(options = {}) {
     state: 'loading', kind: null, context: null, node: null,
     ready: new Promise((yes) => { ready = yes }),
     send, unlock, close, read, songPosition,
+    /**
+     * How much sound is made at a time: setBuffer(4096), or "small", "medium", "large", "auto". On the page's thread
+     * (the fallback) it is the buffer itself: bigger rides over a busier page and is heard later. On the audio thread
+     * the buffer is always 128 frames, and this sets how far ahead everything is scheduled instead. It gives buffer().
+     */
+    setBuffer(size) { setBuffer(size); return bufferNow() },
+    /** { frames, delay: ms from a key to its note, thread: 'audio' | 'page' | null while loading, underruns, setting: 'auto' | frames }. */
+    buffer: () => bufferNow(),
     /** What the player has to say to one sender, as lists of plain objects: a recording is over, a file is saved, the microphone is on or is not. It gives back a function that stops it. */
     onSoundEvents: (listener, scope) => told.on(listener, scope),
     /** What MIDI devices send, and what the desk has to say, for one sender: onMidi((events) => { ... }, scope). It gives back a function that stops it. */
@@ -2306,7 +2339,11 @@ export function createPlayer(options = {}) {
     state('failed')
     return player
   }
-  const context = player.context = options.context || new Context({ latencyHint: 'interactive' })
+  // A big buffer asked for before there is a sound card is asked of the sound card too, where the audio thread
+  // will make the sound: a sound card that takes more at a time leaves a ScriptProcessorNode's smaller buffers
+  // late every time (measured in Chromium), so the fallback is never made smaller than what was asked of it.
+  const hinted = bufferCalled && bufferWant > 2048 && options.fallback !== 'always' && globalThis.isSecureContext !== false && typeof AudioWorkletNode !== 'undefined' ? bufferWant : 0
+  const context = player.context = options.context || new Context({ latencyHint: hinted ? hinted / 48000 : 'interactive' })
   let engineReady = false
   const live = () => engineReady && context.state === 'running'
   let fallbackBegun = false
@@ -2446,6 +2483,16 @@ export function createPlayer(options = {}) {
     pauses(batch)
     // The microphone is asked for as soon as a program wants it, even while the sound itself is waiting for a tap.
     for (const c of batch.cmds) if (c && c.op === 'mic' && c.do !== 'close') mic.open(c, batch.scope)
+    // The buffer is the player's own affair, and is set at once, loaded or not.
+    if (batch.cmds.some((c) => c && c.op === 'buffer')) {
+      for (const c of batch.cmds) {
+        if (!c || c.op !== 'buffer') continue
+        bufferScopes.add(batch.scope)
+        if (c.size !== undefined) setBuffer(c.size)
+      }
+      batch = { ...batch, cmds: batch.cmds.filter((c) => !c || c.op !== 'buffer') }
+      told.emit(batch.scope, [{ type: 'buffer', ...bufferNow() }])
+    }
     if (!live()) {
       // Not able to play yet: everything is kept in order, with when it was asked for (see settle).
       const at = local()
@@ -2561,6 +2608,41 @@ export function createPlayer(options = {}) {
     } else if (m.type === 'problem') tell(m.what === 'record-memory' ? 'there was not enough memory for a recording, so it will be empty.' : 'there was not enough memory for a sample, so it will be silent.')
   }
 
+  // THE BUFFER, as a program sets it (see setSoundBuffer). It may come before the engine is there, and is then
+  // how the player starts.
+  function bufferNow() {
+    return { frames: processor ? player.fallback.buffer : port ? 128 : 0, delay: Math.round(latency * 1000), thread: processor ? 'page' : port ? 'audio' : null, underruns: player.fallback ? player.fallback.underruns : 0, setting: bufferWant }
+  }
+  function sayBuffer() { if (bufferScopes.size) { const now = { type: 'buffer', ...bufferNow() }; for (const scope of bufferScopes) told.emit(scope, [now]) } }
+  function setBuffer(asked) {
+    const got = bufferSize(asked)
+    if (!got) return tell(`a sound buffer is "small", "medium", "large", "auto" or a number of frames from 256 to 16384, not ${shown(asked)}, so it stays as it was.`)
+    if (!got.exact) tell(`a sound buffer is a power of two from 256 to 16384, so ${shown(asked)} is taken as ${got.size}.`)
+    bufferWant = got.size
+    bufferCalled = true
+    if (processor) {
+      lateAt = []
+      const size = Math.max(hinted, fallbackSize(bufferWant, context.sampleRate))
+      if (size !== player.fallback.buffer) changeFallbackNode(size)
+    } else if (port) workletLatency(true)
+  }
+  // On the audio thread the engine always makes 128 frames at a time, so there the buffer is how far ahead
+  // everything is asked for: that many frames, or with "auto" the player's own latency.
+  function workletLatency(say) {
+    if (!bufferCalled) return
+    latency = bufferWant === 'auto' ? options.latency ?? 0.04 : clamp(bufferWant / context.sampleRate, 0.005, 0.4)
+    if (say && bufferWant !== 'auto') tell(`sound is made on the audio thread here, always 128 frames at a time, so a sound buffer of ${bufferWant} sets how far ahead everything is asked for instead: ${Math.round(latency * 1000)} ms. (On a page with no https address it is the buffer itself.)`, 'info')
+  }
+  // One node for another with no click: the sound is faded out, the node changed, and the sound faded in again
+  // with the new node's first buffer. What was scheduled is that fraction of a second later.
+  let changing = null
+  function changeFallbackNode(size) {
+    const fade = player.node.gain
+    if (changing === null) { try { fade.setTargetAtTime(0, context.currentTime, 0.004) } catch (e) { /* no fades here */ } }
+    else clearTimeout(changing)
+    changing = setTimeout(() => { changing = null; if (!closed) makeFallbackNode(size, true) }, 30)
+  }
+
   // THE FALLBACK'S NODE. A ScriptProcessorNode asks the page's thread for one buffer at a time, and the sound card
   // plays the one before meanwhile: when the page is busy for longer than a buffer lasts, the answer comes too
   // late and there is a click. So the buffer is long enough to ride over a busy moment (about 43 ms; 21 ms was
@@ -2569,7 +2651,7 @@ export function createPlayer(options = {}) {
   // doubled, once, and never made smaller again: more would be heard as a slow keyboard.
   let processor = null
   let lateAt = []
-  function makeFallbackNode(size) {
+  function makeFallbackNode(size, faded) {
     if (processor) { processor.onaudioprocess = null; try { processor.disconnect() } catch (e) { /* already gone */ } }
     const node = processor = context.createScriptProcessor(size, 1, 2)
     const length = size / context.sampleRate
@@ -2577,17 +2659,23 @@ export function createPlayer(options = {}) {
     // time than is true, though no buffer is ever left out: the buffers are a buffer apart, and the earliest any
     // has said is where they stand. The engine's clock goes by that, so a busy moment that was ridden over does
     // not move the notes inside it; how much later than that a callback says is how late it came.
-    let count = 0, first = null, wasLate = false, off = 0
+    let count = 0, first = null, wasLate = false, off = 0, early = 0, low = 0
     node.onaudioprocess = (e) => {
       if (node !== processor) return
       const out = e.outputBuffer
       const said = Math.round(e.playbackTime * context.sampleRate) - count * size
       // Late every time for a second or more is not lateness: the clock has moved (a browser that leaves buffers out).
-      if (first === null || said < first || ++off > 1 / length) first = said
+      // One that says an earlier time alone is not believed (among those that pile up behind a busy moment, some
+      // are given a time that has already gone by); three in a row are, by the latest of them.
+      if (said >= first) early = 0
+      else if (first !== null) { low = early++ ? Math.max(low, said) : said }
+      if (first === null || ++off > 1 / length) first = said
+      else if (early >= 3) { first = low; early = 0 }
       const late = said - first
       if (late <= size / 4) off = 0
       fallbackBegun = true
       core.delta = core.time - (first + count * size)
+      if (faded && !count) { try { const fade = player.node.gain; fade.setValueAtTime(0, e.playbackTime + length); fade.linearRampToValueAtTime(1, e.playbackTime + length + 0.015) } catch (err) { player.node.gain.value = 1 } }
       count++
       core.render(out.getChannelData(0), out.getChannelData(1), out.length, 0, micLive ? e.inputBuffer.getChannelData(0) : null)
       // More than a buffer late, the sound card has gone on without it. The buffers that pile up behind one busy
@@ -2595,14 +2683,18 @@ export function createPlayer(options = {}) {
       if (late > size && !wasLate) underrun(e.playbackTime, size)
       wasLate = late > size
     }
+    // Silent from now until the new node's second buffer: the first may begin a little before or after the time it says.
+    if (faded) { try { const fade = player.node.gain; fade.cancelScheduledValues(0); fade.setValueAtTime(0, context.currentTime) } catch (err) { /* no fades here */ } }
     inlet.connect(node)
     node.connect(player.node)
     player.fallback.buffer = size
-    if (options.latency === undefined) latency = 2 * length + FALLBACK_MARGIN
+    if (options.latency === undefined || bufferCalled) latency = 2 * length + FALLBACK_MARGIN
+    sayBuffer()
   }
   function underrun(at, size) {
     player.fallback.underruns++
-    if (!fallbackAuto(options.fallbackBuffer)) return
+    sayBuffer()
+    if (bufferWant !== 'auto') return
     lateAt = lateAt.filter((t) => at - t < GROW_WITHIN)
     lateAt.push(at)
     if (lateAt.length < GROW_AFTER || size * 2 / context.sampleRate > GROW_LIMIT) return
@@ -2643,6 +2735,8 @@ export function createPlayer(options = {}) {
       port = node.port
       node.connect(destination)
       player.kind = 'worklet'
+      workletLatency(true)
+      sayBuffer()
     } else {
       // THE FALLBACK. With no audio worklet (a page that is not served securely has none) the same engine runs on
       // the page's own thread through a ScriptProcessorNode. It is the same sound, later, and a page that is busy for
@@ -2655,7 +2749,7 @@ export function createPlayer(options = {}) {
       player.node.connect(destination)
       player.kind = 'fallback'
       player.fallback = { buffer: 0, underruns: 0, reason: context.audioWorklet ? 'worklet' : 'insecure' }
-      makeFallbackNode(fallbackSize(options.fallbackBuffer, context.sampleRate))
+      makeFallbackNode(Math.max(hinted, fallbackSize(bufferWant, context.sampleRate)))
       if (options.fallback !== 'always') tell(`this page cannot run sound on its own thread (${context.audioWorklet ? `the audio worklet could not be loaded: ${player.workletProblem}` : 'that needs an https address, or localhost'}), so the sound is made on the page's thread instead, ${Math.round(player.fallback.buffer * 1000 / context.sampleRate)} ms at a time. It is the same sound, but a key is heard about ${Math.round(latency * 1000)} ms after it is pressed, and it may stutter or click when the page is busy for longer than that. An https address has neither.`, 'info')
     }
     engineReady = true
@@ -2744,6 +2838,7 @@ export async function createOfflinePlayer(options = {}) {
       for (const c of batch.cmds) {
         if (!c) continue
         const at = (typeof c.t === 'number' ? c.t : typeof batch.now === 'number' ? batch.now : start) - start
+        if (c.op === 'buffer') continue
         if (mic.take(c, batch.scope, at)) conductor.run(c, at, batch.scope)
       }
       conductor.flush()
@@ -2855,6 +2950,7 @@ export function createSound(options = {}) {
   let beatZero = clock()
   let main = null
   let closed = false
+  let bufferSet, bufferSaid = null, bufferAsked = false
 
   function flush() {
     waiting = false
@@ -2864,9 +2960,11 @@ export function createSound(options = {}) {
       // ONE PLAYER FOR THE PAGE. Every createSound() on a page that is not given a transport, or an AudioContext
       // of its own, shares one player (the options of the first make it), each in a scope of its own: so ten
       // scenes on a page are one sound card and one engine, and each still stops, mutes and pauses alone.
-      if (options.context || options.destination || options.share === false) transport = player = createPlayer(options)
+      // A buffer the program set before its first sound is how the player starts.
+      const first = bufferSet === undefined ? options : { ...options, buffer: bufferSet }
+      if (options.context || options.destination || options.share === false) transport = player = createPlayer(first)
       else {
-        if (!shared || shared.player.state === 'closed' || shared.player.state === 'failed') shared = { player: createPlayer(options), users: 0, made: 0 }
+        if (!shared || shared.player.state === 'closed' || shared.player.state === 'failed') shared = { player: createPlayer(first), users: 0, made: 0 }
         shared.users++
         mine = shared
         scope = options.scope || 'page' + ++shared.made
@@ -3547,6 +3645,7 @@ export function createSound(options = {}) {
       if (!e) continue
       if (e.type === 'recorded') takes.get(e.id)?._finish(e)
       else if (e.type === 'saved') { saves.get(e.ask)?.(e.bytes); saves.delete(e.ask) } else if (e.type === 'microphone') micSynth?._said(e)
+      else if (e.type === 'buffer') bufferSaid = { frames: e.frames, delay: e.delay, thread: e.thread, underruns: e.underruns, setting: e.setting }
     }
   }
 
@@ -3961,6 +4060,34 @@ export function createSound(options = {}) {
     beats(n = 1) { return (typeof n === 'string' ? beatsLong(n, 'beats') : n) * 60 / tempo },
     /** Which beat it is now (a fraction between beats). */
     beat() { return (clock() - beatZero) * tempo / 60 },
+    /**
+     * How much sound is made at a time: setSoundBuffer("large") or setSoundBuffer(4096) for fewer clicks on a slow
+     * device, "small" (1024) for a keyboard that feels late, "medium" (2048), and "auto" to let the library choose
+     * and change it again. A number is frames: a power of two from 256 to 16384. It matters on a page with no https
+     * address, where sound is made on the page's thread; on the audio thread it sets how far ahead everything is
+     * scheduled instead. It gives what soundBuffer() does.
+     */
+    setSoundBuffer(size = 'auto') {
+      const got = bufferSize(size)
+      if (!got) throw new Error(`setSoundBuffer needs "small", "medium", "large", "auto" or a number of frames from 256 to 16384, as in setSoundBuffer("large"), not ${shown(size)}`)
+      if (!got.exact) tell(`a sound buffer is a power of two from 256 to 16384, so ${shown(size)} is taken as ${got.size}.`)
+      bufferSet = got.size
+      // With no player yet it is kept, and is how the player starts; a player elsewhere is sent it.
+      if (player) player.setBuffer(got.size)
+      else if (transport) { hearBack(); bufferAsked = true; command({ op: 'buffer', size: got.size, t: clock() }) }
+      return api.soundBuffer()
+    },
+    /**
+     * The buffer as it is: { frames, delay, thread, underruns, setting }. `delay` is the milliseconds from a key to
+     * its note, `thread` is "audio" (the audio thread: nothing to worry about), "page" (the page's thread, which a
+     * busy page makes click) or null before the first sound, `underruns` how many times the sound came too late,
+     * and `setting` what was asked for ("auto" or frames).
+     */
+    soundBuffer() {
+      if (player) return player.buffer()
+      if (transport && !bufferAsked) { hearBack(); bufferAsked = true; command({ op: 'buffer', t: clock() }) }
+      return bufferSaid ? { ...bufferSaid } : { frames: 0, delay: 0, thread: null, underruns: 0, setting: bufferSet === undefined ? 'auto' : bufferSet }
+    },
     /** The sound clock now, in seconds: the time that { at } is read against. */
     soundTime() { return clock() },
     soundNames, synthNames, settingNames,
@@ -4023,6 +4150,8 @@ export function describe() {
     choiceWords: CHOICE_WORDS, plain: PLAIN, synths: PRESETS, sounds: SOUNDS, chords: CHORDS, orders: ORDERS, macroWaves: MACRO_WAVES, lengths: LENGTHS, lengthLetters: LENGTH_LETTERS, midi: MIDI,
     // The voice changers (each a list of settings; putting one on first puts back what the last changed), and the microphone.
     voices: VOICES,
+    // The sound buffer: the words it may be asked for by, the frames it may be, and what is said back.
+    buffer: { functions: ['setSoundBuffer', 'soundBuffer'], words: { ...BUFFER_WORDS, auto: 'auto' }, least: 256, most: 16384, event: 'buffer', reads: ['frames', 'delay', 'thread', 'underruns', 'setting'], threads: ['audio', 'page'] },
     // What a `song` command may do.
     song: { does: ['play', 'resume', 'pause', 'stop', 'seek', 'volume', 'repeat', 'mute', 'solo', 'loopPattern', 'replace'], functions: ['stop', 'pause', 'resume', 'seek', 'mute', 'unmute', 'solo', 'loopPattern', 'replace'] },
     microphone: {
@@ -4066,6 +4195,8 @@ export const setTempo = (bpm) => mine().setTempo(bpm)
 export const beats = (n) => mine().beats(n)
 export const beat = () => mine().beat()
 export const soundTime = () => mine().soundTime()
+export const setSoundBuffer = (size) => mine().setSoundBuffer(size)
+export const soundBuffer = () => mine().soundBuffer()
 // MIDI: a keyboard, knobs and other synths (see synths-midi.js, and lead.playFromMidi(), lead.learn("cutoff")).
 export const onMidi = (fn) => mine().onMidi(fn)
 export const onMidiNote = (fn) => mine().onMidiNote(fn)
@@ -4101,7 +4232,7 @@ export const soundPlayer = () => mine().player
 export {
   playSound as play_sound, playNote as play_note, playNotes as play_notes, makeSynth as make_synth, loadSample as load_sample,
   playSong as play_song, stopSong as stop_song, stopSound as stop_sound, setVolume as set_volume, muteSound as mute_sound,
-  unmuteSound as unmute_sound, setEffects as set_effects, setTempo as set_tempo, soundTime as sound_time,
+  unmuteSound as unmute_sound, setEffects as set_effects, setTempo as set_tempo, soundTime as sound_time, setSoundBuffer as set_sound_buffer, soundBuffer as sound_buffer,
   soundNames as sound_names, synthNames as synth_names, settingNames as setting_names, noteNumber as note_number,
   createSound as create_sound, renderSound as render_sound, packSong as pack_song, playArp as play_arp, startArp as start_arp, mainSynth as main_synth,
   soundOutput as sound_output, chordNotes as chord_notes, startLines as start_lines, loopNotes as loop_notes, lengthBeats as length_beats,

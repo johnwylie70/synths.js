@@ -792,6 +792,104 @@ async function busyPage(name, browser) {
   say(got.quiet.buffer === 2048 && got.quiet.underruns === 0 && got.grown.buffer === 4096 && got.after.buffer === 4096 && got.after.underruns > got.quiet.underruns && grew.length === 1, name,
     `a quiet page keeps 2048 frames and counts no under-run; kept busy for 120 ms four times a second, the buffer is doubled to 4096 after ${got.grown.underruns} under-runs, never further, and the console says so once`, { got, said })
   say(got.gaps.length === 4 && got.gaps.every((g) => Math.abs(g - got.rate / 10) <= 1), name, 'and what is scheduled after the change is still exact to the sample, heard through the same player.node', got)
+
+  // --- setSoundBuffer in a program's own code: before the first sound, while a note plays, and "auto" again
+  await fresh(page)
+  said.length = 0
+  got = await page.evaluate(async () => {
+    const { createSound } = await import('/synths.js')
+    const s = createSound({ fallback: 'always', share: false, fallbackBuffer: 2048 })
+    const before = s.setSoundBuffer('large')
+    const synth = s.makeSynth(T.CLICK)
+    s.flush()
+    await T.on(() => s.player)
+    const rate = s.player.context.sampleRate
+    const tap = await T.tap(s.player)
+    await T.wait(300)
+    // How long after a key its note is heard, by the sound card's clock.
+    const keys = async () => {
+      tap.forget()
+      const pressed = []
+      for (let i = 0; i < 6; i++) { await T.wait(250 + Math.random() * 100); pressed.push(s.player.context.currentTime); synth.play('A4', 0.03); s.flush() }
+      await T.wait(500)
+      const heard = await tap.samples()
+      const d = T.onsets(heard).map((f, i) => ((heard.first + f) / rate - pressed[i]) * 1000)
+      return d.length === 6 ? [Math.min(...d), Math.max(...d)] : d
+    }
+    const large = { is: s.soundBuffer(), keys: await keys() }
+    // Changed while a note sounds: the note goes on, and the change itself is not a click.
+    const hold = synth.start('A4')
+    await T.wait(600)
+    tap.forget()
+    const rounded = s.setSoundBuffer(1000)
+    await T.wait(900)
+    const change = await tap.samples()
+    let loud = 0
+    for (let i = change.length - 4096; i < change.length; i++) loud = Math.max(loud, Math.abs(change[i]))
+    const breaks = T.breaks(change, 440, rate)
+    // Set by hand it is left alone, however busy the page is.
+    let stop = T.busy(120)
+    await T.wait(2500)
+    stop()
+    const pinned = s.soundBuffer()
+    hold.stop()
+    await T.wait(300)
+    const small = { is: s.soundBuffer(), keys: await keys() }
+    // "auto" chooses again, and adapts again.
+    const auto = s.setSoundBuffer('auto')
+    await T.wait(400)
+    const chosen = s.soundBuffer()
+    stop = T.busy(120)
+    await T.wait(3000)
+    stop()
+    let threw = ''
+    try { s.setSoundBuffer('enormous') } catch (e) { threw = e.message }
+    return { rate, before, large, rounded, breaks, loud, pinned, small, auto, chosen, grown: s.soundBuffer(), threw, snake: s.set_sound_buffer === s.setSoundBuffer && s.sound_buffer === s.soundBuffer }
+  })
+  const two = (size) => 2 * size / got.rate * 1000 + 8
+  say(got.before.thread === null && got.before.setting === 4096 && got.large.is.frames === 4096 && got.large.is.thread === 'page' && got.large.is.delay === Math.round(two(4096)) && Math.abs(got.large.keys[0] - two(4096)) < 25 && Math.abs(got.large.keys[1] - two(4096)) < 25, name,
+    `setSoundBuffer("large") before the first sound is how the fallback starts, whatever the host's option said: 4096 frames on the page's thread, and a key is heard ${Math.round(got.large.keys[0])} to ${Math.round(got.large.keys[1])} ms later (soundBuffer() says ${got.large.is.delay})`, got)
+  say(got.small.is.frames === 1024 && got.small.is.setting === 1024 && Math.abs(got.small.keys[0] - two(1024)) < 12 && Math.abs(got.small.keys[1] - two(1024)) < 12 && got.breaks === 0 && got.loud > 0.2 && said.filter((t) => /a sound buffer is a power of two from 256 to 16384, so 1000 is taken as 1024/.test(t)).length === 1, name,
+    `setSoundBuffer(1000) while a note sounds is taken as 1024 with one message, the note goes on with no break at the change, and a key is then heard ${Math.round(got.small.keys[0])} to ${Math.round(got.small.keys[1])} ms later`, { got, said })
+  say(got.pinned.frames === 1024 && got.pinned.underruns > 3 && got.auto.setting === 'auto' && got.chosen.frames === 2048 && got.grown.frames === 4096 && got.grown.underruns > got.pinned.underruns && /setSoundBuffer needs "small", "medium", "large", "auto" or a number of frames/.test(got.threw) && got.snake, name,
+    `a buffer set by hand is left alone on a busy page (${got.pinned.underruns} under-runs counted, still 1024); "auto" chooses 2048 again and doubles it again when the page stays busy; a word that is not one is refused in plain words`, got)
+
+  // --- on the audio thread the buffer cannot change, and the program is told what was done instead
+  await fresh(page)
+  said.length = 0
+  got = await page.evaluate(async () => {
+    const { createSound } = await import('/synths.js')
+    const s = createSound({ share: false })
+    const synth = s.makeSynth(T.CLICK)
+    s.flush()
+    await T.on(() => s.player)
+    const rate = s.player.context.sampleRate
+    const usual = s.soundBuffer()
+    const set = s.setSoundBuffer(4096)
+    s.setSoundBuffer(4096)
+    const tap = await T.tap(s.player)
+    await T.wait(200)
+    const pressed = s.player.context.currentTime
+    synth.play('A4', 0.03)
+    s.flush()
+    await T.wait(500)
+    const heard = await tap.samples()
+    const auto = s.setSoundBuffer('auto')
+    // The same through a transport, as a scene in a frame or Python sends it: a command there, and an event back.
+    const { createPlayer } = await import('/synths.js')
+    const player = createPlayer({ fallback: 'always' })
+    const far = createSound({ sound: { send: (batch) => player.send(JSON.parse(JSON.stringify(batch))), onSoundEvents: (listener, scope) => player.onSoundEvents(listener, scope) } })
+    const sent = far.setSoundBuffer('large')
+    far.makeSynth(T.CLICK).play('A4', 0.1)
+    far.flush()
+    await T.on(() => player)
+    await T.wait(200)
+    return { rate, kind: s.player.kind, usual, set, auto, key: ((heard.first + T.onsets(heard)[0]) / rate - pressed) * 1000, sent, far: far.soundBuffer(), fallback: player.fallback.buffer }
+  })
+  say(got.kind === 'worklet' && got.usual.thread === 'audio' && got.usual.frames === 128 && got.usual.delay === 40 && got.set.frames === 128 && got.set.delay === Math.round(4096000 / got.rate) && Math.abs(got.key - got.set.delay) < 8 && got.auto.delay === 40
+    && said.filter((t) => /sound is made on the audio thread here, always 128 frames at a time, so a sound buffer of 4096 sets how far ahead everything is asked for instead: \d+ ms/.test(t)).length === 1, name,
+    `on the audio thread setSoundBuffer(4096) leaves the 128 frames alone and sets how far ahead everything is asked for (${got.set.delay} ms, and a key is heard ${Math.round(got.key)} ms later), which the console says once and soundBuffer() gives; "auto" is 40 ms again`, { got, said })
+  say(got.far.frames === 4096 && got.far.thread === 'page' && got.far.setting === 4096 && got.fallback === 4096, name, 'sent as a command to a player elsewhere, the buffer is set there and what it is comes back as an event for soundBuffer()', got)
   await context.close()
 }
 

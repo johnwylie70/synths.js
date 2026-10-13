@@ -416,6 +416,37 @@ way it was set, and that is what every synth of its reads back.
 `{ op: "master", pause: true }` silences the sender's own sound with everything kept as it is (a scene that is
 out of view), and `pause: false` brings it back. When every scope of a player is paused, the sound card rests.
 
+### `buffer`
+
+```js
+{ op: "buffer", size: 4096 }       // frames: a power of two from 256 to 16384 (anything else is taken as the nearest)
+{ op: "buffer", size: "large" }    // "small" 1024, "medium" 2048, "large" 4096, "auto"
+{ op: "buffer" }                   // only ask what it is
+```
+
+How much sound is made at a time (`setSoundBuffer`, `soundBuffer`). It belongs to the player, not to a scope: the
+last one to say so wins, and a program's command wins over the player's `fallbackBuffer` and `latency` options.
+It is carried out as soon as it arrives, loaded or not, and waiting for a tap or not.
+
+- **On the fallback** (the page's thread) it is the ScriptProcessorNode's buffer. The node is changed with the
+  sound faded out and in again; everything else goes on (notes, tunes, songs, the microphone), a fraction of a
+  second later. A size switches the doubling off; `"auto"` chooses again (2048 at 44.1 and 48 kHz) and may double again.
+- **On the worklet** the engine always makes 128 frames at a time. The size is then how far ahead everything is
+  scheduled, as frames (`size / sampleRate` seconds, from 0.005 to 0.4), and `"auto"` is the player's `latency`.
+  The player's console says so once.
+
+Every such command is answered with an event to its sender's scope (through `onSoundEvents`, like the
+microphone's), and again whenever it changes or a buffer comes too late:
+
+```js
+{ type: "buffer", frames: 4096, delay: 179, thread: "page", underruns: 0, setting: 4096 }
+```
+
+`frames` is the buffer (128 on the worklet, 0 while loading), `delay` the milliseconds everything is scheduled
+ahead (a key to its note), `thread` `"audio"`, `"page"` or `null` while loading, `underruns` how many times a
+buffer came too late, and `setting` what was asked for (`"auto"` or frames). `player.setBuffer(size)` and
+`player.buffer()` are the same for a host. An offline player passes the command by.
+
 ### `close`
 
 ```js
@@ -574,6 +605,7 @@ player to itself. On each: `pause()`, `resume()` and `close()`.
 | `latency` | seconds everything is played ahead (0.04; on the fallback, two of its buffers and 0.008) |
 | `context`, `destination` | an `AudioContext` and a node of your own to play into |
 | `fallback` | `false` to refuse running the engine on the page's thread when there is no AudioWorklet; `"always"` to insist on it |
+| `buffer` | what a program's `setSoundBuffer` asked for before the player was made (see [`buffer`](#buffer)): frames, `"small"`, `"medium"`, `"large"` or `"auto"`. `createSound` passes it |
 | `fallbackBuffer` | the frames the fallback makes at a time: a power of two from 256 to 16384, or `"auto"` (the default: 2048 at 44.1 and 48 kHz, doubled once if the page keeps being too busy). See below |
 | `onState` | called with `"waiting"`, `"on"` or `"failed"` |
 | `microphone` | where the microphone comes from when it is not the browser's to ask for: see [microphone.md](microphone.md). `false` for none |

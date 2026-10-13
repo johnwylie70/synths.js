@@ -939,5 +939,33 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
   say(threw === null && state === 'failed' && said.filter((t) => /no Web Audio/.test(t)).length <= 1, 'createSound() with nothing given reaches for the page\'s shared player on its first flush, a second sound joins it, and both close: nothing throws where there is no sound card', [threw, state, said])
 }
 
+// --- the sound buffer: a command like the rest, with the words and the rounding
+{
+  const said = []
+  const keep = console.warn
+  console.warn = (...a) => said.push(a.join(' '))
+  const sent = []
+  const s = createSound({ batch: 'manual', sound: { send: (batch) => sent.push(...batch.cmds) } })
+  const first = s.soundBuffer()
+  s.flush()
+  s.setSoundBuffer('large')
+  s.set_sound_buffer(3000)
+  s.setSoundBuffer(3000)
+  s.setSoundBuffer('auto')
+  s.flush()
+  s.receiveSoundEvents([{ type: 'buffer', frames: 2048, delay: 93, thread: 'page', underruns: 2, setting: 'auto' }])
+  const threw = [thrown(() => s.setSoundBuffer('huge')), thrown(() => s.setSoundBuffer(-4)), thrown(() => s.setSoundBuffer({}))]
+  console.warn = keep
+  const offline = await createOfflinePlayer()
+  const quiet = thrown(() => { offline.send({ cmds: [{ op: 'buffer', size: 4096 }] }) })
+  const d = describe().buffer
+  say(same(first, { frames: 0, delay: 0, thread: null, underruns: 0, setting: 'auto' }) && same(sent.map((c) => [c.op, c.size]), [['buffer', undefined], ['buffer', 4096], ['buffer', 4096], ['buffer', 4096], ['buffer', 'auto']])
+    && said.filter((t) => /a sound buffer is a power of two from 256 to 16384, so 3000 is taken as 4096/.test(t)).length === 1 && same(s.soundBuffer(), { frames: 2048, delay: 93, thread: 'page', underruns: 2, setting: 'auto' })
+    && threw.every((t) => /setSoundBuffer needs "small", "medium", "large", "auto" or a number of frames from 256 to 16384/.test(t)) && quiet === null
+    && same(d.functions, ['setSoundBuffer', 'soundBuffer']) && d.words.small === 1024 && d.words.medium === 2048 && d.words.large === 4096 && d.words.auto === 'auto',
+  'setSoundBuffer writes a buffer command (a word, or frames brought to a power of two with one message), soundBuffer() asks once and gives what the player said back, nonsense is refused in plain words, an offline player passes it by, and the names are described',
+  { first, sent, said, threw, quiet, d })
+}
+
 console.log(`${count - failed} of ${count} passed`)
 process.exit(failed ? 1 : 0)

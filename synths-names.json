@@ -2796,6 +2796,32 @@
    }
   }
  },
+ "buffer": {
+  "functions": [
+   "setSoundBuffer",
+   "soundBuffer"
+  ],
+  "words": {
+   "small": 1024,
+   "medium": 2048,
+   "large": 4096,
+   "auto": "auto"
+  },
+  "least": 256,
+  "most": 16384,
+  "event": "buffer",
+  "reads": [
+   "frames",
+   "delay",
+   "thread",
+   "underruns",
+   "setting"
+  ],
+  "threads": [
+   "audio",
+   "page"
+  ]
+ },
  "song": {
   "does": [
    "play",

@@ -44,6 +44,8 @@ The first version.
 - Sound waits for the browser's first tap by itself, and says once that it is waiting.
 - For apps: the functions write commands ([docs/commands.md](docs/commands.md)) that a `sound` option can take and a player elsewhere can play; the engine as bytes and the worklet from a Blob, for a page that may fetch nothing; an offline player that renders the same commands to samples or a WAV file, in a browser or in node; and a fallback for a browser with no audio worklet.
 
+- `setSoundBuffer("large")` and `soundBuffer()` (`set_sound_buffer`, `sound_buffer`): how much sound is made at a time, set in a program's own code and read back as `{ frames, delay, thread, underruns, setting }`. `"small"`, `"medium"`, `"large"`, `"auto"` or a number of frames. On a page with no https address it is the buffer itself (larger for fewer clicks, smaller for a keyboard that feels late); on the audio thread, where the buffer cannot change, it sets how far ahead everything is scheduled, and says so once. It travels as a `buffer` command, so Python and a scene in a frame can send it.
+
 ### Fixed
 
 - On a page with no audio worklet (one not served over https or from localhost, such as a development build opened on an iPad) the sound stuttered and clicked whenever the page was busy for more than about 20 ms. The fallback now makes 2048 frames at a time where it made 1024, which rides over 30 ms; a key is heard about 95 ms after it is pressed where it was 80. `fallbackBuffer` sets it (`4096` for a busier page, heard about 190 ms late), `"auto"` doubles it once if the page keeps being too busy, and `player.fallback` is `{ buffer, underruns, reason }`. The table of what was measured is in [docs/commands.md](docs/commands.md).
