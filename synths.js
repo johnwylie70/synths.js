@@ -73,7 +73,7 @@ const COMMANDS = 1
 // Each row: id, name, kind (f float, i whole number, b on or off, c a choice), least, most, default, unit, the choices.
 // VOICES are the engine's voice changers: for each, what it is and the settings it gives the part it is put on.
 /* PARAMS:BEGIN */
-const ENGINE = {"abi":1,"version":"0.0.0","parts":64,"voices":64,"samples":1024,"events":["note_on","note_off","all_notes_off","param","pitch_bend","voice_pitch","voice_freq","voice_volume","voice_pan","voice_position","voice_kill","macro_tick","arp","arp_more","song","record"]}
+const ENGINE = {"abi":1,"version":"0.0.0","parts":64,"voices":64,"samples":1024,"zones":512,"zoneLayers":4,"events":["note_on","note_off","all_notes_off","param","pitch_bend","voice_pitch","voice_freq","voice_volume","voice_pan","voice_position","voice_kill","macro_tick","arp","arp_more","song","record","arp_style","arp_beat","arp_notes","arp_step"]}
 const PARAMS = [
   [0,"volume","f",0,2,1,"gain"],
   [1,"pan","f",-1,1,0,"pan"],
@@ -197,6 +197,7 @@ const PARAMS = [
   [221,"input.gate_release","f",0.005,2,0.15,"seconds"],
   [222,"reverb.predelay","f",0,0.2,0,"seconds"],
   [223,"reverb.low_cut","f",20,1000,120,"hz"],
+  [224,"tempo","f",20,999,120,"bpm"],
 ]
 const VOICES = {"robot":{"help":"A machine: the voice multiplied by a 50 Hz wave, ringing in a metal pipe.","values":{"fx.ring":1,"fx.ring_freq":50,"fx.comb":0.45,"fx.comb_freq":110,"fx.comb_feedback":0.8,"fx.bits":10}},"chipmunk":{"help":"Small and squeaky: everything seven semitones higher.","values":{"fx.pitch":7}},"monster":{"help":"Huge and deep: seven semitones lower, with a growl and a little room.","values":{"fx.pitch":-7,"fx.drive":0.25,"send.reverb":0.3,"reverb.size":0.7,"reverb.damping":0.6}},"cave":{"help":"Far inside a cave: long echoes and an enormous, dark space.","values":{"send.delay":0.5,"send.reverb":0.6,"delay.time":0.38,"delay.feedback":0.55,"delay.tone":2500,"reverb.type":3,"reverb.size":0.4,"reverb.damping":0.55}},"telephone":{"help":"Down an old phone line: only the middle of the voice, coarse and a little crushed.","values":{"filter.type":3,"filter.slope":1,"filter.cutoff":1200,"filter.resonance":0.2,"fx.drive":0.2,"fx.bits":8,"fx.downsample":6}},"alien":{"help":"Not from here: higher, multiplied by a 180 Hz wave, with a slow metallic sweep.","values":{"fx.pitch":4,"fx.ring":0.8,"fx.ring_freq":180,"fx.comb":0.4,"fx.comb_freq":600,"fx.comb_feedback":0.75,"fx.comb_rate":0.4,"fx.comb_depth":0.5,"send.chorus":0.4}},"whisper":{"help":"Hoarse and breathy: the voice's pitch blurred into noise, with its low end taken off.","values":{"filter.type":2,"filter.cutoff":500,"filter.resonance":0,"fx.ring":1,"fx.ring_wave":1,"fx.ring_freq":350}}}
 /* PARAMS:END */
@@ -441,7 +442,7 @@ function settingValue(entry, value, said) {
  */
 function patchOf(given, said, strict, into = new Map(), sampleSlot = null) {
   for (const [name, value] of Object.entries(given || {})) {
-    if (name === 'note' || name === 'preset' || name === 'macro') continue
+    if (name === 'note' || name === 'preset' || name === 'macro' || name === 'zones') continue
     const entry = setting(name)
     if (!entry) {
       if (strict) throw new Error(`${said}: there is no setting called ${shown(name)}.${meant(name, namesToShow)}`)
@@ -676,6 +677,105 @@ export function readWav(bytes) {
   return null
 }
 
+// --- sample maps: several recordings as one instrument ----------------------------------------
+
+/**
+ * The note in a sound file's name: "piano-C2.wav" is 36, and so are "Fs2", "F#2" and "Gb2" for their note, and a
+ * number alone ("60.wav", "kick_36.wav") is that key. It is the last such word in the name; null if there is none.
+ */
+export function noteInName(file) {
+  const name = String(file).replace(/^.*[\\/]/, '').replace(/\.[A-Za-z0-9]+$/, '')
+  const words = [...name.matchAll(/(?<![A-Za-z0-9#])([A-Ga-g])(#|s|b)?(-?\d)(?![A-Za-z0-9#])/g)]
+  if (words.length) {
+    const [, letter, mark, octave] = words[words.length - 1]
+    try { return noteNumber(letter.toUpperCase() + (mark === 's' ? '#' : mark || '') + octave) } catch (e) { /* not a note after all */ }
+  }
+  const numbers = [...name.matchAll(/(?<![A-Za-z0-9.])(\d{1,3})(?![A-Za-z0-9])/g)].map((m) => +m[1]).filter((n) => n <= 127)
+  return numbers.length ? numbers[numbers.length - 1] : null
+}
+
+/** How long a zone's note takes to die away when nothing says: longer for the low notes, as a piano's are. */
+const zoneRelease = (root) => +clamp(0.12 * 2 ** ((72 - root) / 18), 0.08, 0.8).toFixed(3)
+
+/**
+ * THE ZONES OF A SAMPLE MAP, from what a `zones` command says: which keys and loudnesses each recording is for.
+ * `spec` is { zones: [{ sample, file, note, from, to, loud: [from, to], tune, volume, pan, release, oneShot,
+ * asRecorded, start }], kit, crossfade, oneShot, release }. With nothing said about its keys a recording has those
+ * nearest the note it was played at: the keys are split halfway between neighbours. Recordings of one note with
+ * different `loud` are layers, and with the same are takes that go in turn. `without`: the samples to leave out
+ * (a file that could not be loaded), whose keys the others then share.
+ * It gives { list, flags, unread: the files whose note could not be read from their names }.
+ */
+function zoneList(spec, without = null) {
+  const kit = !!spec.kit
+  const unread = []
+  const zones = []
+  for (const z of Array.isArray(spec.zones) ? spec.zones : []) {
+    if (!z || typeof z !== 'object' || (without && without.has(z.sample))) continue
+    let root = null
+    if (z.note != null) { try { root = noteNumber(z.note) } catch (e) { root = null } } else root = noteInName(z.file || '')
+    if (root === null) { unread.push(z.file || z.sample); continue }
+    zones.push({ z, root })
+  }
+  const key = (n, or) => { if (n == null) return or; try { return clamp(Math.round(noteNumber(n)), 0, 127) } catch (e) { return or } }
+  const fade = spec.crossfade && typeof spec.crossfade === 'object' ? spec.crossfade : { keys: spec.crossfade }
+  const fadeKeys = kit || !(fade.keys > 0) ? 0 : clamp(Math.round(fade.keys), 0, 24)
+  const fadeLoud = !(fade.loud > 0) ? 0 : clamp(Math.round(fade.loud * 127), 0, 64)
+  // The keys of each note that has recordings, split halfway to the next; a crossfade makes neighbours overlap.
+  const roots = [...new Set(zones.map((x) => x.root))].sort((a, b) => a - b)
+  const keys = new Map()
+  roots.forEach((root, i) => {
+    if (kit) return keys.set(root, [Math.round(root), Math.round(root), 0, 0])
+    const range = [0, 127, 0, 0]
+    if (i > 0) { const w = Math.min(fadeKeys, Math.floor(root - roots[i - 1])); range[0] = Math.ceil((roots[i - 1] + root) / 2) - Math.floor(w / 2); range[2] = w }
+    if (i < roots.length - 1) { const w = Math.min(fadeKeys, Math.floor(roots[i + 1] - root)); range[1] = Math.ceil((root + roots[i + 1]) / 2) - Math.floor(w / 2) + w - 1; range[3] = w }
+    keys.set(root, range)
+  })
+  const list = zones.map(({ z, root }) => {
+    const [lo, hi, fadeLo, fadeHi] = keys.get(root)
+    const from = clamp(key(z.from, lo), 0, 127), to = clamp(key(z.to, hi), 0, 127)
+    const loud = Array.isArray(z.loud) ? [clamp(+z.loud[0] || 0, 0, 1), clamp(z.loud[1] == null ? 1 : +z.loud[1], 0, 1)] : [0, 1]
+    let velFrom = Math.ceil(loud[0] * 127), velTo = loud[1] >= 1 ? 127 : Math.max(velFrom, Math.ceil(loud[1] * 127) - 1)
+    const fades = [z.from == null ? fadeLo : 0, z.to == null ? fadeHi : 0, 0, 0]
+    if (fadeLoud && velFrom > 0) { velFrom = Math.max(0, velFrom - Math.floor(fadeLoud / 2)); fades[2] = fadeLoud }
+    if (fadeLoud && velTo < 127) { velTo = Math.min(127, velTo + 1 - Math.floor(fadeLoud / 2) + fadeLoud - 1); fades[3] = fadeLoud }
+    const oneShot = z.oneShot ?? spec.oneShot ?? kit
+    const asRecorded = z.asRecorded ?? kit
+    return {
+      sample: z.sample, file: z.file, note: root, from: Math.min(from, to), to: Math.max(from, to), velFrom, velTo, group: 0, flags: (asRecorded ? 1 : 0) | (oneShot ? 2 : 0), fades,
+      tune: +z.tune || 0, volume: z.volume == null ? 1 : Math.max(0, +z.volume || 0), pan: clamp(+z.pan || 0, -1, 1),
+      release: z.release != null && +z.release >= 0 ? +z.release : spec.release === false || kit ? -1 : zoneRelease(root), start: Math.max(0, Math.round(+z.start || 0)),
+    }
+  })
+  // Recordings for the same keys and the same loudness are takes of one note: they go in turn.
+  const turns = new Map()
+  for (const zone of list) { const k = [zone.from, zone.to, zone.velFrom, zone.velTo].join(); turns.set(k, [...(turns.get(k) || []), zone]) }
+  let group = 0
+  for (const takes of turns.values()) if (takes.length > 1 && group < 255) { group++; for (const zone of takes) zone.group = group }
+  return { list: list.slice(0, ENGINE.zones || 512), flags: spec.silentBetween ?? kit ? 1 : 0, unread }
+}
+
+/** A zone as a program reads it back: the file, its note, the keys and loudnesses it is for, and what it changes. */
+const zoneAsRead = (zone) => ({
+  file: zone.file, note: zone.note, from: zone.from, to: zone.to, loud: [+(zone.velFrom / 127).toFixed(3), +(zone.velTo / 127).toFixed(3)], tune: zone.tune, volume: zone.volume, pan: zone.pan,
+  release: zone.release < 0 ? null : zone.release, oneShot: !!(zone.flags & 2), asRecorded: !!(zone.flags & 1), take: zone.group, crossfade: { keys: [zone.fades[0], zone.fades[1]], loud: [zone.fades[2], zone.fades[3]] },
+})
+
+/** The zones as the engine's records, 48 bytes each (synths-core's docs/engine-api.md, "The zone record"). */
+function packZones(list, slotOf) {
+  const bytes = new Uint8Array(list.length * 48)
+  const view = new DataView(bytes.buffer)
+  list.forEach((zone, i) => {
+    const at = i * 48
+    view.setUint16(at, slotOf(zone.sample), true)
+    bytes.set([zone.from, zone.to, zone.velFrom, zone.velTo, zone.group, zone.flags], at + 2)
+    view.setFloat32(at + 8, zone.note, true); view.setFloat32(at + 12, zone.tune, true); view.setFloat32(at + 16, zone.volume, true); view.setFloat32(at + 20, zone.pan, true); view.setFloat32(at + 24, zone.release, true)
+    bytes.set(zone.fades, at + 28)
+    view.setUint32(at + 44, zone.start, true)
+  })
+  return bytes
+}
+
 /** Left and right samples -> the bytes of a 16-bit stereo WAV file. */
 export function toWav(left, right, sampleRate) {
   const frames = left.length
@@ -800,6 +900,7 @@ function makeCore(wasm, sampleRate, post) {
       } else if (kind === 'macro') setMacro(op)
       else if (kind === 'sample') loadSample(op)
       else if (kind === 'unsample') x.synths_sample_free(engine, op[1])
+      else if (kind === 'zones') setZones(op)
       else if (kind === 'tune') {
         // A tune's times are in units: seconds, or beats when it has a `beat` (the seconds in a beat, which a
         // change of tempo for its group alters as it plays).
@@ -957,6 +1058,17 @@ function makeCore(wasm, sampleRate, post) {
     heardPeak = Math.max(top, heardPeak * Math.exp(-n / (0.5 * sampleRate)))
   }
   let input = null
+
+  // A part's sample map: [, part, the zone records as bytes (null for none), how many, the map's flags].
+  function setZones([, part, bytes, count, flags]) {
+    if (!x.synths_zones_set) return
+    if (!count || !bytes) return x.synths_zones_clear(engine, part)
+    const at = x.synths_alloc(bytes.length)
+    if (!at) return post({ type: 'problem', what: 'sample-memory' })
+    new Uint8Array(memory.buffer, at, bytes.length).set(bytes)
+    x.synths_zones_set(engine, part, at, count, flags)
+    x.synths_free(at)
+  }
 
   function loadSample([, slot, pcm, channels, rate, base, loopMode, loopStart, loopEnd]) {
     const frames = Math.floor(pcm.length / channels)
@@ -1369,6 +1481,11 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
         event(at, PARAM, rec.part, pid, want, 0)
       }
     }
+    // The part's sample map is the synth's, or none: a part passed from one synth to another must not keep the last one's.
+    if ((part.zones || null) !== (rec.zones || null)) {
+      part.zones = rec.zones || null
+      ops.push(rec.zones ? ['zones', rec.part, rec.zones.bytes, rec.zones.list.length, rec.zones.flags] : ['zones', rec.part, null, 0, 0])
+    }
     if (part.macro !== rec.macro) {
       part.macro = rec.macro
       const m = rec.macro
@@ -1403,6 +1520,37 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
     rec.used = ++uses
     return rec
   }
+
+  // A SAMPLE MAP on a synth (the `zones` command; a song's instrument may have one too). The map is set at once,
+  // so each recording plays as soon as it has arrived; when the last has, the map is made again without those
+  // that failed, whose keys the others then take, and it is said once which they were.
+  const sampleJobs = new Map()
+  const sampleFailed = new Map()
+  function mapZones(rec, spec, pfx, at) {
+    for (const old of rec.zoneOwns || []) if (!spec || !spec.zones.some((z) => pfx + z.sample === old)) does.unsample({ id: old })
+    rec.zoneSpec = spec
+    rec.zoneOwns = spec ? spec.zones.map((z) => pfx + z.sample) : null
+    if (!spec) { rec.zones = null; rec.rezone = null; if (rec.part >= 0) dress(rec, at); return }
+    let said = false
+    rec.rezone = (last) => {
+      if (rec.zoneSpec !== spec) return
+      const failed = spec.zones.filter((z) => sampleFailed.has(pfx + z.sample))
+      const { list, flags, unread } = zoneList(spec, new Set(failed.map((z) => z.sample)))
+      rec.zones = { list, flags, bytes: packZones(list, (sample) => slotOf(pfx + sample)) }
+      if (rec.part >= 0) dress(rec, null)
+      if (unread.length && !said) tell(`loadSamples: the note of ${unread.map(shown).join(', ')} cannot be read from ${unread.length > 1 ? 'their names' : 'its name'}, so ${unread.length > 1 ? 'they are' : 'it is'} left out. Put the note in the name (piano-C4.wav, piano-Fs2.wav, 60.wav) or say it: { C4: "that.wav" }.`)
+      if (last && failed.length && !said) tell(`loadSamples: ${[...new Set(failed.map((z) => shown(z.file || z.sample)))].join(', ')} could not be loaded (${sampleFailed.get(pfx + failed[0].sample)}), so ${list.length ? 'the other recordings play in its place' : 'the instrument is silent'}.`)
+      said = said || unread.length > 0 || (last && failed.length > 0)
+    }
+    rec.rezone(false)
+    const jobs = rec.zoneOwns.map((sample) => sampleJobs.get(sample)).filter(Boolean)
+    if (!jobs.length) return rec.rezone(true)
+    rec.zonesComing = spec
+    const job = Promise.allSettled(jobs).then(() => { if (rec.zonesComing === spec) rec.zonesComing = null; rec.rezone?.(true); flush() })
+    loading.add(job)
+    job.finally(() => loading.delete(job))
+  }
+  const zoneSpec = (c) => (Array.isArray(c.zones) ? { zones: c.zones.filter((z) => z && typeof z === 'object' && z.sample != null), kit: c.kit, crossfade: c.crossfade, oneShot: c.oneShot, release: c.release, silentBetween: c.silentBetween } : null)
 
   const note = (n) => { try { return noteNumber(n) } catch (e) { return null } }
   const notes = (n) => (Array.isArray(n) ? n : [n]).map(note).filter((v) => v !== null)
@@ -1537,9 +1685,13 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
       rec.macro = macroOf(c.macro, false)
       dress(rec, at)
     },
+    // A synth is given a sample map, or with no zones has it taken away: see mapZones.
+    zones(c, at) { mapZones(synthFor(c.id, at), zoneSpec(c), prefix, at) },
     free(c) {
       const rec = synths.get(c.id)
       if (!rec) return
+      // The recordings of its sample map go with it.
+      if (rec.zoneSpec) mapZones(rec, null, prefix, null)
       if (rec.part >= 0) { ops.push(['stopPart', rec.part, 0]); parts[rec.part].owner = null; rec.part = -1 }
     },
     note(c, at) {
@@ -1609,15 +1761,24 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
         transfer.push(pcm.buffer)
       }
       if (c.pcm) return send({ pcm: Float32Array.from(c.pcm), channels: c.channels === 2 ? 2 : 1, rate: c.rate || 44100 })
-      const job = load(c).then((sound) => { send(sound); flush() }, (e) => tell(`the sample ${shown(c.name || c.url || c.id)} could not be loaded (${(e && e.message) || e}), so it will be silent.`))
+      // One recording of a sample map that fails is told of with the map (see mapZones), which then does without it.
+      const sid = c.id
+      sampleFailed.delete(sid)
+      const job = load(c).then((sound) => { send(sound); flush() }, (e) => {
+        if (!c.zone) return tell(`the sample ${shown(c.name || c.url || c.id)} could not be loaded (${(e && e.message) || e}), so it will be silent.`)
+        sampleFailed.set(sid, (e && e.message) || String(e))
+        for (const rec of synths.values()) if (rec.zoneOwns && rec.zoneOwns.includes(sid) && !rec.zonesComing) rec.rezone?.(true)
+      })
       loading.add(job)
-      job.finally(() => loading.delete(job))
+      sampleJobs.set(sid, job)
+      job.finally(() => { loading.delete(job); if (sampleJobs.get(sid) === job) sampleJobs.delete(sid) })
     },
     unsample(c) {
       const slot = slots.get(c.id)
       if (slot === undefined) return
       recordings.delete(slot)
       slots.delete(c.id)
+      sampleFailed.delete(c.id)
       freeSlots.push(slot)
       ops.push(['unsample', slot])
     },
@@ -1798,6 +1959,8 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
         rec.used = ++uses
         seat(rec, now)
       }
+      // An instrument that is several recordings: its zones name samples the sender has loaded.
+      if (settings.zones || rec.zoneSpec) mapZones(rec, settings.zones ? zoneSpec(settings.zones) : null, prefix, now)
       event(now, SONG, 0, 6, instrument, rec.part)
     }
     song.info = m.info
@@ -1878,6 +2041,8 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
     /** Whether a synth is the microphone, whose settings have names of their own. */
     isMic(sid, scopeName) { const rec = found(sid, scopeName); return !!rec && rec === mic },
     /** The voice changer a synth has on, 'none' for none, or undefined for a synth that is not there. */
+    /** The zones of a synth's sample map as they are now (see zoneAsRead), or null for a synth with none. */
+    zonesOf(sid, scopeName) { const rec = found(sid, scopeName); return rec && rec.zones ? rec.zones.list.map(zoneAsRead) : null },
     voiceOf(sid, scopeName) { const rec = found(sid, scopeName); return rec ? (rec.worn ? rec.worn.voice : 'none') : undefined },
     /** A setting of a synth as the commands so far have left it: [what it is, its value in the engine's units], or null. */
     settingOf(sid, name, scopeName) {
@@ -1975,9 +2140,10 @@ function makeTarget(id, run, conductor, read, scope) {
       run(c)
       return target
     },
-    get(name) { if (key(name) === 'voice') return conductor()?.voiceOf(id, scope); const now = conductor()?.settingOf(id, named(name), scope); return now ? readSetting(now[0], now[1]) : undefined },
+    get(name) { if (key(name) === 'voice') return conductor()?.voiceOf(id, scope); if (key(name) === 'zones') return conductor()?.zonesOf(id, scope) ?? null; const now = conductor()?.settingOf(id, named(name), scope); return now ? readSetting(now[0], now[1]) : undefined },
     describe(name) {
       if (key(name) === 'voice') return describeVoice()
+      if (key(name) === 'zones') { const zones = conductor()?.zonesOf(id, scope); return zones ? { name: 'zones', kind: 'zones', zones } : null }
       const now = conductor()?.settingOf(id, named(name), scope)
       if (!now) return setting(named(name)) ? describeSetting(setting(named(name))) : null
       const d = describeSetting(now[0], now[1])
@@ -3387,6 +3553,7 @@ export function createSound(options = {}) {
     /** The value of a setting: lead.get("cutoff"). */
     get(name) {
       if (key(name) === 'voice') return this.voice
+      if (key(name) === 'zones') return this._zones ? this.zones() : null
       const entry = setting(this._name(name))
       if (!entry) throw new Error(`get: there is no setting called ${shown(name)}.${meant(String(name), namesToShow)}`)
       return readSetting(entry, entry.part ? this._patch.get(entry.id) : forAll.get(entry.id))
@@ -3394,6 +3561,7 @@ export function createSound(options = {}) {
     /** What a setting is: { name, min, max, default, unit, kind, choices }, for a control that takes its range from it. */
     describe(name) {
       if (key(name) === 'voice') return describeVoice()
+      if (key(name) === 'zones') return this._zones ? { name: 'zones', kind: 'zones', zones: this.zones(), kit: !!this._zones.kit } : null
       const entry = setting(this._name(name))
       if (!entry) return null
       const d = describeSetting(entry, entry.part ? this._patch.get(entry.id) : forAll.get(entry.id))
@@ -3444,6 +3612,36 @@ export function createSound(options = {}) {
 
     /** Record what this synth plays into a sample: `const take = lead.record(4)`. On the microphone, it records the microphone. See recordSound. */
     record(...args) { return recordFrom({ ...choices(args, ['length']), from: this._self || this }, 'record') }
+
+    /**
+     * Several recordings for this synth to play in the place of its wave: lead.samples = { C2: "piano-C2.wav",
+     * C3: "piano-C3.wav" }, or lead.setSamples(files, { crossfade: 3 }). What loadSamples takes; null takes them away.
+     */
+    setSamples(map, o = {}) {
+      if (map === null || map === undefined || map === false) {
+        if (this._zones) command({ op: 'zones', id: this._id, zones: null, t: clock() })
+        this._zones = null
+        return this._self || this
+      }
+      if (!o || typeof o !== 'object') throw new Error(`setSamples takes its settings in braces, as in lead.setSamples(files, { crossfade: 3 }), not ${shown(o)}`)
+      for (const word of Object.keys(o)) if (!MAP_WORDS.includes(word)) throw new Error(`setSamples: there is no ${shown(word)} to say here.${meant(word, MAP_WORDS)} It may be: kit, crossfade, loop, oneShot. A setting of the synth is set on the synth, as in lead.release = 0.5`)
+      const zones = zonesCommand(this._id, map, o, 'setSamples', false)
+      this._patch.set(setting('osc1.sample').id, 0)
+      command(zones)
+      this._zones = zones
+      if (readSetting(setting('osc1.wave'), this._patch.get(setting('osc1.wave').id)) !== 'sample') this.set({ wave: 'sample' })
+      return this._self || this
+    }
+    set_samples(map, o) { return this.setSamples(map, o) }
+    // This synth as a song instrument's patch: its own settings by name, and its recordings.
+    _asPatch() {
+      const own = named([...this._patch].filter(([pid]) => pid < 200 && setting('osc1.sample').id !== pid && setting('osc2.sample').id !== pid))
+      if (this._sample) own['osc1.sample'] = this._sample
+      if (this._zones) own.zones = { ...this._zones, id: undefined, op: undefined, t: undefined }
+      return own
+    }
+    /** The recordings this synth plays and the keys each is for: [{ file, note, from, to, loud, tune, volume, pan, release, oneShot, asRecorded, take }], or [] with none. */
+    zones() { return this._zones ? zoneList(this._zones).list.map(zoneAsRead) : [] }
 
     /** A sample or a recording that goes round and round while its note is held: drum.loop = true, or [first frame, the frame after the last]. */
     get loop() { return this._loop }
@@ -3547,6 +3745,8 @@ export function createSound(options = {}) {
     },
     set(target, name, value) {
       if (name === 'macro') { target.setMacro(value); return true }
+      // `samples` to read is the wave for a scope; to set, it is the recordings the synth plays.
+      if (name === 'samples') { target.setSamples(value); return true }
       if (typeof name !== 'string' || name in target) return Reflect.set(target, name, value, target)
       if (!setting(target._name(name))) {
         const near = nearest(name, namesToShow)
@@ -3559,9 +3759,9 @@ export function createSound(options = {}) {
   })
 
   // A sound file as a sample: the command that loads it, and the id it goes by.
-  function sampleFile(path, o, said) {
+  function sampleFile(path, o, said, more = null) {
     const sid = prefix + 'w' + ++ids
-    const c = { op: 'sample', id: sid, name: path }
+    const c = { op: 'sample', id: sid, name: path, ...more }
     if (o.note !== undefined) c.note = noteNumber(o.note)
     if (o.loop) c.loop = Array.isArray(o.loop) ? o.loop : true
     if (options.read) {
@@ -3612,6 +3812,9 @@ export function createSound(options = {}) {
     const macro = o.macro
     delete o.macro
     macroOf(macro, true, 'makeSynth')
+    // Several recordings for its wave: what loadSamples takes, or [the files, { kit, crossfade }].
+    const recordings = o.samples
+    delete o.samples
     const names = Object.keys(PRESETS).filter((n) => n !== 'sample')
     if (preset !== null && !PRESETS[preset]) throw new Error(`makeSynth(${shown(preset)}): there is no synth called ${shown(preset)}.${meant(preset, names)} The synths are: ${names.join(', ')}`)
     const said = `makeSynth(${preset ? shown(preset) : ''})`
@@ -3627,7 +3830,94 @@ export function createSound(options = {}) {
     if (Object.keys(given).length) c.set = sendable(given)
     if (macro !== undefined) c.macro = macro
     command(c)
-    return asSynth(new Synth(id, patch, (preset && PRESETS[preset].note) || (file && file.note !== undefined ? noteNumber(file.note) : 60), 0.3))
+    const made = asSynth(new Synth(id, patch, (preset && PRESETS[preset].note) || (file && file.note !== undefined ? noteNumber(file.note) : 60), 0.3))
+    if (recordings !== undefined && recordings !== null) made.setSamples(recordings)
+    return made
+  }
+
+  /**
+   * WHAT loadSamples WAS GIVEN, as the zones of a `zones` command, with each file's `sample` command written on the
+   * way. The three ways of saying it: { C2: "a.wav", "F#2": ["b1.wav", "b2.wav"] } (the note each was played at, and
+   * takes that go in turn), ["piano-C2.wav", "piano-Fs2.wav"] (the note is in the name), and a list of
+   * { file, note, from, to, loud, tune, volume, pan, release, loop, oneShot, start } for everything.
+   */
+  const ZONE_WORDS = ['file', 'note', 'from', 'to', 'loud', 'tune', 'volume', 'pan', 'release', 'loop', 'oneShot', 'one_shot', 'asRecorded', 'as_recorded', 'start']
+  function zonesGiven(map, o, said) {
+    const example = `as in loadSamples({ C2: "piano-C2.wav", C3: "piano-C3.wav" }) or loadSamples(["piano-C2.wav", "piano-C3.wav"])`
+    if (!map || typeof map !== 'object') throw new Error(`${said} needs the sound files of an instrument and the note each was played at, ${example}, not ${shown(map)}`)
+    const given = []
+    const one = (what, note) => {
+      if (typeof what === 'string' && what.trim()) return given.push({ file: what, ...(note === undefined ? {} : { note }) })
+      if (Array.isArray(what) && note !== undefined) { for (const take of what) one(take, note); return }
+      if (!what || typeof what !== 'object' || Array.isArray(what) || typeof what.file !== 'string' || !what.file.trim()) throw new Error(`${said}: each recording is the name of a sound file, or { file: "soft-C4.wav", note: "C4", loud: [0, 0.5] }, not ${shown(what)}`)
+      for (const word of Object.keys(what)) if (!ZONE_WORDS.includes(word)) throw new Error(`${said}: a recording has no ${shown(word)}.${meant(word, ZONE_WORDS)} It may have: ${ZONE_WORDS.filter((w) => !w.includes('_')).join(', ')}`)
+      given.push({ ...what, ...(what.note === undefined && note !== undefined ? { note } : {}) })
+    }
+    if (Array.isArray(map)) for (const what of map) one(what)
+    else for (const [note, what] of Object.entries(map)) one(what, note)
+    if (!given.length) throw new Error(`${said} was given no sound files. It needs at least one, ${example}`)
+    const loaded = new Map()
+    return given.map((g) => {
+      const note = g.note === undefined ? noteInName(g.file) : noteNumber(g.note)
+      if (note === null) throw new Error(`${said}: the note of ${shown(g.file)} cannot be read from its name. Put the note in the name (piano-C4.wav, piano-Fs2.wav, 60.wav), or say it: loadSamples({ C4: ${shown(g.file)} })`)
+      const zone = { file: g.file, note }
+      for (const edge of ['from', 'to']) if (g[edge] !== undefined) zone[edge] = noteNumber(g[edge])
+      if (g.loud !== undefined) {
+        if (!Array.isArray(g.loud) || g.loud.length !== 2 || !g.loud.every((v) => typeof v === 'number' && v >= 0 && v <= 1) || g.loud[0] > g.loud[1]) throw new Error(`${said}: loud is how hard a note is played to get this recording, from and to, as in loud: [0, 0.5], not ${shown(g.loud)}`)
+        zone.loud = g.loud
+      }
+      for (const [word, least, most] of [['tune', -1200, 1200], ['volume', 0, 4], ['pan', -1, 1], ['release', 0, 20]]) if (g[word] !== undefined) zone[word] = amount(g[word], `${said}: ${word}`, least, most)
+      if (g.start !== undefined) zone.start = amount(g.start, `${said}: start`, 0, 1e9)
+      if ((g.oneShot ?? g.one_shot) !== undefined) zone.oneShot = !!(g.oneShot ?? g.one_shot)
+      if ((g.asRecorded ?? g.as_recorded) !== undefined) zone.asRecorded = !!(g.asRecorded ?? g.as_recorded)
+      // One file is loaded once, however many zones play it.
+      const loop = g.loop ?? o.loop
+      const k = JSON.stringify([g.file, note, loop || 0])
+      if (!loaded.has(k)) loaded.set(k, sampleFile(g.file, { note, loop }, said, { zone: true }))
+      zone.sample = loaded.get(k)
+      return zone
+    })
+  }
+  const MAP_WORDS = ['kit', 'crossfade', 'loop', 'oneShot', 'one_shot']
+  // The `zones` command for a synth, and what the synth keeps to read its zones back.
+  function zonesCommand(id, map, o, said, ownRelease) {
+    const c = { op: 'zones', id, zones: zonesGiven(map, o, said), t: clock() }
+    if (o.kit) c.kit = true
+    if (o.crossfade !== undefined && o.crossfade !== false) {
+      const f = o.crossfade
+      if (!(typeof f === 'number' && f >= 0) && !(f && typeof f === 'object' && (f.keys === undefined || f.keys >= 0) && (f.loud === undefined || (f.loud >= 0 && f.loud <= 1)))) throw new Error(`${said}: crossfade is how many keys neighbouring recordings fade into each other over, as in { crossfade: 3 }, or { keys: 3, loud: 0.1 } for the loudness layers too, not ${shown(f)}`)
+      c.crossfade = f
+    }
+    if ((o.oneShot ?? o.one_shot) !== undefined) c.oneShot = !!(o.oneShot ?? o.one_shot)
+    // A release said for the whole synth is every zone's; with none said, each zone has one that suits its note.
+    if (ownRelease) c.release = false
+    return c
+  }
+  /**
+   * Several recordings as one instrument: `const piano = loadSamples({ C2: "piano-C2.wav", C3: "piano-C3.wav" })`.
+   * Each name is the note that file was played at, and every key plays the nearest recording, moved to its pitch;
+   * loadSamples(["piano-C2.wav", "piano-Fs2.wav"]) reads the notes from the files' names. It gives a synth, as
+   * loadSample does: piano.play("E4"), piano.reverb = 0.3, keyboard(piano).
+   * { kit: true } is a drum kit: each key is its own sound, as recorded, and the keys between are silent.
+   * { crossfade: 3 } fades neighbours into each other over three keys; { loop: true } has each go round while held.
+   * A list of { file, note, from, to, loud: [0, 0.5], tune, volume, release } says everything: layers by how hard
+   * a note is played, the keys by hand, and several files for one note are takes that go in turn.
+   */
+  function loadSamples(map, o = {}) {
+    const said = 'loadSamples'
+    if (!o || typeof o !== 'object') throw new Error(`loadSamples takes its settings in braces, as in loadSamples(files, { kit: true }), not ${shown(o)}`)
+    const settings = Object.fromEntries(Object.entries(o).filter(([k]) => !MAP_WORDS.includes(k)))
+    const patch = patchOf(settings, said, true, patchOf(PRESETS.sample, said, false, patchOf(PLAIN, said, false)), () => 0)
+    patch.set(setting('osc1.sample').id, 0)
+    share(Object.keys(settings), patch)
+    const id = prefix + 's' + ++ids
+    const zones = zonesCommand(id, map, o, said, Object.keys(settings).some((k) => setting(k)?.name === 'amp.release'))
+    command({ op: 'synth', id, preset: 'sample', ...(Object.keys(settings).length ? { set: sendable(settings) } : {}), t: clock() })
+    command(zones)
+    const first = Math.min(...zones.zones.map((z) => z.note))
+    const synth = new Synth(id, patch, zones.kit ? first : 60, null)
+    synth._zones = zones
+    return asSynth(synth)
   }
 
   function loadSample(path, o = {}) {
@@ -3974,6 +4264,8 @@ export function createSound(options = {}) {
       if (!o.patches || typeof o.patches !== 'object') throw new Error(`playSong: patches needs names and what each is, as in { patches: { "wobble": "bass" } }, not ${shown(o.patches)}`)
       const names = Object.keys(PRESETS).filter((n) => n !== 'sample')
       for (const [name, what] of Object.entries(o.patches)) {
+        // A synth of the program's own (one from loadSamples, say) is given as what it is now: its settings, and its recordings.
+        if (what instanceof Synth) { o.patches = { ...o.patches, [name]: what._asPatch() }; continue }
         const preset = typeof what === 'string' ? what : what && what.preset
         if (preset !== undefined && !PRESETS[preset]) throw new Error(`playSong: the patch ${shown(name)} names a synth called ${shown(preset)}, and there is none.${meant(String(preset), names)} The synths are: ${names.join(', ')}`)
         if (what && typeof what === 'object') { patchOf(what, `playSong: the patch ${shown(name)}`, true, new Map(), () => 0); macroOf(what.macro, true, `playSong: the patch ${shown(name)}`) } else if (typeof what !== 'string') throw new Error(`playSong: the patch ${shown(name)} needs the name of a synth or settings in braces, not ${shown(what)}`)
@@ -4039,7 +4331,7 @@ export function createSound(options = {}) {
   }
 
   const api = {
-    playSound, playNote, playNotes, makeSynth, loadSample, playSong,
+    playSound, playNote, playNotes, makeSynth, loadSample, loadSamples, playSong,
     useMicrophone, recordSound, startRecording, stopRecording, recordOutput, saveSound, receiveSoundEvents,
     /** Let the microphone go, if it was asked for. */
     stopMicrophone() { micSynth?.close() },
@@ -4173,6 +4465,8 @@ export function describe() {
     voices: VOICES,
     // The sound buffer: the words it may be asked for by, the frames it may be, and what is said back.
     buffer: { functions: ['setSoundBuffer', 'soundBuffer'], words: { ...BUFFER_WORDS, auto: 'auto' }, least: 256, most: 16384, event: 'buffer', reads: ['frames', 'delay', 'thread', 'underruns', 'setting'], threads: ['audio', 'page'] },
+    // Several recordings as one instrument: the functions, what a recording and the whole map may say, and the engine's limits.
+    zones: { functions: ['loadSamples'], synthFunctions: ['setSamples', 'zones'], words: ['file', 'note', 'from', 'to', 'loud', 'tune', 'volume', 'pan', 'release', 'loop', 'oneShot', 'asRecorded', 'start'], options: ['kit', 'crossfade', 'loop', 'oneShot'], most: ENGINE.zones, layers: ENGINE.zoneLayers },
     // What a `song` command may do.
     song: { does: ['play', 'resume', 'pause', 'stop', 'seek', 'volume', 'repeat', 'mute', 'solo', 'loopPattern', 'replace'], functions: ['stop', 'pause', 'resume', 'seek', 'mute', 'unmute', 'solo', 'loopPattern', 'replace'] },
     microphone: {
@@ -4205,6 +4499,7 @@ export const mainSynth = () => mine().mainSynth()
 export const soundOutput = () => mine().soundOutput()
 export const makeSynth = (...a) => mine().makeSynth(...a)
 export const loadSample = (...a) => mine().loadSample(...a)
+export const loadSamples = (...a) => mine().loadSamples(...a)
 export const playSong = (...a) => mine().playSong(...a)
 export const stopSong = () => mine().stopSong()
 export const stopSound = () => mine().stopSound()
@@ -4251,10 +4546,10 @@ export const receiveSoundEvents = (events) => mine().receiveSoundEvents(events)
 /** The page's player, once a sound has been asked for: its `state` is 'waiting' until the first tap. */
 export const soundPlayer = () => mine().player
 export {
-  playSound as play_sound, playNote as play_note, playNotes as play_notes, makeSynth as make_synth, loadSample as load_sample,
+  playSound as play_sound, playNote as play_note, playNotes as play_notes, makeSynth as make_synth, loadSample as load_sample, loadSamples as load_samples,
   playSong as play_song, stopSong as stop_song, stopSound as stop_sound, setVolume as set_volume, muteSound as mute_sound,
   unmuteSound as unmute_sound, setEffects as set_effects, setTempo as set_tempo, soundTime as sound_time, setSoundBuffer as set_sound_buffer, soundBuffer as sound_buffer,
-  soundNames as sound_names, synthNames as synth_names, settingNames as setting_names, noteNumber as note_number,
+  soundNames as sound_names, synthNames as synth_names, settingNames as setting_names, noteNumber as note_number, noteInName as note_in_name,
   createSound as create_sound, renderSound as render_sound, packSong as pack_song, playArp as play_arp, startArp as start_arp, mainSynth as main_synth,
   soundOutput as sound_output, chordNotes as chord_notes, startLines as start_lines, loopNotes as loop_notes, lengthBeats as length_beats,
   onMidi as on_midi, onMidiNote as on_midi_note, onMidiNoteOff as on_midi_note_off, onMidiControl as on_midi_control,

@@ -79,6 +79,7 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
       } else if (kind === 'macro') setMacro(op)
       else if (kind === 'sample') loadSample(op)
       else if (kind === 'unsample') x.synths_sample_free(engine, op[1])
+      else if (kind === 'zones') setZones(op)
       else if (kind === 'tune') {
         // A tune's times are in units: seconds, or beats when it has a `beat` (the seconds in a beat, which a
         // change of tempo for its group alters as it plays).
@@ -236,6 +237,17 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
     heardPeak = Math.max(top, heardPeak * Math.exp(-n / (0.5 * sampleRate)))
   }
   let input = null
+
+  // A part's sample map: [, part, the zone records as bytes (null for none), how many, the map's flags].
+  function setZones([, part, bytes, count, flags]) {
+    if (!x.synths_zones_set) return
+    if (!count || !bytes) return x.synths_zones_clear(engine, part)
+    const at = x.synths_alloc(bytes.length)
+    if (!at) return post({ type: 'problem', what: 'sample-memory' })
+    new Uint8Array(memory.buffer, at, bytes.length).set(bytes)
+    x.synths_zones_set(engine, part, at, count, flags)
+    x.synths_free(at)
+  }
 
   function loadSample([, slot, pcm, channels, rate, base, loopMode, loopStart, loopEnd]) {
     const frames = Math.floor(pcm.length / channels)

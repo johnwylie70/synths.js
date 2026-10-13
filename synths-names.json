@@ -7,6 +7,8 @@
   "parts": 64,
   "voices": 64,
   "samples": 1024,
+  "zones": 512,
+  "zoneLayers": 4,
   "events": [
    "note_on",
    "note_off",
@@ -23,7 +25,11 @@
    "arp",
    "arp_more",
    "song",
-   "record"
+   "record",
+   "arp_style",
+   "arp_beat",
+   "arp_notes",
+   "arp_step"
   ]
  },
  "settings": [
@@ -1324,6 +1330,16 @@
    "max": 1000,
    "default": 120,
    "unit": "hz",
+   "scope": "all"
+  },
+  {
+   "id": 224,
+   "name": "tempo",
+   "kind": "float",
+   "min": 20,
+   "max": 999,
+   "default": 120,
+   "unit": "bpm",
    "scope": "all"
   }
  ],
@@ -2827,6 +2843,38 @@
    "audio",
    "page"
   ]
+ },
+ "zones": {
+  "functions": [
+   "loadSamples"
+  ],
+  "synthFunctions": [
+   "setSamples",
+   "zones"
+  ],
+  "words": [
+   "file",
+   "note",
+   "from",
+   "to",
+   "loud",
+   "tune",
+   "volume",
+   "pan",
+   "release",
+   "loop",
+   "oneShot",
+   "asRecorded",
+   "start"
+  ],
+  "options": [
+   "kit",
+   "crossfade",
+   "loop",
+   "oneShot"
+  ],
+  "most": 512,
+  "layers": 4
  },
  "song": {
   "does": [

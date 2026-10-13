@@ -50,7 +50,7 @@ const table = JSON.parse(new TextDecoder().decode(new Uint8Array(memory.buffer, 
 const rows = table.params.map((p) => '  ' + JSON.stringify([p.id, p.name, p.kind === 'choice' ? 'c' : p.kind[0], p.min, p.max, p.default, p.unit || '', ...(p.choices ? [p.choices] : [])]) + ',')
 const block = [
   '/* PARAMS:BEGIN */',
-  `const ENGINE = ${JSON.stringify({ abi: table.abi, version: table.version, parts: table.limits.parts, voices: table.limits.voices, samples: table.limits.samples, events: table.events.map((e) => e.name) })}`,
+  `const ENGINE = ${JSON.stringify({ abi: table.abi, version: table.version, parts: table.limits.parts, voices: table.limits.voices, samples: table.limits.samples, zones: table.limits.zones_part, zoneLayers: table.limits.zone_layers, events: table.events.map((e) => e.name) })}`,
   'const PARAMS = [', ...rows, ']',
   `const VOICES = ${JSON.stringify(Object.fromEntries((table.voice_presets || []).map((v) => [v.name, { help: v.help, values: v.values }])))}`,
   '/* PARAMS:END */',

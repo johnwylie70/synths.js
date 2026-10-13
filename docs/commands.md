@@ -296,6 +296,47 @@ A `sample` command with no `url`, `bytes` or `pcm` changes one that is already t
 loop: true }` sets its loop (`false` takes it away) and `note` the note it is at. For a recording still being
 made, the loop is put on when it is over.
 
+### `zones`
+
+```js
+{ op: "sample", id: "w1", url: "piano-C2.wav", note: 36, zone: true }
+{ op: "sample", id: "w2", url: "piano-C3.wav", note: 48, zone: true }
+{ op: "synth", id: "s1", preset: "sample" }
+{ op: "zones", id: "s1", zones: [{ sample: "w1", file: "piano-C2.wav", note: 36 }, { sample: "w2", file: "piano-C3.wav", note: 48 }] }
+```
+
+Several recordings as one instrument (`loadSamples`, `lead.setSamples`): a synth's sample map. Each zone names a
+sample by its id and the note it was played at; the player works out the rest and gives the engine its zone
+records. The synth's `wave` has to be `"sample"` (the `sample` preset's is). `zones: null` takes the map away.
+
+A zone:
+
+| field | |
+|---|---|
+| `sample` | the id of a `sample` |
+| `note` | the note the recording was played at. Left out, it is read from `file`: `C2`, `Fs2`, `F#2`, `Gb2`, or a number alone |
+| `file` | the file's name, for messages and for reading back |
+| `from`, `to` | the lowest and highest key. Left out: halfway to the neighbours, `ceil((a + b) / 2)` being the first key of the upper one, and the ends of the keyboard for the lowest and highest |
+| `loud` | `[from, to]` of a note's velocity, 0 to 1: velocities from `ceil(from * 127)` to `ceil(to * 127) - 1` (127 when `to` is 1). Left out: all |
+| `tune`, `volume`, `pan` | cents, a multiplier (1), -1 to 1 |
+| `release` | seconds, in the place of the synth's own. Left out: `0.12 * 2^((72 - note) / 18)` kept within 0.08 to 0.8, unless the command has `release: false` or is a kit, and then the synth's |
+| `oneShot`, `asRecorded` | play to the end whatever the key does; play at the recording's own pitch whatever the key |
+| `start` | the frame a note starts at |
+
+On the command: `kit: true` (each zone is its own key alone, `oneShot` and `asRecorded`, and the keys between are
+silent), `crossfade` (a number of keys, or `{ keys, loud }` with `loud` a part of the velocity range: neighbours
+overlap by that much and fade across it), `oneShot` for every zone, `release: false`. Zones with the same keys
+and the same velocities are takes that play in turn.
+
+A `sample` with `zone: true` belongs to a map: if it cannot be loaded, nothing is said of it alone; when every
+sample of the map has arrived or failed, the map is made again without those that failed (their neighbours take
+their keys) and one message names them. The map is set as soon as the command arrives, so each recording plays
+once it is there. A new `zones` for the synth, or `free`, forgets the samples of the old map. A synth's part may
+have 512 zones, and a note plays at most 4. `player.target(id).get("zones")` (and `describe("zones").zones`) is
+the list as the player has it: `[{ file, note, from, to, loud, tune, volume, pan, release, oneShot, asRecorded,
+take, crossfade }]`. A song instrument's patch may carry the same under `zones: { zones: [...], kit, crossfade }`,
+with samples the sender has loaded.
+
 ### `mic`
 
 The microphone: see [The microphone, recording and saving](#the-microphone-recording-and-saving).

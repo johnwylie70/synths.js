@@ -939,6 +939,145 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
   say(threw === null && state === 'failed' && said.filter((t) => /no Web Audio/.test(t)).length <= 1, 'createSound() with nothing given reaches for the page\'s shared player on its first flush, a second sound joins it, and both close: nothing throws where there is no sound card', [threw, state, said])
 }
 
+// --- several recordings as one instrument (loadSamples): keys, layers, kits, names, a missing file, and letting go
+{
+  const hzOf = (n) => 440 * 2 ** ((n - 69) / 12)
+  const tone = (hz, seconds = 1) => { const w = Float32Array.from({ length: SR * seconds }, (_, i) => 0.5 * Math.sin(2 * Math.PI * hz * i / SR)); return toWav(w, w, SR) }
+  // The pitch of a plain wave between two times, from where it first and last goes up through zero.
+  const pitch = (a, from = 0.05, to = 0.35) => {
+    let firstAt = -1, lastAt = -1, n = 0
+    for (let i = Math.round(from * SR) + 1; i < Math.round(to * SR); i++) if (a[i - 1] < 0 && a[i] >= 0) { const at = i - a[i] / (a[i] - a[i - 1]); if (firstAt < 0) firstAt = at; else n++; lastAt = at }
+    return n ? n * SR / (lastAt - firstAt) : 0
+  }
+  const cents = (hz, note) => 1200 * Math.log2(hz / hzOf(note))
+  // Each recording is a sine a little off its note, by an amount of its own, so what is heard says which one played.
+  const OFF = { 'p-C3.wav': 0, 'p-C4.wav': 30, 'p-C5.wav': 60 }
+  const files = { 'p-C3.wav': tone(hzOf(48)), 'p-C4.wav': tone(hzOf(60.3)), 'p-C5.wav': tone(hzOf(72.6)), 'soft-C4.wav': tone(300), 'hard-C4.wav': tone(500), 'kick.wav': tone(100, 0.3), 'snare.wav': tone(200, 0.3), 'hat.wav': tone(900, 0.3), 'take1.wav': tone(400, 0.2), 'take2.wav': tone(600, 0.2) }
+  const studio = async (more = {}) => {
+    const player = await createOfflinePlayer()
+    const s = createSound({ sound: player, clock: () => player.time, batch: 'manual', read: async (path) => files[path] || null, ...more })
+    const settle = async () => { s.flush(); await new Promise((yes) => setTimeout(yes, 20)); s.flush(); await player.render(0.02) }
+    const hear = async (synth, note, volume) => { synth.play(note, 0.4, volume); s.flush(); return (await player.render(0.5)).left }
+    return { player, s, settle, hear }
+  }
+
+  let said = await saying(async () => {
+    const { player, s, settle, hear } = await studio()
+    const piano = s.loadSamples(['p-C3.wav', 'p-C4.wav', 'p-C5.wav'])
+    const zones = piano.zones()
+    say(same(zones.map((z) => [z.file, z.note, z.from, z.to]), [['p-C3.wav', 48, 0, 53], ['p-C4.wav', 60, 54, 65], ['p-C5.wav', 72, 66, 127]]) && zones[0].release > zones[1].release && zones[1].release > zones[2].release && zones.every((z) => same(z.loud, [0, 1]) && !z.oneShot && !z.asRecorded),
+      'loadSamples reads each recording\'s note from its file\'s name and splits the keys halfway between neighbours (C3 up to F3, C4 from F#3 to F4, C5 from F#4), with a longer release for the lower notes', zones)
+    await settle()
+    const heard = {}
+    for (const n of [48, 60, 72, 53, 54, 65, 66, 36, 79]) heard[n] = Math.round(cents(pitch(await hear(piano, n)), n))
+    say([48, 53, 36].every((n) => Math.abs(heard[n] - 0) < 4) && [60, 54, 65].every((n) => Math.abs(heard[n] - 30) < 4) && [72, 66, 79].every((n) => Math.abs(heard[n] - 60) < 4),
+      'a note at each recording\'s own key plays it at its pitch, and every other key plays the nearer recording moved to that key (each recording is off its note by an amount of its own, which is what is heard)', heard)
+    const d = piano.describe('zones')
+    const far = player.target(piano._id).get('zones')
+    say(d.kind === 'zones' && d.zones.length === 3 && same(piano.get('zones'), d.zones) && far.length === 3 && same(far.map((z) => [z.note, z.from, z.to]), zones.map((z) => [z.note, z.from, z.to])) && piano.get('wave') === 'sample' && piano.release !== undefined,
+      'the zones are read back for an editor: piano.zones(), describe("zones") and get("zones"), on the synth and on a player\'s target', [d, far])
+
+    // The same three by the note each was played at, on an ordinary synth, with neighbours faded into each other.
+    const lead = s.makeSynth({ ...CLICK, samples: { C3: 'p-C3.wav', C4: 'p-C4.wav', C5: 'p-C5.wav' } })
+    const other = s.makeSynth(CLICK)
+    other.samples = { C3: 'p-C3.wav', C5: 'p-C5.wav' }
+    const faded = s.makeSynth(CLICK).setSamples({ C3: 'p-C3.wav', C4: 'p-C4.wav' }, { crossfade: 4 })
+    await settle()
+    const got = [Math.round(cents(pitch(await hear(lead, 61)), 61)), Math.round(cents(pitch(await hear(other, 61)), 61)), lead.get('wave'), other.get('wave'), typeof other.samples]
+    const fz = faded.zones()
+    say(same(got, [30, 60, 'sample', 'sample', 'function']) && same(fz.map((z) => [z.from, z.to, z.crossfade.keys]), [[0, 55, [0, 4]], [52, 127, [4, 0]]]),
+      'makeSynth({ samples }), lead.samples = { … } and lead.setSamples(files, { crossfade: 4 }) put a map on an ordinary synth and turn its wave to "sample"; samples() is still the wave for a scope; a crossfade of 4 keys has neighbours overlap by 4', [got, fz])
+    other.samples = null
+    await settle()
+    say(other.zones().length === 0 && other.get('zones') === null && player.target(other._id).get('zones') === null, 'and null takes the recordings away', other.zones())
+  })
+  say(said.length === 0, 'and nothing is said in the console about any of it', said)
+
+  said = await saying(async () => {
+    // Loudness layers, and takes that go in turn.
+    const { s, settle, hear } = await studio()
+    const layered = s.loadSamples([{ file: 'soft-C4.wav', note: 'C4', loud: [0, 0.5] }, { file: 'hard-C4.wav', note: 'C4', loud: [0.5, 1] }])
+    const turns = s.loadSamples({ C4: ['take1.wav', 'take2.wav'] })
+    const by = s.loadSamples([{ file: 'soft-C4.wav', note: 'C4', from: 'A3', to: 'E4', tune: -100, volume: 0.5, release: 2 }])
+    await settle()
+    const layers = [Math.round(pitch(await hear(layered, 'C4', 0.3))), Math.round(pitch(await hear(layered, 'C4', 0.49))), Math.round(pitch(await hear(layered, 'C4', 0.51))), Math.round(pitch(await hear(layered, 'C4', 1)))]
+    const lz = layered.zones().map((z) => z.loud)
+    say(same(layers, [300, 300, 500, 500]) && lz[0][1] < 0.5 && lz[1][0] > 0.5, 'two recordings of one note with loud: [0, 0.5] and [0.5, 1] are layers: the soft one below half, the hard one from half up, never both', [layers, lz])
+    const takes = []
+    for (let i = 0; i < 4; i++) takes.push(Math.round(pitch(await hear(turns, 'C4'), 0.02, 0.18)))
+    say(same(takes, [400, 600, 400, 600]) && turns.zones().every((z) => z.take === 1), 'several files for one note are takes that go in turn', takes)
+    // A kit: each key its own sound at its own pitch, and nothing between.
+    const kit = s.loadSamples({ C2: 'kick.wav', D2: 'snare.wav', 'F#2': 'hat.wav' }, { kit: true })
+    await settle()
+    const drums = [Math.round(pitch(await hear(kit, 'C2'), 0.02, 0.25)), Math.round(pitch(await hear(kit, 'D2'), 0.02, 0.25)), Math.round(pitch(await hear(kit, 'F#2'), 0.02, 0.25)), peak(await hear(kit, 'C#2')), peak(await hear(kit, 'C4'))]
+    say(same(drums.slice(0, 3), [100, 200, 900]) && drums[3] === 0 && drums[4] === 0 && kit.zones().every((z) => z.oneShot && z.asRecorded && z.from === z.to && z.release === null), 'with { kit: true } each key plays its own recording as it was recorded, whatever the key, and the keys between are silent', [drums, kit.zones()])
+    const out = await hear(by, 'C4')
+    const bz = by.zones()[0]
+    say(Math.abs(cents(pitch(out), 59) - 1200 * Math.log2(300 / hzOf(60))) < 4 && same([bz.from, bz.to, bz.tune, bz.volume, bz.release], [57, 64, -100, 0.5, 2]), 'the explicit form sets a recording\'s keys, tuning, loudness and release by hand', [pitch(out), bz])
+
+  })
+  say(said.length === 0, 'and nothing is said in the console about any of that either', said)
+
+  // The names of files.
+  const read = [['piano-C2.wav', 36], ['piano-Fs2.wav', 42], ['F#2.wav', 42], ['Gb2.ogg', 42], ['60.wav', 60], ['kick_36.wav', 36], ['samples/soft-C4.wav', 60], ['bass-a2.wav', 45], ['Bb3.mp3', 58], ['take2-D4.wav', 62], ['C-1.wav', 0], ['loud.wav', null], ['piano.mp3', null]]
+  const unread = thrown(() => createSound({ sound: { send() {} }, batch: 'manual' }).loadSamples(['piano-C2.wav', 'piano-loud.wav']))
+  const wrong = [thrown(() => createSound({ sound: { send() {} } }).loadSamples()), thrown(() => createSound({ sound: { send() {} } }).loadSamples({})), thrown(() => createSound({ sound: { send() {} } }).loadSamples([{ file: 'a-C4.wav', lowd: 1 }])), thrown(() => createSound({ sound: { send() {} } }).loadSamples({ H9: 'a.wav' }))]
+  say(read.every(([name, note]) => synths.noteInName(name) === note) && /the note of "piano-loud.wav" cannot be read from its name\. Put the note in the name/.test(unread) && wrong.every((t) => typeof t === 'string' && t.length > 20) && /Did you mean "loud"/.test(wrong[2]),
+    'a file\'s note is read from its name (C2, Fs2, F#2, Gb2, a number alone), a name with none is refused with what to do about it, and so is nonsense', [read.map(([n]) => [n, synths.noteInName(n)]), unread, wrong])
+
+  // The commands, for another language to write.
+  const c = commands((s) => { s.load_samples({ C3: 'p-C3.wav', C4: 'p-C4.wav' }, { reverb: 0.3, crossfade: 2 }) }, { resolve: (path) => 'https://x.test/' + path })
+  say(same(c.map((x) => x.op), ['sample', 'sample', 'synth', 'zones']) && c[0].zone === true && c[0].url === 'https://x.test/p-C3.wav' && c[0].note === 48 && c[2].preset === 'sample' && c[2].set.reverb === 0.3
+    && same(c[3].zones, [{ file: 'p-C3.wav', note: 48, sample: c[0].id }, { file: 'p-C4.wav', note: 60, sample: c[1].id }]) && c[3].crossfade === 2 && c[3].id === c[2].id && describe().zones.functions[0] === 'loadSamples' && describe().zones.most === 512,
+  'loadSamples writes a sample command for each file, a synth, and a zones command that names them with their notes; the names are described', c)
+
+  // A file that is not there: one message, and the others play in its place.
+  said = await saying(async () => {
+    const { s, settle, hear, player } = await studio({ read: undefined, resolve: (path) => 'data:audio/wav;base64,' + (files[path] ? Buffer.from(files[path]).toString('base64') : '') })
+    const piano = s.loadSamples({ C3: 'p-C3.wav', C4: 'missing-C4.wav', C5: 'p-C5.wav' })
+    await settle()
+    await new Promise((yes) => setTimeout(yes, 50))
+    await player.render(0.05)
+    const heard = [Math.round(cents(pitch(await hear(piano, 58)), 58)), Math.round(cents(pitch(await hear(piano, 62)), 62))]
+    const far = player.target(piano._id).get('zones')
+    say(Math.abs(heard[0]) < 4 && Math.abs(heard[1] - 60) < 4 && far.length === 2 && far[0].to === 59 && far[1].from === 60, 'with one file missing the others take its keys between them', [heard, far])
+  })
+  say(said.length === 1 && /loadSamples: "missing-C4.wav" could not be loaded \(.*\), so the other recordings play in its place/.test(said[0]), 'and one message names the file that failed', said)
+
+  // Letting go: a removed instrument's recordings are freed, so there is room for as many again.
+  said = await saying(async () => {
+    const tiny = toWav(new Float32Array(64).fill(0.5), new Float32Array(64).fill(0.5), SR)
+    const many = Object.fromEntries(Array.from({ length: 100 }, (_, i) => [i, 'tiny.wav']))
+    const { s, settle, hear } = await studio({ read: async (path) => (path === 'tiny.wav' ? tiny : files[path] || null) })
+    for (let round = 0; round < 8; round++) {
+      const big = s.loadSamples(Array.from({ length: 100 }, (_, i) => ({ file: 'tiny.wav', note: i, start: round })))
+      await settle()
+      big.remove()
+    }
+    const piano = s.loadSamples(['p-C3.wav', 'p-C4.wav', 'p-C5.wav'])
+    await settle()
+    const heard = Math.round(cents(pitch(await hear(piano, 60)), 60))
+    piano.remove()
+    await settle()
+    const gone = peak(await hear(piano, 60))
+    say(heard === 30 && gone === 0 && many[0] === 'tiny.wav', 'remove() frees an instrument\'s recordings: eight instruments of a hundred recordings each, one after another, leave room for a piano, and a removed one is silent', [heard, gone])
+  })
+  say(said.length === 0, 'and nothing is said about running out of room', said)
+
+  // As a song's instrument.
+  {
+    const player = await createOfflinePlayer()
+    const s = createSound({ sound: player, clock: () => player.time, read: async (path) => files[path] || readFile(join(ROOT, 'examples', path)).catch(() => null) })
+    const piano = s.loadSamples(['p-C3.wav', 'p-C4.wav', 'p-C5.wav'], { reverb: 0.2 })
+    s.playSong('songs/night_drive.json', { patches: { tune: piano } })
+    await new Promise((yes) => setTimeout(yes, 60))
+    s.flush()
+    const out = await player.render(2)
+    const tune = player.target('song:tune')
+    say(tune.get('zones')?.length === 3 && tune.get('wave') === 'sample' && tune.get('reverb') === 0.2 && peak(out.left) > 0.02, 'an instrument from loadSamples can be a song instrument\'s patch: the song\'s synth has its recordings and its settings', [tune.get('zones'), tune.get('wave'), peak(out.left)])
+  }
+}
+
 // --- values that mean something else are labelled for a control: a reverb's decay of 0 is the type's own
 {
   const s = createSound({ sound: { send() {} }, batch: 'manual' })

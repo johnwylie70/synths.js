@@ -428,6 +428,40 @@ const keys = makeSynth({ sample: "piano.wav", note: "C4", cutoff: 1800, release:
 
 `saveSound(kick, "kick.wav")` saves a sample, or a recording of your own, as a WAV file.
 
+### Several recordings for one instrument
+
+One recording stretched over a whole keyboard sounds thin at one end and muddy at the other. A real instrument is several recordings, each playing the keys near the note it was recorded at:
+
+```js
+const piano = loadSamples({ C2: "piano-C2.wav", "F#2": "piano-Fs2.wav", C3: "piano-C3.wav" })   // the note each was played at
+piano.play("E2")                  // the nearest recording (F#2), moved down to E
+piano.reverb = 0.3                // a synth like any other: settings, dials, keyboard(piano), a tune, an arpeggio
+```
+
+The keys are split halfway between neighbours, and every key plays, below the lowest recording and above the highest too. With the notes in the files' names there is less to write: `loadSamples(["piano-C2.wav", "piano-Fs2.wav", "piano-C3.wav"])` reads `C2`, `Fs2` (or `F#2`, `Gb2`) and `C3` from them, and a number alone (`60.wav`) is that key. A name with no note in it is refused, with what to do about it.
+
+A drum kit is the same with `{ kit: true }`: each key is its own sound, played as it was recorded whatever the key, to its end, and the keys between are silent.
+
+```js
+const kit = loadSamples({ C2: "kick.wav", D2: "snare.wav", "F#2": "hat.wav" }, { kit: true })
+kit.playNotes("C2 F#2 D2 F#2", 0.25, { repeat: true })
+```
+
+What else can be said:
+
+- **`{ crossfade: 3 }`** fades neighbouring recordings into each other over three keys, where a change from one to the next would be heard. `{ crossfade: { keys: 3, loud: 0.1 } }` fades the loudness layers too.
+- **Layers by how hard a note is played**, in the explicit form, a list of `{ file, note, … }`: `loadSamples([{ file: "soft-C4.wav", note: "C4", loud: [0, 0.5] }, { file: "hard-C4.wav", note: "C4", loud: [0.5, 1] }])`. `loud` is the note's volume, from and to.
+- **Takes that go in turn**: several files for one note, `{ C4: ["snare-1.wav", "snare-2.wav"] }`, and each hit plays the next.
+- **By hand**, for each recording: `from` and `to` (its keys), `tune` (cents), `volume`, `pan`, `release` (seconds), `oneShot`, `asRecorded`, `loop`, `start` (frames). `{ loop: true }` and `{ oneShot: true }` after the files are for all of them.
+- **Release.** With nothing said each recording has a release that suits its note, longer for the low ones (0.48 seconds at C2, 0.19 at C4, 0.08 at C6), as a piano's are. `loadSamples(files, { release: 1 })` gives every recording that release in their place; set afterwards (`piano.release = 1`) it changes nothing while each recording has its own.
+- **On an ordinary synth**: `lead.samples = { C3: "a.wav", C4: "b.wav" }`, `lead.setSamples(files, { crossfade: 3 })` or `makeSynth({ samples: { … }, cutoff: 1800 })`, and the recordings go through that synth's filter and envelope. `lead.samples = null` takes them away. (`lead.samples()` is still the wave for a scope.)
+- **Reading it back**: `piano.zones()` is the list as it stands, `[{ file, note, from, to, loud, tune, volume, pan, release, oneShot, asRecorded, take }]`, and `piano.describe("zones")` has the same for an editor.
+- **In a song**: `playSong("tune.json", { patches: { keys: piano } })` gives a song's instrument the piano.
+
+The files are fetched together, and each recording plays as soon as it has arrived. If one cannot be loaded, the console names it once and its neighbours take its keys. `piano.remove()` lets go of the recordings as well as the synth. An instrument may have 512 recordings, and a note plays at most 4 at once.
+
+[`examples/piano.js`](examples/piano.js) is a piano of nine real recordings with a keyboard to play it.
+
 ## Your voice
 
 The microphone is a synth whose sound comes in instead of being made. Ask for it, give it a voice, and listen:
