@@ -20,6 +20,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const PICTURES = resolve(ROOT, '../pictures.js')
 const CONTROLS = resolve(ROOT, '../controls.js')
+const DIALS = resolve(ROOT, '../dials.js')
 const from = process.env.PLAYWRIGHT || 'playwright'
 const playwright = await import(from.startsWith('/') ? pathToFileURL(join(from, 'index.mjs')).href : from)
 
@@ -28,7 +29,7 @@ const server = createServer(async (req, res) => {
   const path = decodeURIComponent(new URL(req.url, 'http://x').pathname)
   if (path === '/test.html') return res.writeHead(200, { 'content-type': 'text/html' }).end('<!doctype html><body><button id="b" style="width:200px;height:100px">tap</button>')
   // pictures.js, for the example that draws: from the repository beside this one.
-  const file = path.startsWith('/pictures.js/') ? join(PICTURES, path.slice(13)) : path.startsWith('/controls.js/') ? join(CONTROLS, path.slice(13)) : join(ROOT, path)
+  const file = path.startsWith('/pictures.js/') ? join(PICTURES, path.slice(13)) : path.startsWith('/controls.js/') ? join(CONTROLS, path.slice(13)) : path.startsWith('/dials.js/') ? join(DIALS, path.slice(10)) : join(ROOT, path)
   let body
   try { body = await readFile(file) } catch { return res.writeHead(404).end() }
   res.writeHead(200, { 'content-type': TYPES[extname(path)] || 'application/octet-stream', 'access-control-allow-origin': '*' }).end(body)
@@ -46,7 +47,7 @@ const say = (ok, engine, what, got) => {
 }
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
-// ONLY=midi runs the MIDI cases alone.
+// ONLY=midi runs the MIDI cases alone, and ONLY=examples the examples.
 const ONLY = process.env.ONLY
 
 // Helpers every test page is given, as window.T.
@@ -446,7 +447,7 @@ async function examples(name, browser) {
   for (const file of files) {
     const source = await readFile(join(ROOT, 'examples', file), 'utf8')
     const scene = source.includes('await use(')
-    if (scene && !(existsSync(join(PICTURES, 'pictures.js')) && (!source.includes('controls.js') || existsSync(join(CONTROLS, 'controls.js'))))) { console.log(`     ${name}: ${file} needs pictures.js (and controls.js) beside this repository, skipped`); continue }
+    if (scene && !(existsSync(join(PICTURES, 'pictures.js')) && (!source.includes('controls.js') || existsSync(join(CONTROLS, 'controls.js'))) && (!source.includes('dials.js') || existsSync(join(DIALS, 'dials.js'))))) { console.log(`     ${name}: ${file} needs pictures.js (and controls.js) beside this repository, skipped`); continue }
     await page.goto(`${at}/examples/index.html?run=${file}${scene ? '&pictures=/pictures.js/pictures.js' : ''}`)
     await page.evaluate(HELPERS)
     // A press that is held and moved, as a person would: the theremin sounds only while something is pressed.
@@ -732,7 +733,7 @@ for (const name of ['chromium', 'webkit']) {
   try { browser = await playwright[name].launch(ALLOWED[name]) } catch { console.log(`${name}: not installed, skipped`); continue }
   try {
     if (!ONLY) await withSound(name, browser)
-    if (!ONLY) await examples(name, browser)
+    if (!ONLY || ONLY === 'examples') await examples(name, browser)
     if (!ONLY || ONLY === 'midi') await midi(name, browser)
   } catch (e) { say(false, name, 'the tests ran to the end', String(e?.stack || e)) }
   await browser.close()
