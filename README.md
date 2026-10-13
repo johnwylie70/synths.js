@@ -95,6 +95,27 @@ playNote("Cm7")                      // a chord by name: C minor seventh
 playNote("C4", { length: 2, volume: 0.3, pan: -1, after: 0.5 })   // the same things by name; pan -1 is left, 1 is right
 ```
 
+### Bending a note
+
+A note's pitch can move, on any synth and on a sample:
+
+```js
+lead.play("A4", 1, { bend: "scoop" })                  // up into the note from just below, as a singer starts one
+lead.play("C5", 1, { glide: "sixteenth" })             // slides to C5 from the note this synth played last
+lead.play("E5", 2, { vibrato: true })                  // begins straight, then starts to sing
+lead.play("A3", 1, { bend: "fall" })                   // droops away at its end
+lead.play("C4", 1, { slide: 12 })                      // an octave up, at once: a laser
+```
+
+| | |
+|---|---|
+| `glide` | the note starts at the pitch of the synth's last note and slides to its own: `true` (a sixteenth), a note length, or seconds |
+| `bend` | `"scoop"` (from 2 semitones below, over a sixteenth), `"fall"` (5 down over an eighth, ending with the note), `"dip"` (a semitone down and back), or `{ to: 2, over: "eighth" }`: how far in semitones, or to a note by name, and how long. `{ shape: "scoop", to: -5 }` is a scoop of another size |
+| `slide` | a bend by a number of semitones over a sixteenth, or `{ to, over }` |
+| `vibrato` | `true`, or `{ depth: 0.3, rate: 6, delay: "eighth" }`: semitones each way, times a second, and how long the note sounds first |
+
+They are for one note at a time (a chord's notes would all be moved to one pitch), in `play`, `start` and `playNote`; a tune from `playNotes` does not take them. A note that is held can be moved as it sounds: `const note = lead.start("C4")`, then `note.slideTo("E4", 0.2)`, `note.vibrato()` and `note.vibrato(false)`.
+
 ### Chords by name
 
 A chord is a note and a kind: `"C"`+`"m7"` is `"Cm7"`. The kinds are `major` (or `maj`), `minor` (or `m`), `dim`, `aug`, `sus2`, `sus4`, `5`, `6`, `m6`, `7`, `maj7`, `m7`, `dim7`, `m7b5`, `add9`, `9`, `maj9`, `m9` and `octave`. Wherever a note is played, a chord's name plays all its notes: `lead.play("Fmaj7", 1)`, `playNotes("Am F C G", 0.5)`. `chordNotes("Cm7")` gives the notes as numbers.
@@ -222,6 +243,8 @@ chord.stop()
 ```
 
 A synth can have a pattern of its own, which every arpeggio of it follows unless it says another: `lead.arpPattern = "trance"` (or the steps, or a list of them such as `[1, 0, 3, 2]`, where 0 is a rest). It reads back as its text, `"1^ - 3 2 - 1^ 3 -"`, and `lead.arpPattern = "off"` takes it away. `lead.arpStep()` is the step that is sounding, counted from 0, for drawing it.
+
+For a sequencer of your own that looks ahead: `soundTime()` is the sound's clock in seconds, and `lead.play("C4", { at: soundTime() + 0.25 })`, `lead.noteOn("C4", 0.8, { at })` and `lead.noteOff("C4", { at })` happen on the exact sample of that time.
 
 A chord has room for eight notes. Every synth has `arp` and `startArp`; with no synth (`playArp`, `startArp`) they play on a plain square wave. The length after the chord is how long the arpeggio sounds, as for any note (half a second unless you say), and it takes `volume`, `pan`, `after`, `at` and `beat` like any note; `chord.change("F", { after: 2 })` changes it later. A struck arpeggio is ordinary notes, so it goes through the synth's envelope and filter at every step, and plays the right recordings of an instrument from `loadSamples`. The tempo an arpeggio in steps keeps is the page's: where several scenes share a page, it is the tempo that was set last.
 

@@ -59,6 +59,9 @@ The first version.
 - The trance gate: `pad.gate("x.x.xx.x")` chops a synth's sound into a pattern of steps in time with the tempo, by its steps, by name (`"trance"`, `"pump"`) or as a list of levels, with `{ rate, depth, smooth, swing, stereo, sends }`; `pad.gate("off")`. Its parts are settings for dials (`gateDepth`, `gateRate`, `gateSmooth`, `gateSwing`) and `pad.gatePattern`.
 - `lead.arpPattern`: a synth's own pattern for its arpeggios, set as text, a name or a list and read back as text, taken by the arpeggio that is sounding at its next step. `lead.arpStep()` and `pad.gateStep()` are the step that is sounding, for an editor to light.
 
+- A note's pitch can move: `lead.play("A4", 1, { bend: "scoop" })`, `"fall"`, `"dip"`, `{ to: 2, over: "eighth" }`; `{ glide: "sixteenth" }` slides to the note from the synth's last one; `{ slide: 12 }`; `{ vibrato: true }` or `{ depth, rate, delay }`, and `note.vibrato()` on a note that is held. In `play`, `start` and `playNote`.
+- `lead.noteOn("C4", 0.8, { at })` and `lead.noteOff("C4", { at })` take a time of `soundTime()`, exact to the sample, for a sequencer that looks ahead.
+
 ### Fixed
 
 - `song.channel(n).level()` read zero for a channel whose instrument is a synth patch. It is now what is heard on the channel whichever kind of instrument plays it (the engine, synths-core a0b6535, shows a channel's synth notes on the channel's own meter).

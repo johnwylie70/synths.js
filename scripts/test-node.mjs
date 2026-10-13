@@ -1135,6 +1135,50 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
       'a gate takes a pattern by name, a rate as a note length and a depth (half closed is half as loud), a list of levels is its text, pad.gate("off") opens it again, the microphone\'s own gate is still its noise gate, and nonsense is refused', [halved, named, listed, open, refused])
   }
 
+  // The pitch of a note moved: a glide from the last note, bends by their shapes, a slide, a vibrato.
+  {
+    const semis = (a, from, to) => +(12 * Math.log2(pitch(a, Math.round(from * SR), Math.round(to * SR)) / hzOf(60))).toFixed(1)
+    const one = async (play) => { const { s, go } = await studio(120); const lead = s.makeSynth(CLICK); play(lead, s); return go(1) }
+    const glided = await one((lead, s) => { lead.play('C4', 0.1); lead.play('E4', 0.6, { after: 0.2, glide: 0.2 }) })
+    const scoop = await one((lead) => lead.play('C4', 0.6, { bend: 'scoop' }))
+    const up = await one((lead) => lead.play('C4', 0.6, { bend: { to: 2, over: 0.2 } }))
+    const named = await one((lead) => lead.play('C4', 0.6, { bend: { to: 'E4', over: 'sixteenth' } }))
+    const dip = await one((lead) => lead.play('C4', 0.6, { bend: 'dip' }))
+    const fall = await one((lead) => lead.play('C4', 0.6, { bend: 'fall' }))
+    const slid = await one((lead) => lead.play('C4', 0.6, { slide: 12 }))
+    const got = {
+      glide: [semis(glided, 0.2, 0.215), semis(glided, 0.29, 0.31), semis(glided, 0.45, 0.6)],
+      scoop: [semis(scoop, 0, 0.012), semis(scoop, 0.2, 0.4)],
+      up: [semis(up, 0, 0.012), semis(up, 0.09, 0.11), semis(up, 0.3, 0.5)],
+      named: semis(named, 0.2, 0.5),
+      dip: [semis(dip, 0.115, 0.135), semis(dip, 0.3, 0.5)],
+      fall: [semis(fall, 0.1, 0.3), semis(fall, 0.58, 0.598)],
+      slid: semis(slid, 0.2, 0.5),
+    }
+    const near = (v, want, by = 0.3) => Math.abs(v - want) <= by
+    say(near(got.glide[0], 0, 0.5) && near(got.glide[1], 2, 0.5) && near(got.glide[2], 4, 0.05) && near(got.scoop[0], -2, 0.4) && near(got.scoop[1], 0, 0.05) && near(got.up[0], 0, 0.3) && near(got.up[1], 1, 0.3) && near(got.up[2], 2, 0.05) && near(got.named, 4, 0.05)
+      && near(got.dip[0], -1, 0.3) && near(got.dip[1], 0, 0.05) && near(got.fall[0], 0, 0.05) && got.fall[1] < -3.5 && near(got.slid, 12, 0.05),
+      'play(note, { glide }) slides to the note from the synth\'s last one; bend: "scoop" comes up into it, { to: 2, over } bends there and stays, a note by name is bent to, "dip" goes down and comes back, "fall" droops at the note\'s end, and slide: 12 is an octave up over a sixteenth', got)
+
+    // A vibrato begins after its delay: the pitch is steady, and then is not.
+    const sung = await one((lead) => lead.play('C4', 0.9, { vibrato: { depth: 1, rate: 8, delay: 0.3 } }))
+    const held = await (async () => { const { s, go } = await studio(120); const note = s.makeSynth(CLICK).start('C4'); const a = await go(0.3); note.vibrato({ depth: 1, rate: 8 }); const b = await go(0.4); note.vibrato(false); await go(0.1); return [a, b, await go(0.3)] })()
+    const spread = (a, from, to) => { const ps = []; let last = -1; for (let i = Math.round(from * SR) + 1; i < Math.round(to * SR); i++) if (a[i - 1] < 0 && a[i] >= 0) { const at = i - a[i] / (a[i] - a[i - 1]); if (last >= 0) ps.push(SR / (at - last)); last = at } return +(12 * Math.log2(Math.max(...ps) / Math.min(...ps))).toFixed(2) }
+    const wobble = [spread(sung, 0.02, 0.28), spread(sung, 0.35, 0.85), spread(held[0], 0.02, 0.28), spread(held[1], 0.05, 0.38), spread(held[2], 0.02, 0.28)]
+    say(wobble[0] < 0.05 && wobble[1] > 1.5 && wobble[1] < 2.3 && wobble[2] < 0.05 && wobble[3] > 1.5 && wobble[4] < 0.05,
+      'vibrato: { depth: 1, rate: 8, delay: 0.3 } leaves the note steady for 0.3 seconds and then moves it a semitone each way; note.vibrato() gives one to a note that is sounding, and note.vibrato(false) stops it', wobble)
+
+    // A sequencer looking ahead: a key down at a time of soundTime() is on that exact sample.
+    const { s, go } = await studio(120)
+    const drum = s.makeSynth(CLICK)
+    const t0 = s.soundTime()
+    for (let i = 0; i < 4; i++) { drum.noteOn('C4', 0.8, { at: t0 + 0.1 + i * 0.125 }); drum.noteOff('C4', { at: t0 + 0.15 + i * 0.125 }) }
+    const hits = onsets(await go(1))
+    const refused = [thrown(() => drum.play('C4', { bend: 'wobble' })), thrown(() => drum.play('C4', { bend: 'dip', slide: 2 })), thrown(() => drum.play('C4', { vibrato: 3 })), thrown(() => drum.play(['C4', 'E4'], { bend: { to: 'G4' } }))]
+    say(same(hits, [4800, 10800, 16800, 22800]) && same(describe().moves.shapes, ['scoop', 'fall', 'dip']) && refused.every((t) => typeof t === 'string' && t.length > 20),
+      'noteOn(note, velocity, { at }) and noteOff(note, { at }) are on the exact sample of a time of soundTime(), for a sequencer that looks ahead; what a note\'s pitch cannot be told is refused', [hits, refused])
+  }
+
   const wrong = [() => createSound({ sound: { send() {} } }).makeSynth('lead').arp('Cm7', { step: 'sixteenth', speed: 30 }), () => createSound({ sound: { send() {} } }).makeSynth('lead').arp('Cm7', { style: 'bounce' }),
     () => createSound({ sound: { send() {} } }).makeSynth('lead').arp('Cm7', { pattern: '1 x 3' }), () => createSound({ sound: { send() {} } }).makeSynth('lead').arp('Cm7', { accent: 'loud' }), () => createSound({ sound: { send() {} } }).makeSynth('lead').arp('Cm7', { order: 'sideways' })].map(thrown)
   say(wrong.every((t) => typeof t === 'string') && /step .* or speed .*, not both/.test(wrong[0]) && /"strike".*"slide"/.test(wrong[1]) && /a pattern is up to 32 steps with spaces between them/.test(wrong[2]) && /up-down2/.test(wrong[4]), 'what an arpeggio cannot be told is refused in plain words', wrong)

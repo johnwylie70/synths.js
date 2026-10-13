@@ -219,6 +219,9 @@ Start a note, or several at once.
 | `pan` | optional, -1 to 1, for this note alone |
 | `h` | optional: a handle for `off` and `voice` |
 | `arp` | optional: an [arpeggio](#an-arpeggio) for this note |
+| `glide` | optional, seconds: a single note starts at the pitch of the synth's last note and slides to its own in that time |
+| `bend` | optional, for a single note: `{ to, over, shape }`. `to` is semitones from the note (96 either way), `over` seconds (0.125). With no `shape` the pitch goes there and stays. `"scoop"`: it starts `to` away (-2) and comes to the note. `"dip"`: it goes `to` away (-1) and comes back, half the time each way. `"fall"`: it goes `to` away (-5), ending when the note's `len` does (at once for a note with none) |
+| `vibrato` | optional, for a single note: `{ depth, rate, delay }`: semitones each way (0.3), times a second (6), seconds before it begins (0.25) |
 
 Every note in a list shares the handle and is let go together.
 
@@ -275,7 +278,8 @@ Change a note that is sounding, by its handle.
 
 `pitch` (a note) or `freq` (in Hz) moves it, over `glide` seconds if given. `vol` is a multiplier, 0 to 4 (1 when
 a note starts). `pan` is -1 to 1. `kill: true` cuts it off at once. `arp` gives it an
-[arpeggio](#an-arpeggio) or changes the one it has, and `arp: null` takes it away.
+[arpeggio](#an-arpeggio) or changes the one it has, and `arp: null` takes it away. `vibrato` gives the note a vibrato
+as it sounds (`{ depth, rate, delay }`), and `vibrato: false` stops it.
 
 ### `sound`
 

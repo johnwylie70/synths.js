@@ -1768,6 +1768,29 @@
    "scale": 1
   }
  },
+ "moves": {
+  "words": [
+   "glide",
+   "bend",
+   "slide",
+   "vibrato"
+  ],
+  "shapes": [
+   "scoop",
+   "fall",
+   "dip"
+  ],
+  "bend": [
+   "to",
+   "over",
+   "shape"
+  ],
+  "vibrato": [
+   "depth",
+   "rate",
+   "delay"
+  ]
+ },
  "arp": {
   "words": [
    "speed",

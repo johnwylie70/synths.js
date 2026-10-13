@@ -1446,7 +1446,7 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
   const params = allSettings()
   const partParams = PARAMS.filter((p) => p[0] < 200)
   const id = (name) => params.get(key(name)).id
-  const PARAM = 4, NOTE_ON = 1, NOTE_OFF = 2, VOICE_PITCH = 6, VOICE_FREQ = 7, VOICE_VOLUME = 8, VOICE_PAN = 9, VOICE_KILL = 11, ARP = 13, ARP_MORE = 14, ARP_STYLE = 17, ARP_BEAT = 18, ARP_NOTES = 19, ARP_PATTERN = 21
+  const PARAM = 4, NOTE_ON = 1, NOTE_OFF = 2, VOICE_PITCH = 6, VOICE_FREQ = 7, VOICE_VOLUME = 8, VOICE_PAN = 9, VOICE_KILL = 11, VOICE_VIBRATO = 23, ARP = 13, ARP_MORE = 14, ARP_STYLE = 17, ARP_BEAT = 18, ARP_NOTES = 19, ARP_PATTERN = 21
   const canArp = ENGINE.events.includes('arp')
   const MASTER = id('master.volume')
   // The live input, in an engine that has one: which part it plays through, and whether it is heard.
@@ -1552,6 +1552,9 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
     return had.slot
   }
   const TEMPO = setting('tempo')?.id
+  const VOICE_VIBRATO_OK = ENGINE.events.includes('voice_vibrato')
+  // A vibrato of a note's own: semitones each way, times a second, after a delay. false, or a depth of 0, stops it.
+  const vibrate = (rec, h, v, at) => { const o = v && typeof v === 'object' ? v : {}; event(at, VOICE_VIBRATO, rec.part, h, v === false ? 0 : clamp(o.depth == null ? 0.3 : +o.depth || 0, 0, 12), clamp(+o.rate || 6, 0.1, 40), Math.max(0, o.delay == null ? 0.25 : +o.delay || 0)) }
   const GATE_DEPTH = setting('gate.depth')?.id, GATE_RATE = setting('gate.rate')?.id
   const CLOCK = ENGINE.events.indexOf('clock') + 1
   // THE BEAT, as the engine counts it, kept here too so that a display can be told which step is sounding: the
@@ -1828,6 +1831,25 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
       for (const n of list) event(at, NOTE_ON, rec.part, h, n, c.vel == null ? 0.8 : clamp(c.vel, 0, 1))
       if (c.pan) event(at, VOICE_PAN, rec.part, h, clamp(c.pan, -1, 1))
       if (c.arp && !played) arpeggio(at, rec.part, h, c.arp, false, rec)
+      // THE PITCH MOVED, for one note (a chord under one handle would be squeezed onto one pitch). A glide starts
+      // the note at the pitch of the synth's last note and slides it to its own. A bend goes `to` semitones from
+      // the note over a time and stays; a scoop starts that far off and comes to the note; a dip goes and comes
+      // back; a fall is a bend that ends with the note. A vibrato begins after its delay.
+      if (list.length === 1) {
+        const n = list[0], time = at ?? 0
+        if (c.glide > 0 && rec.lastNote != null && rec.lastNote !== n) { event(at, VOICE_PITCH, rec.part, h, rec.lastNote, 0); event(at, VOICE_PITCH, rec.part, h, n, +c.glide) }
+        const bend = c.bend && typeof c.bend === 'object' ? c.bend : null
+        if (bend) {
+          const shape = bend.shape, over = bend.over > 0 ? +bend.over : 0.125
+          const to = Number.isFinite(+bend.to) && bend.to != null ? clamp(+bend.to, -96, 96) : shape === 'fall' ? -5 : shape === 'dip' ? -1 : -2
+          if (shape === 'scoop') { event(at, VOICE_PITCH, rec.part, h, n + to, 0); event(at, VOICE_PITCH, rec.part, h, n, over) }
+          else if (shape === 'dip') { event(at, VOICE_PITCH, rec.part, h, n + to, over / 2); event(time + over / 2, VOICE_PITCH, rec.part, h, n, over / 2) }
+          else if (shape === 'fall' && c.len != null) event(time + Math.max(0, c.len - over), VOICE_PITCH, rec.part, h, n + to, over)
+          else event(at, VOICE_PITCH, rec.part, h, n + to, over)
+        }
+        if (c.vibrato && VOICE_VIBRATO_OK) vibrate(rec, h, c.vibrato, at)
+      }
+      if (list.length) rec.lastNote = list[list.length - 1]
       if (c.len != null && list.length) event(at + Math.max(0.001, c.len), NOTE_OFF, rec.part, h, 0)
     },
     off(c, at) {
@@ -1850,6 +1872,7 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
         arpeggio(at, rec.part, c.h, c.arp, false, rec)
         if (rec.arpNow && rec.arpNow.h === c.h) { if (c.arp) { rec.arpNow.done = arpSteps(rec.arpNow, at); rec.arpNow.at = at; rec.arpNow.arp = c.arp } else rec.arpNow = null }
       }
+      if (c.vibrato !== undefined && VOICE_VIBRATO_OK) vibrate(rec, c.h, c.vibrato, at)
       if (c.kill) event(at, VOICE_KILL, rec.part, c.h, 0)
     },
     sound(c, at) {
@@ -3583,9 +3606,44 @@ export function createSound(options = {}) {
   }
 
   /** A note that is sounding: what start() gives back. */
+  /**
+   * HOW A NOTE'S PITCH MOVES, from what play() or start() was told, as the command carries it (times in seconds):
+   *   glide    the note slides to its pitch from the synth's last note: true (a sixteenth), seconds, or a note length
+   *   bend     "scoop" (up into the note), "fall" (drooping away at its end), "dip" (down and back), or
+   *            { to: semitones or a note, over: seconds or a note length, shape }
+   *   slide    a bend by so many semitones over a sixteenth: 12, or { to, over }
+   *   vibrato  true, or { depth: semitones each way (0.3), rate: times a second (6), delay: before it begins ("eighth") }
+   */
+  const SHAPES = ['scoop', 'fall', 'dip']
+  function movesOf(o, said) {
+    const out = {}
+    const time = (value, what, usual) => (value === undefined || value === true ? length(usual, what) : typeof value === 'string' ? length(value, what) : amount(value, what, 0, 60))
+    if (o.glide !== undefined && o.glide !== false && o.glide !== null) out.glide = time(o.glide, `${said}: glide`, 'sixteenth')
+    if (o.bend !== undefined && o.slide !== undefined) throw new Error(`${said}: a note has a bend or a slide, not both`)
+    const given = o.bend !== undefined ? o.bend : typeof o.slide === 'number' ? { to: o.slide, over: 'sixteenth' } : o.slide
+    if (given !== undefined && given !== false && given !== null) {
+      const b = typeof given === 'string' ? { shape: given } : given
+      if (!b || typeof b !== 'object' || (b.shape !== undefined && !SHAPES.includes(b.shape)) || (b.shape === undefined && b.to === undefined)) throw new Error(`${said}: ${o.bend !== undefined ? 'bend' : 'slide'} is ${o.bend !== undefined ? '"scoop", "fall", "dip", or ' : 'a number of semitones, or '}how far and how long in braces, as in { to: 2, over: "eighth" }, not ${shown(given)}`)
+      const bend = {}
+      if (b.shape) bend.shape = b.shape
+      if (b.to !== undefined) {
+        // A note by name is that far from the note being played.
+        if (typeof b.to === 'string') { const from = o.note === undefined || o.note === null ? null : notesOf(o.note); if (!from || from.length !== 1) throw new Error(`${said}: a bend to a note by name needs one note to bend from`); bend.to = noteNumber(b.to) - from[0] } else bend.to = amount(b.to, `${said}: bend to`, -96, 96)
+      }
+      bend.over = time(b.over, `${said}: over`, b.shape === 'scoop' || o.bend === undefined ? 'sixteenth' : 'eighth')
+      out.bend = bend
+    }
+    if (o.vibrato !== undefined && o.vibrato !== false && o.vibrato !== null) {
+      const v = o.vibrato === true ? {} : o.vibrato
+      if (!v || typeof v !== 'object') throw new Error(`${said}: vibrato is true, or its depth, rate and delay in braces, as in { depth: 0.5, rate: 5 }, not ${shown(o.vibrato)}`)
+      out.vibrato = { depth: v.depth === undefined ? 0.3 : amount(v.depth, `${said}: vibrato depth`, 0, 12), rate: v.rate === undefined ? 6 : amount(v.rate, `${said}: vibrato rate`, 0.1, 40), delay: v.delay === undefined ? length('eighth', said) : typeof v.delay === 'string' ? length(v.delay, `${said}: vibrato delay`) : amount(v.delay, `${said}: vibrato delay`, 0, 60) }
+    }
+    return out
+  }
+
   class Note {
     constructor(synth, h) { this.synth = synth; this.h = h }
-    stop() { command({ op: 'off', id: this.synth, h: this.h, t: clock() }); return this }
+    stop(o = {}) { command({ op: 'off', id: this.synth, h: this.h, t: o && typeof o === 'object' ? when(o, 'stop') : clock() }); return this }
     cut() { command({ op: 'voice', id: this.synth, h: this.h, kill: true, t: clock() }); return this }
     slideTo(note, time = 0) { command({ op: 'voice', id: this.synth, h: this.h, pitch: noteNumber(note), glide: time, t: clock() }); return this }
     slide_to(note, time) { return this.slideTo(note, time) }
@@ -3593,6 +3651,8 @@ export function createSound(options = {}) {
     set frequency(hz) { command({ op: 'voice', id: this.synth, h: this.h, freq: amount(hz, 'frequency', 1, 20000), t: clock() }) }
     set volume(v) { command({ op: 'voice', id: this.synth, h: this.h, vol: amount(v, 'volume', 0, 4), t: clock() }) }
     set pan(v) { command({ op: 'voice', id: this.synth, h: this.h, pan: amount(v, 'pan', -1, 1), t: clock() }) }
+    /** Give the note a vibrato as it sounds: note.vibrato(), note.vibrato({ depth: 0.5, rate: 5, delay: 0 }), and note.vibrato(false) stops it. */
+    vibrato(v = true) { command({ op: 'voice', id: this.synth, h: this.h, vibrato: v === false ? false : movesOf({ vibrato: v === true ? { delay: 0 } : v }, 'vibrato').vibrato, t: clock() }); return this }
   }
 
   // The chord an arpeggio is given -> its notes as numbers: a list of notes, a chord by name, or a root and a kind.
@@ -3725,21 +3785,23 @@ export function createSound(options = {}) {
     /** play(note, length, volume) or play(note, { length, volume, pan, after, at, beat }). No note: the synth's own. */
     play(...args) {
       const o = choices(args, ['note', 'length', 'volume'])
+      const moves = movesOf(o, 'play')
       const c = { op: 'note', id: this._id, note: o.note === undefined || o.note === null ? null : notesOf(o.note), len: o.length === null ? null : o.length === undefined ? this._length : length(o.length, 'play: the length'), t: when(o, 'play') }
       if (o.volume !== undefined) c.vel = amount(o.volume, 'play: volume')
       if (o.pan !== undefined) c.pan = amount(o.pan, 'play: pan', -1, 1)
-      command(c)
+      command(Object.assign(c, moves))
       return this
     }
 
     /** Start a note that stays until it is stopped: `const note = lead.start("C4")`, then `note.stop()`. */
     start(...args) {
       const o = choices(args, ['note', 'volume'])
+      const moves = movesOf(o, 'start')
       const h = (handles = handles >= 0x7ffffff0 ? 1 : handles + 1)
       const c = { op: 'note', id: this._id, note: o.note === undefined || o.note === null ? null : notesOf(o.note), len: null, h, t: when(o, 'start') }
       if (o.volume !== undefined) c.vel = amount(o.volume, 'start: volume')
       if (o.pan !== undefined) c.pan = amount(o.pan, 'start: pan', -1, 1)
-      command(c)
+      command(Object.assign(c, moves))
       return new Note(this._id, h)
     }
 
@@ -3965,15 +4027,16 @@ export function createSound(options = {}) {
       if (this._sample) command({ op: 'sample', id: this._sample, loop: this._loop, t: clock() })
     }
     /** A key goes down, and comes up: what a keyboard plays. The note stays until its noteOff. */
-    noteOn(note, velocity = 0.8) {
+    noteOn(note, velocity = 0.8, o = {}) {
       const n = noteNumber(note)
-      this._held.get(n)?.stop()
-      this._held.set(n, this.start(n, amount(velocity, 'noteOn: velocity')))
+      this._held.get(n)?.stop(o)
+      // { at } is a time of soundTime(): the key goes down on that exact sample (a sequencer looking ahead).
+      this._held.set(n, this.start(n, amount(velocity, 'noteOn: velocity'), o && o.at !== undefined ? { at: o.at } : {}))
       return this
     }
-    noteOff(note) {
+    noteOff(note, o = {}) {
       const n = noteNumber(note)
-      this._held.get(n)?.stop()
+      this._held.get(n)?.stop(o)
       this._held.delete(n)
       return this
     }
@@ -4779,6 +4842,8 @@ export function describe() {
     settings: PARAMS.map(([id, name, kind, min, max, def, unit, choices]) => ({ id, name, kind: KINDS[kind], min, max, default: def, unit, ...(choices ? { choices } : {}), ...(LABELS[name] ? { labels: LABELS[name] } : {}), scope: id < 200 ? 'synth' : 'all' })),
     names: Object.fromEntries(Object.entries(ALIASES).map(([alias, to]) => [alias, Array.isArray(to) ? { setting: to[0], scale: to[1] } : { setting: to, scale: 1 }])),
     // An arpeggio: what it may be told, its two styles, and the patterns it can follow by name.
+    // How a note's pitch can be moved, in play() and start() and in a note command.
+    moves: { words: ['glide', 'bend', 'slide', 'vibrato'], shapes: ['scoop', 'fall', 'dip'], bend: ['to', 'over', 'shape'], vibrato: ['depth', 'rate', 'delay'] },
     arp: { words: ['speed', 'step', 'order', 'style', 'gate', 'octaves', 'swing', 'accent', 'pattern'], styles: ['slide', 'strike'], patterns: ARP_PATTERNS, patternSteps: ARP_PATTERN_STEPS, setting: 'arpPattern', step: 'arpStep', fields: ['offsets', 'rate', 'beats', 'order', 'octaves', 'gate', 'style', 'swing', 'accent', 'pattern'] },
     // The trance gate: its patterns by name, the setting that holds one, its other settings, and the readout of its step.
     gate: { functions: ['gate', 'gateStep'], patterns: GATE_PATTERNS, setting: 'gatePattern', settings: ['gateDepth', 'gateRate', 'gateSmooth', 'gateSwing', 'gateSends', 'gateStereo'], words: ['rate', 'depth', 'smooth', 'swing', 'stereo', 'sends'], step: 'gateStep' },
