@@ -2061,23 +2061,64 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
 const hidden = (name) => import(/* @vite-ignore */ /* webpackIgnore: true */ name)
 const inNode = typeof process !== 'undefined' && !!process.versions?.node
 
-async function fileOrFetch(url, missing) {
+// Is this the engine? A WebAssembly module begins "\0asm" and is at least eight bytes.
+const isEngine = (bytes) => { const b = new Uint8Array(bytes.buffer || bytes, bytes.byteOffset || 0, Math.min(8, bytes.byteLength)); return b.length === 8 && b[0] === 0 && b[1] === 0x61 && b[2] === 0x73 && b[3] === 0x6d }
+const notEmpty = (bytes) => bytes.byteLength > 0
+
+/**
+ * A file's bytes, from the disk in node or fetched. A reply is not believed until it has been looked at: `good`
+ * says whether the bytes are what was asked for (not empty; for the engine, a WebAssembly module).
+ *
+ * A reply of "200 ok" with nothing in it does happen. Inside an app whose web view patches `fetch` (Capacitor's
+ * HTTP plugin does), fetching a binary file by its whole address gives an empty body, or fails with "Load
+ * failed", where the same address through XMLHttpRequest gives every byte (measured on an iPad, 2026-10-13); a
+ * cache can hand back an entry it kept while the file was being written. So when a reply is empty, wrong or
+ * failed, the file is asked for again in other ways before giving up: the fetch the host kept from before it was
+ * patched, if it says where that is; XMLHttpRequest; and fetch once more, past the cache. A file that the
+ * server says is not there (404) is not asked for again.
+ */
+async function fileOrFetch(url, missing, good = notEmpty, what = 'that file') {
   if (url.protocol === 'file:' && inNode) {
     const { readFile } = await hidden('node:fs/promises')
     const { fileURLToPath } = await hidden('node:url')
     return readFile(fileURLToPath(url))
   }
-  const reply = await fetch(url)
-  if (!reply.ok) throw new Error(missing)
-  return reply.arrayBuffer()
+  const fetched = async (reply) => { if (!reply.ok) throw Object.assign(new Error(missing), { gone: reply.status >= 400 && reply.status < 500 }); return reply.arrayBuffer() }
+  const ways = [() => fetch(url).then(fetched)]
+  if (typeof globalThis.CapacitorWebFetch === 'function') ways.push(() => globalThis.CapacitorWebFetch(url.href).then(fetched))
+  if (typeof XMLHttpRequest !== 'undefined') ways.push(() => new Promise((yes, no) => {
+    const ask = new XMLHttpRequest()
+    ask.open('GET', url.href)
+    ask.responseType = 'arraybuffer'
+    ask.onload = () => (ask.status >= 200 && ask.status < 300 && ask.response ? yes(ask.response) : no(new Error(missing)))
+    ask.onerror = () => no(new Error(missing))
+    ask.send()
+  }))
+  ways.push(() => fetch(url, { cache: 'reload' }).then(fetched))
+  let why = null
+  for (const way of ways) {
+    try {
+      const bytes = await way()
+      if (good(bytes)) return bytes
+      why = new Error(bytes.byteLength ? `${what} is not what was expected at ${url.href} (${bytes.byteLength} bytes of something else came back)` : `${what} came back empty from ${url.href}`)
+    } catch (e) {
+      if (e && e.gone) throw e
+      why = why || (e instanceof Error ? e : new Error(missing))
+    }
+  }
+  throw why
 }
 
 /** The engine, from what a host gave (bytes, a module, an address, a promise of one) or the file beside this one. */
 async function engineBytes(wasm) {
   wasm = await wasm
-  if (wasm instanceof ArrayBuffer || ArrayBuffer.isView(wasm) || wasm instanceof WebAssembly.Module) return wasm
+  if (wasm instanceof WebAssembly.Module) return wasm
+  if (wasm instanceof ArrayBuffer || ArrayBuffer.isView(wasm)) {
+    if (!isEngine(wasm)) throw new Error(wasm.byteLength ? `the engine that was given is not one (${wasm.byteLength} bytes of something else)` : 'the engine that was given is empty')
+    return wasm
+  }
   const url = new URL(wasm || 'synths_core.wasm', BASE)
-  return fileOrFetch(url, `the engine's file ${url.href} could not be fetched`)
+  return fileOrFetch(url, `the engine's file ${url.href} could not be fetched`, isEngine, 'the engine\'s file')
 }
 
 async function sampleBytes(c) {

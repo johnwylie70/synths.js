@@ -1095,6 +1095,71 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
   'describe gives labels for the values that mean something else (reverbDecay 0 is "auto" on a synth, on soundOutput() and on a player\'s target; the microphone\'s gate at -100 is "off"), none where 0 is a real zero, and the table of settings carries them', got)
 }
 
+// --- a reply that says "ok" and has nothing in it: the file is asked for again in other ways, and the reason is plain
+{
+  const engine = await readFile(join(ROOT, 'synths_core.wasm'))
+  const kept = { fetch: globalThis.fetch, xhr: globalThis.XMLHttpRequest, web: globalThis.CapacitorWebFetch }
+  const reply = (bytes, status = 200) => ({ ok: status >= 200 && status < 300, status, arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) })
+  const empty = new Uint8Array(0)
+  const asked = []
+  const pretendXhr = (bytes) => class { open(method, url) { this.url = url } send() { asked.push('xhr ' + (this.responseType || '')); this.status = 200; this.response = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength); setTimeout(() => this.onload(), 0) } }
+  const start = async () => { try { const p = await createOfflinePlayer({ wasm: 'https://app.test/lib/synths_core.wasm' }); p.close?.(); return 'ok' } catch (e) { return e.message } }
+  const out = {}
+  try {
+    // A fetch that a web view has patched: an empty "200 ok" for a whole address, where XMLHttpRequest has the bytes.
+    globalThis.fetch = async (url, o) => { asked.push('fetch' + (o?.cache ? ' ' + o.cache : '') + (url instanceof URL ? ' URL' : '')); return reply(empty) }
+    globalThis.XMLHttpRequest = pretendXhr(engine)
+    out.xhr = [await start(), asked.splice(0)]
+    // No XMLHttpRequest: empty the first time, there the second time, past the cache.
+    delete globalThis.XMLHttpRequest
+    globalThis.fetch = async (url, o) => { asked.push('fetch' + (o?.cache ? ' ' + o.cache : '')); return reply(o?.cache === 'reload' ? engine : empty) }
+    out.again = [await start(), asked.splice(0)]
+    // A host that says where the fetch from before the patch is.
+    globalThis.fetch = async () => { asked.push('fetch'); throw new TypeError('Load failed') }
+    globalThis.CapacitorWebFetch = async (url) => { asked.push('unpatched ' + typeof url); return reply(engine) }
+    out.unpatched = [await start(), asked.splice(0)]
+    delete globalThis.CapacitorWebFetch
+    // Always empty, always something else, and not there at all.
+    globalThis.fetch = async () => { asked.push('fetch'); return reply(empty) }
+    globalThis.XMLHttpRequest = pretendXhr(empty)
+    out.empty = [await start(), asked.splice(0)]
+    globalThis.fetch = async () => reply(new TextEncoder().encode('<!doctype html><title>Not found</title>'))
+    globalThis.XMLHttpRequest = pretendXhr(new TextEncoder().encode('<!doctype html>'))
+    out.wrong = [await start()]
+    asked.length = 0
+    globalThis.fetch = async () => { asked.push('fetch'); return reply(empty, 404) }
+    out.gone = [await start(), asked.splice(0)]
+    out.given = [await (async () => { try { await createOfflinePlayer({ wasm: new Uint8Array(0) }); return 'ok' } catch (e) { return e.message } })()]
+    // A sample and a song the same way.
+    globalThis.fetch = async (url) => { asked.push('fetch'); return reply(empty) }
+    globalThis.XMLHttpRequest = pretendXhr(toWav(new Float32Array(4800).fill(0.5), new Float32Array(4800).fill(0.5), SR))
+    const player = await createOfflinePlayer({ wasm: engine })
+    const s = createSound({ sound: player, clock: () => player.time, batch: 'manual', resolve: (path) => 'https://app.test/' + path })
+    const said = await saying(async () => {
+      s.loadSample('there.wav').play()
+      s.flush()
+      out.sample = [peak((await player.render(0.05)).left), asked.splice(0)]
+      globalThis.XMLHttpRequest = pretendXhr(empty)
+      s.loadSample('hollow.wav').play()
+      s.playSong('hollow.mod')
+      s.flush()
+      await player.render(0.05)
+    })
+    out.said = said
+  } finally {
+    globalThis.fetch = kept.fetch
+    if (kept.xhr) globalThis.XMLHttpRequest = kept.xhr; else delete globalThis.XMLHttpRequest
+    if (kept.web) globalThis.CapacitorWebFetch = kept.web; else delete globalThis.CapacitorWebFetch
+  }
+  say(out.xhr[0] === 'ok' && same(out.xhr[1], ['fetch URL', 'xhr arraybuffer']) && out.again[0] === 'ok' && same(out.again[1], ['fetch', 'fetch reload']) && out.unpatched[0] === 'ok' && same(out.unpatched[1], ['fetch', 'unpatched string']),
+    'an engine file that comes back empty (or whose fetch fails) is asked for again: through the fetch a host kept from before it was patched, through XMLHttpRequest, and by fetch once more past the cache; whichever has the bytes starts the engine', out)
+  say(out.empty[0] === 'the engine\'s file came back empty from https://app.test/lib/synths_core.wasm' && same(out.empty[1], ['fetch', 'xhr arraybuffer', 'fetch']) && /the engine's file is not what was expected at https:\/\/app\.test\/lib\/synths_core\.wasm \(\d+ bytes of something else came back\)/.test(out.wrong[0])
+    && /could not be fetched/.test(out.gone[0]) && same(out.gone[1], ['fetch']) && out.given[0] === 'the engine that was given is empty',
+    'when every way gives nothing the reason says what came back and from where, not that WebAssembly could not read it; a page of text in the engine\'s place is said to be something else; a file that is not there is not asked for again', out)
+  say(out.sample[0] > 0.1 && same(out.sample[1], ['fetch', 'xhr arraybuffer']) && out.said.some((t) => /the sample "hollow.wav" could not be loaded \(that file came back empty from https:\/\/app\.test\/hollow\.wav\)/.test(t)) && out.said.some((t) => /hollow\.mod/.test(t) && /came back empty/.test(t)),
+    'a sample is fetched the same way, and a sample or a song that comes back empty every time is said to have come back empty', out)
+}
+
 // --- a host that makes the sound itself: createPlayer is given a core and a clock, and needs no Web Audio and no engine
 {
   const { createPlayer } = synths

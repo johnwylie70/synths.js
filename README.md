@@ -649,6 +649,15 @@ makeSynth(): there is no setting called "cutof". Did you mean "cutoff"?
 
 Things that are not your mistake do not stop your program. They are said once in the console and the rest carries on: sound that is waiting for a tap, a sample whose file is missing, more synths than there is room for (32 at once; `remove()` gives a place back), more notes than there are voices (64; the oldest note makes way), a browser with no MIDI, no microphone.
 
+### When there is no sound at all
+
+The console says why, once, beginning `synths.js:`.
+
+- **"the engine's file came back empty from …"**, inside an app. Some apps' web views patch `fetch` (Capacitor's HTTP plugin does), and a patched `fetch` can answer "ok" with nothing in it for a binary file asked for by its whole address. The library looks at what it was sent before believing it, and asks again through `XMLHttpRequest` and past the cache, so this is only said when every way gave nothing. Giving the engine as bytes always works: `configure({ wasm: bytes })`.
+- **"the engine's file … could not be fetched"**: `synths_core.wasm` is not beside `synths.js`. Copy it there, or say where it is: `configure({ wasm: "/lib/synths_core.wasm" })`.
+- **"sound is waiting for a tap"**: browsers keep a page silent until it has been touched.
+- **"this page cannot run sound on its own thread"**: the page is not served over https, so sound is made on the page's thread ([the fallback](#for-apps-that-show-scenes)). There is sound, a little later, and a busy page makes it click.
+
 ## For apps that show scenes
 
 synths.js is built in three layers so that the sound can be made somewhere other than where the program runs: in another frame, from a worker, or from Python.
