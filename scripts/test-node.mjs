@@ -9,6 +9,8 @@
  * It ends with code 1 if a case fails.
  */
 import { spawnSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -84,6 +86,12 @@ async function saying(run) {
     if (said) bad.push(`${name}: ${said}`)
   }
   say(bad.length === 0 && names.includes('cutoff'), `every ready-made synth (${Object.keys(d.synths).length}) and sound (${Object.keys(d.sounds).length}) uses only settings and choices that exist`, bad)
+}
+
+{
+  const pack = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8'))
+  const missing = pack.files.filter((f) => !existsSync(join(ROOT, f)))
+  say(pack.version === synths.version && describe().version === pack.version && missing.length === 0, 'the package and the library agree on the version, and every file the package lists is there', { pack: pack.version, lib: synths.version, missing })
 }
 
 // --- notes

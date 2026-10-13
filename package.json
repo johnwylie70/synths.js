@@ -1,16 +1,29 @@
 {
   "name": "synths.js",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Make sounds and music in plain JavaScript: synths, samples, effects and tracker songs, for games and for fun. The sound sibling of pictures.js.",
   "type": "module",
   "main": "./synths.js",
   "module": "./synths.js",
-  "exports": { ".": "./synths.js", "./synths.js": "./synths.js" },
-  "files": ["synths.js", "README.md", "CHANGELOG.md", "LICENSE"],
-  "engines": { "node": ">=20" },
+  "exports": {
+    ".": "./synths.js",
+    "./synths.js": "./synths.js",
+    "./synths-worklet.js": "./synths-worklet.js",
+    "./synths_core.wasm": "./synths_core.wasm",
+    "./synths-names.json": "./synths-names.json"
+  },
+  "files": ["synths.js", "synths-worklet.js", "synths_core.wasm", "synths-names.json", "docs/", "README.md", "CHANGELOG.md", "LICENSE"],
+  "engines": {
+    "node": ">=20"
+  },
   "keywords": ["sound", "music", "synth", "synthesizer", "tracker", "mod", "samples", "games", "audio", "education", "creative-coding"],
   "author": "John Wylie",
   "license": "MIT",
-  "repository": { "type": "git", "url": "git+https://github.com/johnwylie70/synths.js.git" },
-  "bugs": { "url": "https://github.com/johnwylie70/synths.js/issues" }
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/johnwylie70/synths.js.git"
+  },
+  "bugs": {
+    "url": "https://github.com/johnwylie70/synths.js/issues"
+  }
 }
