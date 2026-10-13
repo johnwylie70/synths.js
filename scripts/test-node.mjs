@@ -1170,30 +1170,30 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
   {
     const { player, s, go } = await studio(120)
     const pad = s.makeSynth(CLICK)
-    const before = [pad.get('gateDepth'), pad.gatePattern, pad.gateStep()]
-    pad.gate('x.x.xx..', { smooth: 0.001 })
+    const before = [pad.get('tranceGateDepth'), pad.tranceGate, pad.tranceGateStep()]
+    pad.setTranceGate('x.x.xx..', { smooth: 0.001 })
     pad.start('A4')
     const levels = (a, steps, long = 6000) => Array.from({ length: steps }, (_, k) => +top(a, k * long + 800, (k + 1) * long - 800).toFixed(2))
     const chopped = levels(await go(1), 8)
-    const during = [pad.get('gateDepth'), pad.gatePattern, pad.gateStep(), player.target(pad._id).get('gateStep'), player.target(pad._id).get('gatePattern')]
+    const during = [pad.get('tranceGateDepth'), pad.tranceGate, pad.tranceGateStep(), player.target(pad._id).get('tranceGateStep'), player.target(pad._id).get('tranceGate')]
     await go(0.125 + 0.0625)                                // into step 1 of the second round
-    const step = pad.gateStep()
-    pad.gate('eighths', { rate: 'eighth', depth: 0.5, smooth: 0.001 })
+    const step = pad.tranceGateStep()
+    pad.setTranceGate('eighths', { rate: 'eighth', depth: 0.5, smooth: 0.001 })
     s.setTempo(120)                                         // beat 0 is now: the pattern begins again here
     const halved = levels(await go(1), 4, 12000)
-    const named = [pad.gatePattern, pad.describe('gatePattern').named, pad.get('gateRate'), pad.get('gateDepth')]
-    pad.gatePattern = [1, 0.5, 0, 1]
-    const listed = pad.gatePattern
-    pad.gate('off')
+    const named = [pad.tranceGate, pad.describe('tranceGate').named, pad.get('tranceGateRate'), pad.get('tranceGateDepth')]
+    pad.tranceGate = [1, 0.5, 0, 1]
+    const listed = pad.tranceGate
+    pad.tranceGate = 'off'
     const open = levels(await go(0.5), 4)
     const mic = s.useMicrophone()
     mic.gate = -45
-    const refused = [thrown(() => pad.gate('x-x-')), thrown(() => pad.gate('x.x.', { speed: 2 }))]
+    const refused = [thrown(() => { pad.tranceGate = 'x-x-' }), thrown(() => pad.setTranceGate('x.x.', { speed: 2 }))]
     say(same(before, [0, '', -1]) && chopped[0] > 0.2 && same(chopped.map((v) => (v > 0.1 ? 'x' : '.')).join(''), 'x.x.xx..') && same(during, [1, 'x.x.xx..', 0, 0, 'x.x.xx..']) && step === 1,
-      'pad.gate("x.x.xx..") chops a held note into that pattern, a step a sixteenth, on the beat that setTempo began; the gate\'s depth becomes 1; gateStep() is the step that is sounding, on the synth and on a player\'s target', [before, chopped, during, step])
-    say(halved[0] > 0.2 && Math.abs(halved[1] / halved[0] - 0.5) < 0.03 && Math.abs(halved[2] - halved[0]) < 0.01 && same(named, ['x.x.x.x.x.x.x.x.', 'eighths', 2, 0.5]) && listed === 'x5.x' && open.every((v) => v > 0.2) && pad.gateStep() === -1 && pad.get('gateDepth') === 0 && mic.get('gate') === -45 && typeof mic.gate === 'number'
-      && /a gate's pattern is up to 32 steps/.test(refused[0]) && /there is no "speed" to say here/.test(refused[1]),
-      'a gate takes a pattern by name, a rate as a note length and a depth (half closed is half as loud), a list of levels is its text, pad.gate("off") opens it again, the microphone\'s own gate is still its noise gate, and nonsense is refused', [halved, named, listed, open, refused])
+      'pad.tranceGate = "x.x.xx.." chops a held note into that pattern, a step a sixteenth, on the beat that setTempo began; the gate\'s depth becomes 1; tranceGateStep() is the step that is sounding, on the synth and on a player\'s target', [before, chopped, during, step])
+    say(halved[0] > 0.2 && Math.abs(halved[1] / halved[0] - 0.5) < 0.03 && Math.abs(halved[2] - halved[0]) < 0.01 && same(named, ['x.x.x.x.x.x.x.x.', 'eighths', 2, 0.5]) && listed === 'x5.x' && open.every((v) => v > 0.2) && pad.tranceGateStep() === -1 && pad.get('tranceGateDepth') === 0 && mic.get('gate') === -45 && mic.gate === -45 && !synths.settingNames().includes('gateDepth') && synths.settingNames().includes('tranceGateDepth') && describe().tranceGate.setting === 'tranceGate' && typeof pad.trance_gate === 'string'
+      && /a trance gate's pattern is up to 32 steps/.test(refused[0]) && /there is no "speed" to say here/.test(refused[1]),
+      'a gate takes a pattern by name, a rate as a note length and a depth (half closed is half as loud), a list of levels is its text, "off" opens it again, the microphone\'s own gate is still its noise gate, and nonsense is refused', [halved, named, listed, open, refused])
   }
 
   // The pitch of a note moved: a glide from the last note, bends by their shapes, a slide, a vibrato.

@@ -1755,6 +1755,30 @@
    "setting": "delay.level",
    "scale": 1
   },
+  "tranceGateDepth": {
+   "setting": "gate.depth",
+   "scale": 1
+  },
+  "tranceGateRate": {
+   "setting": "gate.rate",
+   "scale": 1
+  },
+  "tranceGateSmooth": {
+   "setting": "gate.smooth",
+   "scale": 1
+  },
+  "tranceGateSwing": {
+   "setting": "gate.swing",
+   "scale": 1
+  },
+  "tranceGateSends": {
+   "setting": "gate.sends",
+   "scale": 1
+  },
+  "tranceGateStereo": {
+   "setting": "gate.stereo",
+   "scale": 1
+  },
   "chorusRate": {
    "setting": "chorus.rate",
    "scale": 1
@@ -1854,10 +1878,10 @@
    "pattern"
   ]
  },
- "gate": {
+ "tranceGate": {
   "functions": [
-   "gate",
-   "gateStep"
+   "setTranceGate",
+   "tranceGateStep"
   ],
   "patterns": {
    "eighths": "x.x.x.x.x.x.x.x.",
@@ -1869,14 +1893,14 @@
    "triplets": "x..x..x..x..x..x..x..x..",
    "dotted": "x..x..x.x..x..x."
   },
-  "setting": "gatePattern",
+  "setting": "tranceGate",
   "settings": [
-   "gateDepth",
-   "gateRate",
-   "gateSmooth",
-   "gateSwing",
-   "gateSends",
-   "gateStereo"
+   "tranceGateDepth",
+   "tranceGateRate",
+   "tranceGateSmooth",
+   "tranceGateSwing",
+   "tranceGateSends",
+   "tranceGateStereo"
   ],
   "words": [
    "rate",
@@ -1886,7 +1910,7 @@
    "stereo",
    "sends"
   ],
-  "step": "gateStep"
+  "step": "tranceGateStep"
  },
  "choiceWords": {
   "square": "pulse",

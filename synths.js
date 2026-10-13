@@ -237,6 +237,7 @@ const ALIASES = {
   masterVolume: 'master.volume', limiter: 'master.limiter',
   echoTime: 'delay.time', echoFeedback: 'delay.feedback', echoTone: 'delay.tone', echoBounce: 'delay.pingpong',
   reverbSize: 'reverb.size', reverbDamping: 'reverb.damping', reverbType: 'reverb.type', reverbDecay: 'reverb.decay', reverbPredelay: 'reverb.predelay', reverbLowCut: 'reverb.low_cut', reverbLevel: 'reverb.level', echoLevel: 'delay.level',
+  tranceGateDepth: 'gate.depth', tranceGateRate: 'gate.rate', tranceGateSmooth: 'gate.smooth', tranceGateSwing: 'gate.swing', tranceGateSends: 'gate.sends', tranceGateStereo: 'gate.stereo',
   chorusRate: 'chorus.rate', chorusDepth: 'chorus.depth',
   micGain: 'input.gain', micGate: 'input.gate', micGateRelease: 'input.gate_release',
 }
@@ -352,13 +353,13 @@ function arpPatternText(given, said = 'arpPattern') {
   if (!steps.length || steps.length > 32 || !steps.every((t) => ARP_STEP.test(t))) throw new Error(`${said}: a pattern is up to 32 steps with spaces between them, as in "1 - 3 2 _ 1 3 5^" (a number is that note of the chord, - a rest, _ holds the last note, ' an octave up, ^ an accent), a list of them, or one by name: ${ARP_PATTERNS.join(', ')}; not ${shown(given)}`)
   return text
 }
-function gatePatternText(given, said = 'gatePattern') {
+function gatePatternText(given, said = 'tranceGate') {
   if (given === null || given === undefined || given === false) return null
   if (Array.isArray(given) && given.every((v) => typeof v === 'number' && v >= 0 && v <= 1)) given = given.map((v) => (v >= 1 ? 'x' : v <= 0 ? '.' : String(Math.round(v * 9)))).join('')
   const text = typeof given === 'string' ? given.replace(/\s+/g, '') : null
   if (text !== null && NO_PATTERN.has(text.toLowerCase())) return null
   if (text !== null && Object.prototype.hasOwnProperty.call(GATE_PATTERNS, text.toLowerCase())) return GATE_PATTERNS[text.toLowerCase()]
-  if (text === null || text.length > 32 || !/^[xX.0-9]+$/.test(text)) throw new Error(`${said}: a gate's pattern is up to 32 steps, one character each, as in "x.x.xx.x" (x is open, . is closed, 0 to 9 a level between), a list of levels from 0 to 1, or one by name: ${Object.keys(GATE_PATTERNS).join(', ')}; not ${shown(given)}`)
+  if (text === null || text.length > 32 || !/^[xX.0-9]+$/.test(text)) throw new Error(`${said}: a trance gate's pattern is up to 32 steps, one character each, as in "x.x.xx.x" (x is open, . is closed, 0 to 9 a level between), a list of levels from 0 to 1, or one by name: ${Object.keys(GATE_PATTERNS).join(', ')}; not ${shown(given)}`)
   return text.toLowerCase()
 }
 /** The name of a built-in pattern whose text this is, if it is one. */
@@ -369,8 +370,8 @@ const describePattern = (which, text) => {
   const named = text ? patternName(table, text) : undefined
   return { name: which, kind: 'pattern', default: '', value: text || '', steps: 32, patterns: { ...table }, ...(named ? { named } : {}) }
 }
-const PATTERN_WORDS = { arppattern: 'arpPattern', gatepattern: 'gatePattern' }
-/** Is this the name of a pattern setting (arpPattern, arp_pattern, gatePattern, gate_pattern)? It gives the name it goes by. */
+const PATTERN_WORDS = { arppattern: 'arpPattern', trancegate: 'tranceGate' }
+/** Is this the name of a pattern setting (arpPattern, arp_pattern, tranceGate, trance_gate)? It gives the name it goes by. */
 const patternWord = (name) => (typeof name === 'string' ? PATTERN_WORDS[key(name)] : undefined)
 /**
  * Does an arpeggio (as a command carries it) need the engine's arpeggiator? One that is only a voice whose pitch
@@ -409,7 +410,8 @@ function allSettings() {
     settings.set(key(alias), scale === 1 ? entry : { ...entry, scale })
     friendly.push(alias)
   }
-  namesToShow = [...friendly, ...[...byName.keys()].map(camel).filter((n) => !friendly.includes(n))]
+  // The trance gate's settings go by one spelling (tranceGateDepth): `gate` alone is an arpeggio's and the microphone's.
+  namesToShow = [...friendly, ...[...byName.keys()].filter((n) => !n.startsWith('gate.')).map(camel).filter((n) => !friendly.includes(n))]
   return settings
 }
 const setting = (name) => (typeof name === 'string' ? allSettings().get(key(name)) : undefined)
@@ -1594,9 +1596,9 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
       part.zones = rec.zones || null
       ops.push(rec.zones ? ['zones', rec.part, rec.zones.bytes, rec.zones.list.length, rec.zones.flags] : ['zones', rec.part, null, 0, 0])
     }
-    if ((part.gate || null) !== (rec.gatePattern || null)) {
-      part.gate = rec.gatePattern || null
-      ops.push(['gate', rec.part, rec.gatePattern ? new TextEncoder().encode(rec.gatePattern) : null])
+    if ((part.gate || null) !== (rec.tranceGate || null)) {
+      part.gate = rec.tranceGate || null
+      ops.push(['gate', rec.part, rec.tranceGate ? new TextEncoder().encode(rec.tranceGate) : null])
     }
     if (part.macro !== rec.macro) {
       part.macro = rec.macro
@@ -1730,12 +1732,12 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
         try { rec.arpPattern = arpPatternText(c.arpPattern) } catch (e) { tell(e.message) }
         if (rec.arpNow && rec.arpNow.played && rec.arpNow.arp.pattern === undefined && rec.part >= 0) event(at, ARP_PATTERN, rec.part, rec.arpNow.h, rec.arpPattern ? patternSlot(rec.arpPattern) : 0, 0)
       }
-      if (rec && c.gatePattern !== undefined) {
+      if (rec && c.tranceGate !== undefined) {
         // The trance gate's pattern. Given one, a gate that is fully open (depth 0, which is no gate) is closed all the way; taken away, it is opened.
-        let text = rec.gatePattern
-        try { text = gatePatternText(c.gatePattern) } catch (e) { tell(e.message) }
+        let text = rec.tranceGate
+        try { text = gatePatternText(c.tranceGate) } catch (e) { tell(e.message) }
         const depth = rec.patch.has(GATE_DEPTH) ? rec.patch.get(GATE_DEPTH) : 0
-        rec.gatePattern = text
+        rec.tranceGate = text
         if (rec.part >= 0) dress(rec, at)
         if (GATE_DEPTH !== undefined && (c.set == null || !Object.keys(c.set).some((k) => setting(k)?.id === GATE_DEPTH))) { if (text && depth === 0) change(rec, new Map([[GATE_DEPTH, 1]]), at, 0); else if (!text && depth !== 0) change(rec, new Map([[GATE_DEPTH, 0]]), at, 0) }
       }
@@ -2236,15 +2238,15 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
     /** The zones of a synth's sample map as they are now (see zoneAsRead), or null for a synth with none. */
     zonesOf(sid, scopeName) { const rec = found(sid, scopeName); return rec && rec.zones ? rec.zones.list.map(zoneAsRead) : null },
     /** A synth's pattern for its arpeggios or for its gate, as text ('' for none), or undefined for a synth that is not there. */
-    patternOf(sid, which, scopeName) { const rec = found(sid, scopeName); return rec ? (which === 'arpPattern' ? rec.arpPattern : rec.gatePattern) || '' : undefined },
+    patternOf(sid, which, scopeName) { const rec = found(sid, scopeName); return rec ? (which === 'arpPattern' ? rec.arpPattern : rec.tranceGate) || '' : undefined },
     /**
-     * Which step is sounding at a time of the sound card: { arpStep, gateStep }, each counted from 0 within its
+     * Which step is sounding at a time of the sound card: { arpStep, tranceGateStep }, each counted from 0 within its
      * pattern (an arpeggio with no pattern: within its chord and octaves), or -1 when there is none. It is worked
      * out here from the tempo, not asked of the engine, so swing is not in it.
      */
     stepsOf(sid, now, scopeName) {
       const rec = found(sid, scopeName)
-      const out = { arpStep: -1, gateStep: -1 }
+      const out = { arpStep: -1, tranceGateStep: -1 }
       if (!rec) return out
       const run = rec.arpNow
       if (run && now >= run.at - 1e-9 && now < run.until) {
@@ -2253,7 +2255,7 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
         out.arpStep = Math.floor(arpSteps(run, now) + 1e-6) % length
       }
       const depth = rec.patch.has(GATE_DEPTH) ? rec.patch.get(GATE_DEPTH) : 0
-      if (depth > 0) out.gateStep = Math.floor(beatAt(now) * (rec.patch.has(GATE_RATE) ? rec.patch.get(GATE_RATE) : 4) + 1e-6) % (rec.gatePattern ? rec.gatePattern.length : 2)
+      if (depth > 0) out.tranceGateStep = Math.floor(beatAt(now) * (rec.patch.has(GATE_RATE) ? rec.patch.get(GATE_RATE) : 4) + 1e-6) % (rec.tranceGate ? rec.tranceGate.length : 2)
       return out
     },
     voiceOf(sid, scopeName) { const rec = found(sid, scopeName); return rec ? (rec.worn ? rec.worn.voice : 'none') : undefined },
@@ -2396,7 +2398,7 @@ function makeTarget(id, run, conductor, read, scope) {
       run(c)
       return target
     },
-    get(name) { if (key(name) === 'voice') return conductor()?.voiceOf(id, scope); if (patternWord(name)) return conductor()?.patternOf(id, patternWord(name), scope); if (key(name) === 'arpstep' || key(name) === 'gatestep') return read(id, scope)[key(name) === 'arpstep' ? 'arpStep' : 'gateStep'] ?? -1; if (key(name) === 'zones') return conductor()?.zonesOf(id, scope) ?? null; const now = conductor()?.settingOf(id, named(name), scope); return now ? readSetting(now[0], now[1]) : undefined },
+    get(name) { if (key(name) === 'voice') return conductor()?.voiceOf(id, scope); if (patternWord(name)) return conductor()?.patternOf(id, patternWord(name), scope); if (key(name) === 'arpstep' || key(name) === 'trancegatestep') return read(id, scope)[key(name) === 'arpstep' ? 'arpStep' : 'tranceGateStep'] ?? -1; if (key(name) === 'zones') return conductor()?.zonesOf(id, scope) ?? null; const now = conductor()?.settingOf(id, named(name), scope); return now ? readSetting(now[0], now[1]) : undefined },
     describe(name) {
       if (key(name) === 'voice') return describeVoice()
       if (patternWord(name)) return describePattern(patternWord(name), conductor()?.patternOf(id, patternWord(name), scope))
@@ -3911,7 +3913,7 @@ export function createSound(options = {}) {
       if (key(name) === 'voice') return this.voice
       if (patternWord(name)) return this._patterns?.[patternWord(name)] || ''
       if (key(name) === 'arpstep') return this.arpStep()
-      if (key(name) === 'gatestep') return this.gateStep()
+      if (key(name) === 'trancegatestep') return this.tranceGateStep()
       if (key(name) === 'zones') return this._zones ? this.zones() : null
       const entry = setting(this._name(name))
       if (!entry) throw new Error(`get: there is no setting called ${shown(name)}.${meant(String(name), namesToShow)}`)
@@ -3944,48 +3946,52 @@ export function createSound(options = {}) {
 
     /**
      * PATTERNS. `lead.arpPattern = "1 - 3 2 _ 1 3 5^"` (or "trance", or a list of steps) is the rhythm every arpeggio of
-     * this synth follows unless it says another, the one that is sounding from its next step; `lead.gatePattern =
-     * "x.x.xx.x"` is the trance gate's. Each reads back as its text, '' for none, and null or "off" takes it away.
+     * this synth follows unless it says another, the one that is sounding from its next step.
+     *
+     * `pad.tranceGate = "x.x.xx.x"` is the trance gate: the synth's sound turned up and down in that pattern of steps,
+     * in time with the tempo, so a held chord becomes a rhythm. x is open, . is closed, 0 to 9 a level between; or a
+     * pattern by name ("trance", "pump"), or a list of levels from 0 to 1. Its settings are tranceGateRate (steps to a
+     * beat: 4, sixteenths), tranceGateDepth (how far a closed step closes: 1), tranceGateSmooth (seconds from one
+     * level to the next), tranceGateSwing, tranceGateStereo (left and right by turns) and tranceGateSends (whether
+     * the echo and the reverb are fed the chopped sound). The steps begin at setTempo.
+     *
+     * Each reads back as its text, '' for none, and null or "off" takes it away.
      */
     get arpPattern() { return this._patterns?.arpPattern || '' }
     set arpPattern(pattern) { this._pattern('arpPattern', pattern, clock()) }
     get arp_pattern() { return this.arpPattern }
     set arp_pattern(pattern) { this.arpPattern = pattern }
-    get gatePattern() { return this._patterns?.gatePattern || '' }
-    set gatePattern(pattern) { this._pattern('gatePattern', pattern, clock()) }
-    get gate_pattern() { return this.gatePattern }
-    set gate_pattern(pattern) { this.gatePattern = pattern }
+    get tranceGate() { return this._patterns?.tranceGate || '' }
+    set tranceGate(pattern) { this._pattern('tranceGate', pattern, clock()) }
+    get trance_gate() { return this.tranceGate }
+    set trance_gate(pattern) { this.tranceGate = pattern }
     _pattern(which, pattern, at) {
       const text = (which === 'arpPattern' ? arpPatternText : gatePatternText)(pattern, which)
       this._patterns = { ...this._patterns, [which]: text || '' }
       // The gate opens and closes all the way unless its depth says otherwise, as the player will make it.
-      if (which === 'gatePattern') { const depth = setting('gate.depth'); if (depth && text && !this._patch.get(depth.id)) this._patch.set(depth.id, 1); else if (depth && !text) this._patch.set(depth.id, 0) }
+      if (which === 'tranceGate') { const depth = setting('gate.depth'); if (depth && text && !this._patch.get(depth.id)) this._patch.set(depth.id, 1); else if (depth && !text) this._patch.set(depth.id, 0) }
       command({ op: 'set', id: this._id, [which]: text || '', t: at })
     }
-    /**
-     * The trance gate: this synth's sound turned up and down in a pattern of steps, in time with the tempo, so a held
-     * chord becomes a rhythm. pad.gate("x.x.xx.x") or pad.gate("trance"); x is open, . is closed, 0 to 9 a level
-     * between. { rate: steps to a beat (4, sixteenths) or a note length, depth: how far a closed step closes (1),
-     * smooth: seconds from one level to the next, swing, stereo: left and right by turns, sends: whether the echo
-     * and the reverb are fed the chopped sound }. pad.gate("off") takes it away. The steps begin at setTempo.
-     */
-    gate(pattern = 'eighths', o = {}) {
-      if (!o || typeof o !== 'object') throw new Error(`gate takes its settings in braces, as in pad.gate("x.x.xx.x", { rate: "eighth" }), not ${shown(o)}`)
+    /** The trance gate and its settings in one line: pad.setTranceGate("x.x.xx.x", { rate: "eighth", depth: 0.8, smooth: 0.02 }). A rate may be a note length. */
+    setTranceGate(pattern = 'eighths', o = {}) {
+      const words = ['rate', 'depth', 'smooth', 'swing', 'stereo', 'sends']
+      if (!o || typeof o !== 'object') throw new Error(`setTranceGate takes its settings in braces, as in pad.setTranceGate("x.x.xx.x", { rate: "eighth" }), not ${shown(o)}`)
       const set = {}
       for (const [word, value] of Object.entries(o)) {
-        if (!['rate', 'depth', 'smooth', 'swing', 'stereo', 'sends'].includes(word)) throw new Error(`gate: there is no ${shown(word)} to say here.${meant(word, ['rate', 'depth', 'smooth', 'swing', 'stereo', 'sends'])} It may be: rate, depth, smooth, swing, stereo, sends`)
-        set['gate.' + word] = word === 'rate' && typeof value === 'string' ? 1 / beatsLong(value, 'gate: rate') : value
+        if (!words.includes(word)) throw new Error(`setTranceGate: there is no ${shown(word)} to say here.${meant(word, words)} It may be: ${words.join(', ')}`)
+        set['gate.' + word] = word === 'rate' && typeof value === 'string' ? 1 / beatsLong(value, 'setTranceGate: rate') : value
       }
-      this._pattern('gatePattern', pattern, clock())
+      this._pattern('tranceGate', pattern, clock())
       if (Object.keys(set).length) this.set(set)
       return this._self || this
     }
+    set_trance_gate(pattern, o) { return this.setTranceGate(pattern, o) }
     /** Which step of its arpeggio this synth is on now, counted from 0 (within the pattern, if it has one), or -1 with none sounding: for drawing it. */
     arpStep() { return (transport?.read?.(this._id, scope) || NOTHING).arpStep ?? -1 }
     arp_step() { return this.arpStep() }
     /** Which step of its trance gate this synth is on now, counted from 0, or -1 with no gate. */
-    gateStep() { return (transport?.read?.(this._id, scope) || NOTHING).gateStep ?? -1 }
-    gate_step() { return this.gateStep() }
+    tranceGateStep() { return (transport?.read?.(this._id, scope) || NOTHING).tranceGateStep ?? -1 }
+    trance_gate_step() { return this.tranceGateStep() }
 
     /**
      * A voice changer on everything this synth plays: lead.voice = "robot". The voices are robot, chipmunk, monster,
@@ -4384,9 +4390,6 @@ export function createSound(options = {}) {
       this._waiting = []
     }
     _name(name) { return micName(name) }
-    // The microphone's `gate` is its noise gate, a level: mic.gate = -45. (A synth's gate() is the trance gate; the microphone's is mic.gatePattern.)
-    get gate() { return this.get('gate') }
-    set gate(level) { this.set({ gate: level }) }
     _given(given, at) {
       const out = {}
       for (const [name, value] of Object.entries(given)) {
@@ -4898,8 +4901,8 @@ export function describe() {
     // How a note's pitch can be moved, in play() and start() and in a note command.
     moves: { words: ['glide', 'bend', 'slide', 'vibrato'], shapes: ['scoop', 'fall', 'dip'], bend: ['to', 'over', 'shape'], vibrato: ['depth', 'rate', 'delay'] },
     arp: { words: ['speed', 'step', 'order', 'style', 'gate', 'octaves', 'swing', 'accent', 'pattern'], styles: ['slide', 'strike'], patterns: ARP_PATTERNS, patternSteps: ARP_PATTERN_STEPS, setting: 'arpPattern', step: 'arpStep', fields: ['offsets', 'rate', 'beats', 'order', 'octaves', 'gate', 'style', 'swing', 'accent', 'pattern'] },
-    // The trance gate: its patterns by name, the setting that holds one, its other settings, and the readout of its step.
-    gate: { functions: ['gate', 'gateStep'], patterns: GATE_PATTERNS, setting: 'gatePattern', settings: ['gateDepth', 'gateRate', 'gateSmooth', 'gateSwing', 'gateSends', 'gateStereo'], words: ['rate', 'depth', 'smooth', 'swing', 'stereo', 'sends'], step: 'gateStep' },
+    // The trance gate: its patterns by name, the setting that holds one (tranceGate), its other settings, and the readout of its step.
+    tranceGate: { functions: ['setTranceGate', 'tranceGateStep'], patterns: GATE_PATTERNS, setting: 'tranceGate', settings: ['tranceGateDepth', 'tranceGateRate', 'tranceGateSmooth', 'tranceGateSwing', 'tranceGateSends', 'tranceGateStereo'], words: ['rate', 'depth', 'smooth', 'swing', 'stereo', 'sends'], step: 'tranceGateStep' },
     choiceWords: CHOICE_WORDS, plain: PLAIN, synths: PRESETS, sounds: SOUNDS, chords: CHORDS, orders: ORDERS, macroWaves: MACRO_WAVES, lengths: LENGTHS, lengthLetters: LENGTH_LETTERS, midi: MIDI,
     // The voice changers (each a list of settings; putting one on first puts back what the last changed), and the microphone.
     voices: VOICES,

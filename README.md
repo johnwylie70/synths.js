@@ -250,18 +250,29 @@ A chord has room for eight notes. Every synth has `arp` and `startArp`; with no 
 
 ## The trance gate
 
-A gate turns a synth's sound up and down in a pattern of steps, in time with the tempo, so a held chord becomes a rhythm. It chops whatever the synth is playing.
+A trance gate turns a synth's sound up and down in a pattern of steps, in time with the tempo, so a held chord becomes a rhythm. It chops whatever the synth is playing.
 
 ```js
 setTempo(138)
 const pad = makeSynth("pad", { echo: 0.3 })
-pad.gate("x.x.xx.x")                       // x is open, . is closed; a step is a sixteenth
+pad.tranceGate = "x.x.xx.x"                // x is open, . is closed; a step is a sixteenth
 pad.start(["A3", "C4", "E4"])
 ```
 
-`pad.gate("trance")` is a pattern by name: `eighths`, `offbeat`, `gallop`, `trance`, `stutter`, `pump`, `triplets` (with `rate: 6`) and `dotted`. A digit from `0` to `9` in a pattern is a step part of the way open, so `"2468"` swells. After the pattern, in braces: `rate` (steps to a beat, or a note length: `"eighth"`), `depth` (how far a closed step closes: 1 is silence, 0.5 is half), `smooth` (seconds from one level to the next; longer is softer), `swing`, `stereo` (left and right by turns) and `sends: false` (the echo and reverb are then fed the sound before it is chopped). `pad.gate("off")` takes it away.
+`pad.tranceGate = "trance"` is a pattern by name: `eighths`, `offbeat`, `gallop`, `trance`, `stutter`, `pump`, `triplets` (with `tranceGateRate` 6) and `dotted`. A digit from `0` to `9` in a pattern is a step part of the way open, so `"2468"` swells; a list of levels from 0 to 1 is a pattern too. It reads back as the pattern's text, and `pad.tranceGate = "off"` takes it away.
 
-The steps begin at `setTempo`: call it where the bar begins and the gate is on the beat. Each part of the gate is also an ordinary setting, for a dial: `gateDepth`, `gateRate`, `gateSmooth`, `gateSwing`, and `pad.gatePattern`, which reads back as the pattern's text. `pad.gateStep()` is the step that is sounding. (The microphone's own `mic.gate` is its noise gate, a level in dB; its trance gate is `mic.gatePattern`.)
+Its settings, each one a dial can be tied to:
+
+| | |
+|---|---|
+| `tranceGateRate` | steps to a beat: 4 is sixteenths, 2 eighths, 3 and 6 triplets |
+| `tranceGateDepth` | how far a closed step closes: 1 is silence, 0.5 is half. Giving a pattern makes it 1 |
+| `tranceGateSmooth` | seconds from one level to the next; longer is softer |
+| `tranceGateSwing` | every second step that much of a step late |
+| `tranceGateStereo` | left and right by turns |
+| `tranceGateSends` | `false`: the echo and the reverb are fed the sound before it is chopped |
+
+`pad.setTranceGate("x.x.xx.x", { rate: "eighth", depth: 0.8, smooth: 0.02 })` says a pattern and its settings in one line, with the rate as a note length. The steps begin at `setTempo`: call it where the bar begins and the gate is on the beat. `pad.tranceGateStep()` is the step that is sounding, for drawing it. (The word `gate` alone is something else twice over: an arpeggio's `gate` is how long each of its notes is held, and the microphone's `mic.gate` is its noise gate.)
 
 ## Synths
 

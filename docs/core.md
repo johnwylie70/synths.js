@@ -205,6 +205,8 @@ names the place.
 `text` is a `Uint8Array` of the gate's pattern as text (`"x.x.xx.x"`), for `synths_gate_text`. `null` takes the
 pattern away (`synths_gate_set` with no levels), which leaves the gate open and closed by turns. Whether the gate
 is heard at all is the part's `gate.depth`, an ordinary `param`.
+(The library's own word for this is the trance gate, `tranceGate`; the op and the engine's parameters keep the
+engine's word, `gate`.)
 
 ### `macro`: a part's step macro
 
