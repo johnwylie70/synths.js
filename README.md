@@ -373,6 +373,16 @@ hum.play("E4", 2)
 
 There is nothing to wait for: play it straight away, and it sounds as soon as the file has arrived.
 
+Any synth can have a sample for its wave, and then the recording goes through that synth's filter, envelope and effects:
+
+```js
+const lead = makeSynth("pad")
+lead.sample = loadSample("piano.wav")                     // its wave is now "sample"; lead.wave = "saw" goes back
+const keys = makeSynth({ sample: "piano.wav", note: "C4", cutoff: 1800, release: 0.6 })   // or all in one line: note is the note the recording is at
+```
+
+`sample` takes a sample from `loadSample`, a recording (`recordSound`), or the name of a sound file. The wave `"sample"` is only for a synth that has one: on a synth with none it is not among the choices a `select("wave", lead, "wave")` offers, and `lead.wave = "sample"` says how to give it one and leaves the wave as it was.
+
 `saveSound(kick, "kick.wav")` saves a sample, or a recording of your own, as a WAV file.
 
 ## Your voice

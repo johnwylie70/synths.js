@@ -279,7 +279,11 @@ base64. WAV files (8, 16, 24 and 32 bit, and floating point) are read by the pla
 kind is decoded by the browser, so the offline player in node reads WAV only. Loading takes a moment and nothing
 waits for it: a note played before the recording has arrived is silent.
 
-To play it, make a synth whose `sample` setting is the sample's id:
+To play it, make a synth whose `sample` setting is the sample's id (and whose wave is `"sample"`, which the
+`sample` preset's is). Any synth may be given one this way: `{ op: "set", id: "s1", set: { sample: "w1", wave:
+"sample" } }` puts the recording under that synth's filter and envelope. A sender should not offer the wave
+`"sample"` for a synth it has given no sample (the library leaves it out of `describe("wave").choices`, and does
+not send it):
 
 ```js
 { op: "synth", id: "s2", preset: "sample", set: { sample: "w1" } }

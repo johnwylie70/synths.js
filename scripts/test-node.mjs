@@ -82,6 +82,7 @@ async function saying(run) {
   const names = synths.settingNames()
   const bad = []
   for (const which of ['synths', 'sounds']) for (const [name, entry] of Object.entries(d[which])) {
+    if (name === 'sample') continue          // what loadSample starts from: it is given its sample there
     const said = thrown(() => written((s) => s.makeSynth(which === 'synths' ? Object.fromEntries(Object.entries(entry).filter(([k]) => k !== 'note')) : entry.patch)))
     if (said) bad.push(`${name}: ${said}`)
   }
@@ -456,9 +457,43 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
   const lead = s.makeSynth('lead')
   lead.set('cutoff', 800)
   say(lead.get('cutoff') === 800 && lead.get('filter_cutoff') === 800 && lead.cutoff === 800 && lead.get('wave') === 'saw', 'set(name, value) and get(name) work by any spelling', [lead.get('cutoff'), lead.get('wave')])
-  say(same(lead.describe('filter_cutoff'), { name: 'filter.cutoff', kind: 'float', min: 20, max: 20000, default: 800, unit: 'hz' }) && same(lead.describe('wave').choices, ['sine', 'triangle', 'saw', 'pulse', 'sample']) && lead.describe('wave').kind === 'choice'
+  say(same(lead.describe('filter_cutoff'), { name: 'filter.cutoff', kind: 'float', min: 20, max: 20000, default: 800, unit: 'hz' }) && same(lead.describe('wave').choices, ['sine', 'triangle', 'saw', 'pulse']) && lead.describe('wave').kind === 'choice'
     && same([lead.describe('octave').min, lead.describe('octave').max, lead.describe('octave').unit], [-4, 4, 'octaves']) && lead.describe('sync').kind === 'bool' && lead.describe('nothing') === null,
     'describe(name) gives the range, the unit, the kind and the choices, in the friendly name\'s own units', lead.describe('filter_cutoff'))
+
+  // "sample" is a wave only for a synth that has a sample: a select offers it then, and not before.
+  {
+    const batches = []
+    const player = await createOfflinePlayer()
+    const w = createSound({ sound: { send: (b) => { batches.push(b); player.send(b) }, read: (i, sc) => player.read(i, sc) }, clock: () => 0, batch: 'manual', resolve: (p) => 'file://' + join(ROOT, 'examples', p) })
+    const plain = w.makeSynth('lead')
+    let told = await saying(async () => { plain.wave = 'sample'; plain.set({ wave: 'sample', cutoff: 900 }); plain.wave2 = 'sample' })
+    w.flush()
+    const sent = batches.flatMap((b) => b.cmds).filter((c) => c.op === 'set')
+    say(plain.describe('wave').max === 3 && !plain.describe('wave2').choices.includes('sample') && plain.get('wave') === 'saw' && plain.get('cutoff') === 900 && sent.length === 1 && same(sent[0].set, { cutoff: 900 })
+      && told.length === 2 && /wave = "sample" needs a sample to play, and this synth has none, so its wave stays "saw"\. Give it one first: lead\.sample = loadSample\("piano\.wav"\)/.test(told[0]) && /wave2 = "sample"/.test(told[1]),
+      'on a synth with no sample "sample" is not among the choices of wave or wave2, and setting it in code says once how to give the synth a sample, keeps the wave it had and still makes the other changes', { told, sent, wave: plain.get('wave') })
+    const thud = w.loadSample('sounds/thud.wav')
+    plain.sample = thud
+    const by = [plain.describe('wave').choices.includes('sample'), plain.get('wave'), plain.describe('wave2').choices.includes('sample'), thud.describe('wave').choices.includes('sample')]
+    plain.wave = 'saw'
+    plain.wave = 'sample'
+    const layered = w.makeSynth({ sample: 'sounds/tone.wav', note: 'A4', loop: true, cutoff: 1500, attack: 0, release: 0.05 })
+    const second = w.makeSynth('lead', { 'osc2.sample': thud, level2: 0.5 })
+    w.flush()
+    const made = batches.flatMap((b) => b.cmds)
+    const file = made.find((c) => c.op === 'sample' && /tone\.wav$/.test(c.url))
+    say(same(by, [true, 'sample', false, true]) && plain.get('wave') === 'sample' && layered.get('wave') === 'sample' && layered.describe('wave').choices.includes('sample') && layered.get('cutoff') === 1500 && file && file.note === 69 && file.loop === true
+      && made.some((c) => c.op === 'synth' && c.set && c.set.sample === file.id && c.set['osc1.wave'] === 'sample' && c.set.note === undefined) && second.get('wave2') === 'sample' && second.get('wave') === 'saw' && second.describe('wave2').choices.includes('sample') && !second.describe('wave').choices.includes('sample'),
+      'lead.sample = loadSample(…) gives a synth a sample and turns its wave to it, after which "sample" is a choice; makeSynth({ sample: "tone.wav", note: "A4" }) loads the file itself; and the second oscillator can have one alone', { by, file })
+    await player.render(0.2)
+    layered.play('A4', 0.5)
+    w.flush()
+    const out = await player.render(0.5)
+    say(Math.abs(crossings(out.left, 0.02, 0.12) * 10 - 440) <= 20 && peak(out.left) > 0.02 && player.target(layered._id).describe('wave').choices.includes('sample') && !player.target(second._id).describe('wave').choices.includes('sample'), 'the layered synth plays its recording through its own filter and envelope, and a target beside the player knows which synths have a sample too', [crossings(out.left, 0.02, 0.12) * 10, peak(out.left)])
+    told = await saying(async () => { w.makeSynth({ wave: 'sample' }); w.makeSynth('bass', { wave2: 'sample' }) })
+    say(told.length === 2 && thrown(() => w.makeSynth({ sample: 7 })) && /sample needs a sample from loadSample, a recording, or the name of a sound file/.test(thrown(() => { plain.sample = 7 })), 'makeSynth({ wave: "sample" }) with no sample says the same, and a sample that is not one says what it should be', told)
+  }
   const plain = s.makeSynth(CLICK)
   say(same([plain.samples().length, plain.level(), plain.notes()], [1024, [0, 0], []]) || plain.samples().length === 0, 'before anything plays, samples(), level() and notes() are empty', [plain.samples().length, plain.level(), plain.notes()])
   plain.noteOn(69, 1)
