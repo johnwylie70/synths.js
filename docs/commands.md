@@ -204,21 +204,35 @@ Every note in a list shares the handle and is let go together.
 
 #### An arpeggio
 
-`arp` turns a note into a chord from one voice: the engine steps its pitch through a few offsets, on the exact
-frame of each step.
+`arp` has the note played as an arpeggio of a chord. There are two kinds, and which it is follows from its fields.
 
 ```js
 { op: "note", id: "s1", note: [60], len: 0.5, h: 7, arp: { offsets: [0, 3, 7, 10], rate: 50, order: "up" } }
+{ op: "note", id: "s1", note: [48], len: 2, h: 8, arp: { offsets: [0, 3, 7, 10], beats: 0.25, gate: 0.5, octaves: 2 } }
 ```
 
 | field | |
 |---|---|
 | `offsets` | up to 8 whole numbers of semitones, each added in turn to the note (-128 to 127). The sender works a chord's name out into these |
 | `rate` | steps a second, 0.1 to 1000 (50) |
-| `order` | `"up"`, `"down"`, `"updown"`, `"written"` or `"random"` (spaces, `-` and `_` do not matter), or the engine's number 0 to 4 (`"up"`) |
+| `beats` | in the place of `rate`: how long a step is in beats (quarter notes), so 0.25 is a sixteenth. It keeps to the tempo (the `tempo` command), which a step takes up as it begins |
+| `order` | `"up"`, `"down"`, `"updown"`, `"written"`, `"random"`, `"updown2"` (the top and bottom twice) or `"together"` (every note at each step); spaces, `-` and `_` do not matter; or the engine's number 0 to 6 (`"up"`) |
+| `style` | `"strike"`: each step is a new note, held for its gate. `"slide"`: one voice whose pitch jumps. Left out: `"strike"` with `beats` or a `gate`, and otherwise `"slide"` |
+| `gate` | for `"strike"`: how much of its step each note is held, 0.05 to 1 (0.5) |
+| `octaves` | 1 to 4: the chord, then the same an octave up |
+| `swing` | 0 to 0.75: every second step that much of a step late |
+| `accent` | up to 8 numbers from 0 to 1: how hard each step is struck, going round; 0 is a rest |
+| `pattern` | text: the steps of a pattern (`"1 - 3 2 _ 1 3 5^"`) or the name of one of the engine's (in `describe().arp.patterns`), in the place of the order and the accents. The engine's document has the grammar |
 
-Give the note one pitch, the root. To change the chord of a note that is sounding, send `voice` with its handle
-and a new `arp`: the pattern starts again from its first step and nothing else about the note does.
+With only `offsets`, `rate` and an `order` from the first five, it is **a voice's own arpeggio**: one voice whose
+pitch steps through the offsets, as the engine's `arp` event has always made it (a C64 chord). With any of the
+other fields, or an `order` of `"updown2"` or `"together"`, it is played by **the engine's arpeggiator**, on the
+exact frame of each step. A sender that wants to know whether the player's engine has one looks for `arp_style`
+in `describe().engine.events`.
+
+Give the note one pitch, the root. To change the arpeggio of a note that is sounding, send `voice` with its
+handle and a new `arp` (the whole of it, not only what changed). A voice's own starts again from its first step;
+the arpeggiator's takes the change at its next step and keeps its place. `arp: null` takes it away.
 
 ### `off`
 

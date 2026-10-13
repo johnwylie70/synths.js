@@ -387,7 +387,7 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
     ['a chord spelt wrongly', () => lead.play('Cmaj77'), /"Cmaj77" is not a note or a chord\. Did you mean "Cmaj7"\? A note is written "C4" or "F#3", and a chord "Cm", "Cmaj7" or "Csus4"/],
     ['a kind of chord that does not exist', () => lead.arp('C4', 'minr'), /"minr" is not a kind of chord\. Did you mean "minor"\? The kinds are: major, minor, dim, aug, sus2, sus4, 5, 6/],
     ['an arpeggio with no chord', () => lead.arp(), /arp needs a chord, as in arp\("Cm7"\), arp\("C4", "minor"\) or arp\(\["C4", "E4", "G4"\]\)/],
-    ['an order that does not exist', () => lead.arp('Cm', { order: 'sideways' }), /arp: "sideways" is not an order an arpeggio can go in\. The orders are: up, down, up-down, as written, random/],
+    ['an order that does not exist', () => lead.arp('Cm', { order: 'sideways' }), /arp: "sideways" is not an order an arpeggio can go in\. The orders are: up, down, up-down, up-down2 \(the top and bottom notes twice\), as written, random, together/],
     ['a macro step with a wave that does not exist', () => lead.setMacro([{ wave: 'nose' }]), /setMacro: "nose" is not a wave a step can switch to\. Did you mean "noise"\? They are: sine, triangle, saw, pulse, square, noise/],
     ['a macro that is not a list', () => { lead.macro = 5 }, /setMacro: a macro needs a list of steps, as in \[\{ pitch: 0 \}, \{ pitch: 4 \}, \{ pitch: 7 \}\], not 5/],
   ]) say(says.test(thrown(run) || ''), `${what} says so`, thrown(run))
@@ -956,6 +956,119 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
   })
   console.warn = keep
   say(threw === null && state === 'failed' && said.filter((t) => /no Web Audio/.test(t)).length <= 1, 'createSound() with nothing given reaches for the page\'s shared player on its first flush, a second sound joins it, and both close: nothing throws where there is no sound card', [threw, state, said])
+}
+
+// --- arpeggios played in time: each step a note struck afresh, counted in beats of the tempo
+{
+  const hzOf = (n) => 440 * 2 ** ((n - 69) / 12)
+  const studio = async (bpm) => {
+    const player = await createOfflinePlayer({ sampleRate: SR })
+    const s = createSound({ sound: player, clock: () => player.time, batch: 'manual' })
+    if (bpm) s.setTempo(bpm)
+    return { player, s, go: async (seconds) => { s.flush(); return (await player.render(seconds)).left } }
+  }
+  // The pitch in a stretch of a plain wave, from its upward crossings of zero.
+  const pitch = (a, from, to) => { let firstAt = -1, lastAt = -1, n = 0; for (let i = from + 1; i < to; i++) if (a[i - 1] < 0 && a[i] >= 0) { const at = i - a[i] / (a[i] - a[i - 1]); if (firstAt < 0) firstAt = at; else n++; lastAt = at } return n ? n * SR / (lastAt - firstAt) : 0 }
+  const noteOf = (hz) => Math.round(69 + 12 * Math.log2(hz / 440))
+  const top = (a, from, to) => peak(a.subarray(from, to))
+
+  // Sixteenths at two tempos, to the sample.
+  const grid = {}
+  for (const bpm of [120, 150]) {
+    const { s, go } = await studio(bpm)
+    s.makeSynth(CLICK).arp('Cm7', 1.9, { step: 'sixteenth', gate: 0.5 })
+    grid[bpm] = onsets(await go(2))
+  }
+  say(grid[120].length === 16 && grid[120].every((f, i) => f === i * 6000) && grid[150].length === 19 && grid[150].every((f, i) => f === i * 4800),
+    'an arpeggio with { step: "sixteenth" } strikes a note every sixteenth on the exact sample: every 6000 frames at 120 beats a minute, every 4800 at 150', grid)
+
+  // Struck against sliding, the gate, the octaves and the orders.
+  {
+    const pluck = { wave: 'sine', filter: 'off', attack: 0, decay: 0.04, sustain: 0.1, release: 0 }
+    const a = await studio(120), b = await studio(120), c = await studio(120), d = await studio(120)
+    a.s.makeSynth(pluck).arp('C4', 'major', 1.9, { step: 'sixteenth', gate: 1 })
+    b.s.makeSynth(pluck).arp('C4', 'major', 1.9, { step: 'sixteenth', style: 'slide' })
+    c.s.makeSynth(CLICK).arp('C4', 'major', 1.9, { step: 'sixteenth', gate: 0.25, octaves: 2 })
+    d.s.makeSynth(CLICK).arp('C4', 'major', 1.9, { step: 'eighth', order: 'up-down2', gate: 0.5 })
+    const struck = await a.go(2), slid = await b.go(2), short = await c.go(2), twice = await d.go(2)
+    const tops = (x) => [0, 1, 2, 3, 4, 5].map((k) => +top(x, k * 6000, k * 6000 + 600).toFixed(2))
+    const lengths = onsets(short).slice(0, 6).map((f) => { let end = f; for (let i = f; i < f + 6000; i++) if (Math.abs(short[i]) > 1e-4) end = i; return end - f })
+    const through = [0, 1, 2, 3, 4, 5, 6].map((k) => noteOf(pitch(short, k * 6000 + 40, k * 6000 + 1400)))
+    const order = [0, 1, 2, 3, 4, 5, 6].map((k) => noteOf(pitch(twice, k * 12000 + 40, k * 12000 + 5800)))
+    say(tops(struck).every((v) => v > 0.2) && tops(slid)[0] > 0.2 && tops(slid).slice(2).every((v) => v < 0.12) && onsets(slid).length === 1,
+      'each step of a struck arpeggio starts the envelope again, where style "slide" is one note whose pitch jumps under one envelope', [tops(struck), tops(slid)])
+    say(lengths.every((n) => Math.abs(n - 1500) < 30) && same(through, [60, 64, 67, 72, 76, 79, 60]) && same(order, [60, 64, 67, 67, 64, 60, 60]),
+      'gate: 0.25 holds each note for a quarter of its step, octaves: 2 goes through the chord and then the same an octave up, and "up-down2" plays the top and the bottom twice', [lengths, through, order])
+  }
+
+  // The tempo changes under a held arpeggio, its chord changes and keeps its place, and it stops.
+  {
+    const { s, go } = await studio(120)
+    const lead = s.makeSynth(CLICK)
+    const arp = lead.startArp('C4', 'major', { step: 'sixteenth', gate: 0.5 })
+    const first = await go(0.3)                 // steps at 0, 6000, 12000
+    s.setTempo(240)
+    arp.change('F4', 'major')
+    const then = await go(0.5)
+    arp.stop()
+    const after = await go(0.3)
+    const on = onsets(then)
+    const pitches = [noteOf(pitch(first, 12040, 13400)), noteOf(pitch(then, on[1] + 40, on[1] + 1300)), noteOf(pitch(then, on[2] + 40, on[2] + 1300))]
+    say(same(onsets(first), [0, 6000, 12000]) && on[1] === 18000 - 14400 && on.slice(2, 6).every((f, i) => f - on[i + 1] === 3000) && same(pitches, [67, 65, 69]) && peak(after.subarray(2400)) === 0,
+      'setTempo under a held arpeggio moves the step after the one in hand (which comes when it was always going to) and the rest are twice as fast; chord.change("F") is taken at that step and keeps the place (the fourth step is F major\'s first note again, the fifth its second); stop() ends it', [onsets(first), on.slice(0, 6), pitches])
+  }
+
+  // Swing, accents, a pattern and stabs.
+  {
+    const a = await studio(120), b = await studio(120), c = await studio(120), d = await studio(120)
+    a.s.makeSynth(CLICK).arp('C4', 'major', 0.95, { step: 'eighth', gate: 0.3, swing: 0.5 })
+    b.s.makeSynth(CLICK).arp('C4', 'major', 0.95, { step: 'sixteenth', gate: 0.5, accent: [1, 0.4, 0, 0.4] })
+    c.s.makeSynth(CLICK).arp('C4', 'major', 1.9, { step: 'sixteenth', gate: 0.5, pattern: '1 - 3 - 2\' _ - -' })
+    const stabs = d.s.makeSynth(CLICK)
+    stabs.arp('C4', 'major', 0.95, { step: 'quarter', order: 'together', gate: 0.5 })
+    const swung = onsets(await a.go(1)), accented = await b.go(1), patterned = await c.go(2)
+    await d.go(0.01)
+    const voices = d.player.voices()
+    const levels = [0, 1, 2, 3, 4].map((k) => +top(accented, k * 6000, k * 6000 + 2900).toFixed(2))
+    const pat = onsets(patterned)
+    const held = (() => { let end = pat[2]; for (let i = pat[2]; i < pat[2] + 20000; i++) if (Math.abs(patterned[i]) > 1e-4) end = i; return end - pat[2] })()
+    say(same(swung, [0, 18000, 24000, 42000]) && levels[0] > 0.2 && Math.abs(levels[1] / levels[0] - 0.4) < 0.05 && levels[2] === 0 && Math.abs(levels[3] - levels[1]) < 0.02 && levels[4] === levels[0],
+      'swing: 0.5 puts every second step half a step late; accent: [1, 0.4, 0, 0.4] strikes the steps that hard, with a rest where it is 0, and goes round', [swung, levels])
+    say(same(pat.slice(0, 6), [0, 12000, 24000, 48000, 60000, 72000]) && same([noteOf(pitch(patterned, 40, 2800)), noteOf(pitch(patterned, 12040, 14800)), noteOf(pitch(patterned, 24040, 28000))], [60, 67, 76]) && Math.abs(held - 9000) < 60 && voices === 3,
+      'a pattern is a rhythm of its own ("1 - 3 - 2\' _ - -": the first note, a rest, the third, a rest, the second an octave up held through the next step, two rests), and order "together" strikes the whole chord at each step', [pat.slice(0, 6), held, voices])
+  }
+
+  // The fast arpeggio of a C64 tune is as it was: one voice, by the engine's `arp` event, with nothing new sent.
+  {
+    const player = await createOfflinePlayer({ sampleRate: SR })
+    const sent = []
+    const s = createSound({ sound: { send: (b) => { sent.push(...b.cmds); player.send(b) } }, clock: () => 0, batch: 'manual' })
+    const lead = s.makeSynth(CLICK)
+    lead.arp('C4', 'major')
+    s.flush()
+    createSound({ sound: { send: (b) => sent.push(...b.cmds) }, clock: () => 0 }).makeSynth(CLICK).arp('C4', 'major', { speed: 25, order: 'down' })
+    await new Promise((yes) => setTimeout(yes, 5))
+    const a = (await player.render(0.4)).left
+    const steps = [0, 1, 2, 3].map((k) => noteOf(pitch(a, k * 960 + 20, k * 960 + 940)))
+    const arps = sent.filter((c) => c.arp).map((c) => c.arp)
+    say(same(arps, [{ offsets: [0, 4, 7], rate: 50, order: 0 }, { offsets: [0, 4, 7], rate: 25, order: 1 }]) && onsets(a).length === 1 && same(steps, [60, 64, 67, 60]),
+      'arp(chord) with a speed, or with nothing said, is the fast arpeggio it always was: the same command, one note, its pitch stepping fifty times a second', [arps, steps])
+  }
+
+  // By hand, as a tracker auditions one: a note command with the whole arpeggio in it.
+  {
+    const player = await createOfflinePlayer({ sampleRate: SR })
+    player.send({ now: 0, cmds: [{ op: 'synth', id: 'a', set: CLICK }, { op: 'tempo', bpm: 120, t: 0 }, { op: 'note', id: 'a', note: [48], len: 0.9, vel: 0.8, t: 0, arp: { offsets: [0, 3, 7, 10], beats: 0.25, style: 'strike', gate: 0.5, octaves: 2, order: 'up' } }] })
+    const a = (await player.render(1)).left
+    const on = onsets(a)
+    const notes = on.map((f) => noteOf(pitch(a, f + 40, f + 1100)))
+    say(same(on, [0, 6000, 12000, 18000, 24000, 30000, 36000, 42000]) && same(notes, [48, 51, 55, 58, 60, 63, 67, 70]) && describe().engine.events.includes('arp_style') && same(describe().arp.styles, ['slide', 'strike']) && describe().arp.patterns.includes('trance') && describe().orders.together === 6,
+      'a note command carries the whole arpeggio (offsets, beats, style, gate, octaves, order, swing, accent, pattern) and is struck in time; the names are described, and the engine says it has arp_style', [on, notes])
+  }
+
+  const wrong = [() => createSound({ sound: { send() {} } }).makeSynth('lead').arp('Cm7', { step: 'sixteenth', speed: 30 }), () => createSound({ sound: { send() {} } }).makeSynth('lead').arp('Cm7', { style: 'bounce' }),
+    () => createSound({ sound: { send() {} } }).makeSynth('lead').arp('Cm7', { pattern: '1 x 3' }), () => createSound({ sound: { send() {} } }).makeSynth('lead').arp('Cm7', { accent: 'loud' }), () => createSound({ sound: { send() {} } }).makeSynth('lead').arp('Cm7', { order: 'sideways' })].map(thrown)
+  say(wrong.every((t) => typeof t === 'string') && /step .* or speed .*, not both/.test(wrong[0]) && /"strike".*"slide"/.test(wrong[1]) && /a pattern is steps with spaces between them/.test(wrong[2]) && /up-down2/.test(wrong[4]), 'what an arpeggio cannot be told is refused in plain words', wrong)
 }
 
 // --- several recordings as one instrument (loadSamples): keys, layers, kits, names, a missing file, and letting go

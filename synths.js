@@ -328,7 +328,15 @@ const CHORDS = {
 const LENGTHS = { whole: 4, half: 2, quarter: 1, eighth: 0.5, sixteenth: 0.25, thirtysecond: 0.125 }
 const LENGTH_LETTERS = { w: 4, h: 2, q: 1, e: 0.5, s: 0.25, t: 0.125 }
 /** The orders an arpeggio can go in, as the engine numbers them. */
-const ORDERS = { up: 0, down: 1, updown: 2, written: 3, aswritten: 3, given: 3, random: 4 }
+const ORDERS = { up: 0, down: 1, updown: 2, written: 3, aswritten: 3, given: 3, random: 4, updown2: 5, together: 6, stab: 6 }
+/** The patterns an arpeggio can follow by name (the engine's own), and what a step of one written out looks like. */
+const ARP_PATTERNS = ['bounce', 'octaves', 'root-fifth', 'thumb', 'converge', 'diverge', 'offbeat', 'gallop', 'trance', 'acid']
+const ARP_STEP = /^(?:~?\d{1,2}[',]*\^?(?::\d)?|[-._])$/
+/**
+ * Does an arpeggio (as a command carries it) need the engine's arpeggiator? One that is only a voice whose pitch
+ * steps so many times a second, in one of the first five orders, does not: that is the C64 chord, as it always was.
+ */
+const arpIsPlayed = (arp) => !!arp && (arp.beats > 0 || arp.style === 'strike' || arp.gate > 0 || arp.octaves > 1 || arp.swing > 0 || (Array.isArray(arp.accent) && arp.accent.length > 0) || !!arp.pattern || orderOf(arp.order, false) > 4)
 /** The waves a step of a macro can switch to. */
 const MACRO_WAVES = { sine: 0, triangle: 1, saw: 2, pulse: 3, square: 3, noise: 4 }
 
@@ -545,10 +553,10 @@ function notesOf(what) {
 // The order of an arpeggio as the engine's number, from "up", "down", "up-down", "as written" or "random".
 function orderOf(order, strict, said) {
   if (order === undefined || order === null) return 0
-  if (typeof order === 'number' && order >= 0 && order <= 4) return Math.floor(order)
+  if (typeof order === 'number' && order >= 0 && order <= 6) return Math.floor(order)
   const k = key(order)
   if (Object.prototype.hasOwnProperty.call(ORDERS, k)) return ORDERS[k]
-  if (strict) throw new Error(`${said}: ${shown(order)} is not an order an arpeggio can go in.${meant(String(order), ['up', 'down', 'up-down', 'as written', 'random'])} The orders are: up, down, up-down, as written, random`)
+  if (strict) throw new Error(`${said}: ${shown(order)} is not an order an arpeggio can go in.${meant(String(order), ['up', 'down', 'up-down', 'up-down2', 'as written', 'random', 'together'])} The orders are: up, down, up-down, up-down2 (the top and bottom notes twice), as written, random, together`)
   return 0
 }
 
@@ -911,6 +919,7 @@ function makeCore(wasm, sampleRate, post) {
       else if (kind === 'sample') loadSample(op)
       else if (kind === 'unsample') x.synths_sample_free(engine, op[1])
       else if (kind === 'zones') setZones(op)
+      else if (kind === 'arpPattern') { if (x.synths_arp_pattern_text) { const at = put(op[2]); if (at) { x.synths_arp_pattern_text(engine, op[1], at, op[2].length); x.synths_free(at) } } }
       else if (kind === 'tune') {
         // A tune's times are in units: seconds, or beats when it has a `beat` (the seconds in a beat, which a
         // change of tempo for its group alters as it plays).
@@ -1394,7 +1403,7 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
   const params = allSettings()
   const partParams = PARAMS.filter((p) => p[0] < 200)
   const id = (name) => params.get(key(name)).id
-  const PARAM = 4, NOTE_ON = 1, NOTE_OFF = 2, VOICE_PITCH = 6, VOICE_FREQ = 7, VOICE_VOLUME = 8, VOICE_PAN = 9, VOICE_KILL = 11, ARP = 13, ARP_MORE = 14
+  const PARAM = 4, NOTE_ON = 1, NOTE_OFF = 2, VOICE_PITCH = 6, VOICE_FREQ = 7, VOICE_VOLUME = 8, VOICE_PAN = 9, VOICE_KILL = 11, ARP = 13, ARP_MORE = 14, ARP_STYLE = 17, ARP_BEAT = 18, ARP_NOTES = 19, ARP_PATTERN = 21
   const canArp = ENGINE.events.includes('arp')
   const MASTER = id('master.volume')
   // The live input, in an engine that has one: which part it plays through, and whether it is heard.
@@ -1458,13 +1467,46 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
 
   // Give the note with a handle an arpeggio (or change the one it has, or with no offsets take it away): the
   // engine steps one voice through the offsets, in semitones, so many times a second.
-  function arpeggio(at, part, h, arp) {
+  function arpeggio(at, part, h, arp, fresh = false) {
     if (!canArp) return tell('arpeggios are not ready yet in this version, so an arpeggio plays as its lowest note alone.')
     const offsets = arp && Array.isArray(arp.offsets) ? arp.offsets.slice(0, 8).map((v) => clamp(Math.round(+v || 0), -128, 127)) : []
     const pack = (o) => ((o[0] & 255) | (o[1] & 255) << 8 | (o[2] & 255) << 16 | (o[3] & 255) << 24) >>> 0
+    // PLAYED BY THE ENGINE'S ARPEGGIATOR: each step a note struck afresh and held for its gate (or one voice whose
+    // pitch jumps, with a gate of 0), in beats of the tempo or so many a second, through octaves, with swing,
+    // accents or a pattern. `fresh` is a note about to start (the events wait on the part for it, handle 0, and
+    // go before its note_on); otherwise they go to a sounding note's handle, which takes them at its next step
+    // and keeps its place.
+    if (offsets.length && arpIsPlayed(arp)) {
+      const a = fresh ? 0 : h
+      const strike = arp.style ? arp.style !== 'slide' : arp.beats > 0 || arp.gate > 0
+      const accents = (Array.isArray(arp.accent) ? arp.accent : []).slice(0, 8).reduce((bits, v, i) => (bits | (clamp(Math.round((+v || 0) * 15), 0, 15) << (i * 4))) >>> 0, 0)
+      event(at, ARP_NOTES, part, a, arp.beats > 0 ? 0 : arp.rate > 0 ? clamp(arp.rate, 0.1, 1000) : 50, orderOf(arp.order, false), offsets.length, pack(offsets))
+      if (offsets.length > 4) event(at, ARP_MORE, part, a, 0, 0, 0, pack(offsets.slice(4)))
+      event(at, ARP_STYLE, part, a, strike ? clamp(arp.gate > 0 ? +arp.gate : 0.5, 0.05, 1) : 0, clamp(Math.round(+arp.octaves || 1), 1, 4), clamp(+arp.swing || 0, 0, 0.75), accents)
+      event(at, ARP_BEAT, part, a, arp.beats > 0 ? clamp(1 / arp.beats, 0.01, 64) : 0, 0)
+      event(at, ARP_PATTERN, part, a, arp.pattern ? patternSlot(String(arp.pattern)) : 0, 0)
+      return true
+    }
+    if (fresh) return false
     event(at, ARP, part, h, arp && arp.rate > 0 ? clamp(arp.rate, 0.1, 1000) : 50, orderOf(arp && arp.order, false), offsets.length, pack(offsets))
     if (offsets.length > 4) event(at, ARP_MORE, part, h, 0, 0, 0, pack(offsets.slice(4)))
+    return true
   }
+  // A pattern's text has one of the engine's 64 places, the least lately used making way.
+  const patterns = new Map()
+  let patternUse = 0
+  function patternSlot(text) {
+    let had = patterns.get(text)
+    if (!had) {
+      let slot = patterns.size + 1
+      if (slot > 64) { const [oldest, was] = [...patterns].sort((x, y) => x[1].used - y[1].used)[0]; patterns.delete(oldest); slot = was.slot }
+      patterns.set(text, had = { slot, used: 0 })
+      ops.push(['arpPattern', slot, new TextEncoder().encode(text)])
+    }
+    had.used = ++patternUse
+    return had.slot
+  }
+  const TEMPO = setting('tempo')?.id
   const autoHandle = () => (handle = handle >= 0xbffffff0 ? 0x80000001 : handle + 1)
   const plain = () => patchOf(PLAIN, '', false)
 
@@ -1708,9 +1750,11 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
       const rec = synthFor(c.id, at)
       const h = c.h > 0 ? c.h : autoHandle()
       const list = c.note == null ? [rec.note] : notes(c.note)
+      // An arpeggio the engine's arpeggiator plays waits on the part for its note; a voice's own is given to the note after.
+      const played = !!c.arp && list.length > 0 && arpeggio(at, rec.part, h, c.arp, true)
       for (const n of list) event(at, NOTE_ON, rec.part, h, n, c.vel == null ? 0.8 : clamp(c.vel, 0, 1))
       if (c.pan) event(at, VOICE_PAN, rec.part, h, clamp(c.pan, -1, 1))
-      if (c.arp) arpeggio(at, rec.part, h, c.arp)
+      if (c.arp && !played) arpeggio(at, rec.part, h, c.arp)
       if (c.len != null && list.length) event(at + Math.max(0.001, c.len), NOTE_OFF, rec.part, h, 0)
     },
     off(c, at) {
@@ -1806,6 +1850,8 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
       if (!(c.bpm > 0)) return
       scope.tempo = clamp(+c.bpm, 20, 400)
       ops.push(['tempo', scope.name, 60 / scope.tempo, at])
+      // The engine has one tempo, for arpeggios counted in beats: it is whoever set theirs last.
+      if (TEMPO !== undefined) event(at, PARAM, 0, TEMPO, scope.tempo, 0)
     },
     stop(c) {
       if (c.id != null) ops.push(['stopTune', c.id])
@@ -3446,8 +3492,37 @@ export function createSound(options = {}) {
   function arpOf(notes, root, o, said) {
     const offsets = notes.map((n) => n - root)
     if (offsets.some((v) => !Number.isInteger(v) || v < -128 || v > 127)) throw new Error(`${said}: the notes of an arpeggio have to be whole notes within ten octaves of the first one`)
-    return { offsets, rate: o.speed === undefined ? 50 : amount(o.speed, `${said}: speed`, 0.1, 1000), order: orderOf(o.order, true, said) }
+    const arp = { offsets, rate: o.speed === undefined ? 50 : amount(o.speed, `${said}: speed`, 0.1, 1000), order: orderOf(o.order, true, said) }
+    // Counted in beats: each step a note length ("sixteenth"), or so many beats, which follows the tempo.
+    const step = o.step ?? o.rate
+    if (step !== undefined) {
+      if (o.speed !== undefined) throw new Error(`${said}: say how fast one way: step (a note length, as in { step: "sixteenth" }) or speed (steps a second), not both`)
+      arp.beats = typeof step === 'string' ? beatsLong(step, `${said}: step`) : amount(step, `${said}: step`, 1 / 64, 16)
+      delete arp.rate
+    }
+    if (o.style !== undefined) {
+      if (o.style !== 'slide' && o.style !== 'strike') throw new Error(`${said}: style is "strike" (each step a new note) or "slide" (one voice whose pitch jumps), not ${shown(o.style)}`)
+      arp.style = o.style
+    }
+    if (o.gate !== undefined) arp.gate = amount(o.gate, `${said}: gate`, 0.05, 1)
+    if (o.octaves !== undefined) arp.octaves = Math.round(amount(o.octaves, `${said}: octaves`, 1, 4))
+    if (o.swing !== undefined) arp.swing = amount(o.swing, `${said}: swing`, 0, 0.75)
+    const accent = o.accent ?? o.accents
+    if (accent !== undefined && accent !== null) {
+      if (!Array.isArray(accent) || accent.length > 8 || !accent.every((v) => typeof v === 'number' && v >= 0 && v <= 1)) throw new Error(`${said}: accent is how hard each step is struck, up to eight numbers from 0 (a rest) to 1, as in { accent: [1, 0.5, 0.5, 0.5] }, not ${shown(accent)}`)
+      arp.accent = accent
+    }
+    if (o.pattern !== undefined && o.pattern !== null) {
+      const text = typeof o.pattern === 'string' ? o.pattern.trim() : ''
+      const steps = text.split(/\s+/)
+      if (!text || (!ARP_PATTERNS.includes(text) && (steps.length > 32 || !steps.every((t) => ARP_STEP.test(t))))) throw new Error(`${said}: a pattern is steps with spaces between them, as in { pattern: "1 - 3 2 _ 1 3 5^" } (a number is that note of the chord, - a rest, _ holds the last note, ' an octave up, ^ an accent), or one by name: ${ARP_PATTERNS.join(', ')}; not ${shown(o.pattern)}`)
+      arp.pattern = text
+    }
+    return arp
   }
+  /** What an arpeggio may be told, kept between changes of its chord. */
+  const ARP_WORDS = ['speed', 'step', 'rate', 'order', 'style', 'gate', 'octaves', 'swing', 'accent', 'accents', 'pattern']
+  const arpWords = (o) => Object.fromEntries(ARP_WORDS.filter((w) => o[w] !== undefined).map((w) => [w, o[w]]))
   // What arp() was given: a chord, then in any order a kind of chord (text), a length (a number) and options.
   function arpArgs(args) {
     const o = {}
@@ -3469,7 +3544,9 @@ export function createSound(options = {}) {
     /** Another chord, without starting the note again: arp.change("Fm"), arp.change("F4", "minor"), or a list of notes. */
     change(chord, kind, o = {}) {
       if (kind && typeof kind === 'object') { o = kind; kind = undefined }
-      this.o = { ...this.o, ...o }
+      // A new speed takes the place of a step, and a step of a speed.
+      if (o.speed !== undefined) { delete this.o.step; delete this.o.rate } else if (o.step !== undefined || o.rate !== undefined) delete this.o.speed
+      this.o = { ...this.o, ...arpWords(o) }
       command({ op: 'voice', id: this.synth, h: this.h, arp: arpOf(chordOf(chord, kind, 'change'), this.root, this.o, 'change'), t: when(o, 'change') })
       this.now = [chord, kind]
       return this
@@ -3477,6 +3554,12 @@ export function createSound(options = {}) {
     set chord(chord) { this.change(chord) }
     set speed(speed) { this.change(...this.now, { speed }) }
     set order(order) { this.change(...this.now, { order }) }
+    set step(step) { this.change(...this.now, { step }) }
+    set gate(gate) { this.change(...this.now, { gate }) }
+    set octaves(octaves) { this.change(...this.now, { octaves }) }
+    set swing(swing) { this.change(...this.now, { swing }) }
+    set accent(accent) { this.change(...this.now, { accent }) }
+    set pattern(pattern) { this.change(...this.now, { pattern }) }
   }
 
   /** A tune that is playing: what playNotes() gives back. */
@@ -3584,6 +3667,12 @@ export function createSound(options = {}) {
      * A chord from one voice, as a fast arpeggio: the sound of a C64 tune. lead.arp("Cm7"), lead.arp("C4", "minor"),
      * lead.arp(["C4", "E4", "G4"]), then a length in seconds (half a second unless you say) and
      * { speed: steps a second (50), order: "up" | "down" | "up-down" | "as written" | "random", volume, pan, after }.
+     *
+     * And a musical one, each step a note struck afresh, in time with the tempo:
+     * lead.arp("Cm7", "whole", { step: "sixteenth", octaves: 2, gate: 0.5 }). `step` is a note length; `gate` is how
+     * much of its step each note is held (0.5); `octaves` 1 to 4; `swing` puts every second step back; `accent` is
+     * how hard each step is struck, [1, 0.5, 0.5, 0.5]; `order` may also be "up-down2" and "together" (stabs);
+     * `pattern` is a rhythm of its own, "1 - 3 2 _ 1 3 5^" or "trance"; `style: "slide"` keeps it one voice.
      */
     arp(...args) { return this._arp(args, 'arp', 0.5) }
     /** The same, staying until it is stopped: `const chord = lead.startArp("Am")`, `chord.change("F")`, `chord.stop()`. */
@@ -3597,7 +3686,7 @@ export function createSound(options = {}) {
       if (o.volume !== undefined) c.vel = amount(o.volume, `${said}: volume`)
       if (o.pan !== undefined) c.pan = amount(o.pan, `${said}: pan`, -1, 1)
       command(c)
-      const arp = new Arp(this._id, h, notes[0], { speed: o.speed, order: o.order })
+      const arp = new Arp(this._id, h, notes[0], arpWords(o))
       arp.now = [chord, kind]
       return arp
     }
@@ -4527,6 +4616,8 @@ export function describe() {
     version, commands: COMMANDS, engine: ENGINE,
     settings: PARAMS.map(([id, name, kind, min, max, def, unit, choices]) => ({ id, name, kind: KINDS[kind], min, max, default: def, unit, ...(choices ? { choices } : {}), ...(LABELS[name] ? { labels: LABELS[name] } : {}), scope: id < 200 ? 'synth' : 'all' })),
     names: Object.fromEntries(Object.entries(ALIASES).map(([alias, to]) => [alias, Array.isArray(to) ? { setting: to[0], scale: to[1] } : { setting: to, scale: 1 }])),
+    // An arpeggio: what it may be told, its two styles, and the patterns it can follow by name.
+    arp: { words: ['speed', 'step', 'order', 'style', 'gate', 'octaves', 'swing', 'accent', 'pattern'], styles: ['slide', 'strike'], patterns: ARP_PATTERNS, fields: ['offsets', 'rate', 'beats', 'order', 'octaves', 'gate', 'style', 'swing', 'accent', 'pattern'] },
     choiceWords: CHOICE_WORDS, plain: PLAIN, synths: PRESETS, sounds: SOUNDS, chords: CHORDS, orders: ORDERS, macroWaves: MACRO_WAVES, lengths: LENGTHS, lengthLetters: LENGTH_LETTERS, midi: MIDI,
     // The voice changers (each a list of settings; putting one on first puts back what the last changed), and the microphone.
     voices: VOICES,

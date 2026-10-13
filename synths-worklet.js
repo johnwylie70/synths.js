@@ -80,6 +80,7 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
       else if (kind === 'sample') loadSample(op)
       else if (kind === 'unsample') x.synths_sample_free(engine, op[1])
       else if (kind === 'zones') setZones(op)
+      else if (kind === 'arpPattern') { if (x.synths_arp_pattern_text) { const at = put(op[2]); if (at) { x.synths_arp_pattern_text(engine, op[1], at, op[2].length); x.synths_free(at) } } }
       else if (kind === 'tune') {
         // A tune's times are in units: seconds, or beats when it has a `beat` (the seconds in a beat, which a
         // change of tempo for its group alters as it plays).

@@ -1768,6 +1768,47 @@
    "scale": 1
   }
  },
+ "arp": {
+  "words": [
+   "speed",
+   "step",
+   "order",
+   "style",
+   "gate",
+   "octaves",
+   "swing",
+   "accent",
+   "pattern"
+  ],
+  "styles": [
+   "slide",
+   "strike"
+  ],
+  "patterns": [
+   "bounce",
+   "octaves",
+   "root-fifth",
+   "thumb",
+   "converge",
+   "diverge",
+   "offbeat",
+   "gallop",
+   "trance",
+   "acid"
+  ],
+  "fields": [
+   "offsets",
+   "rate",
+   "beats",
+   "order",
+   "octaves",
+   "gate",
+   "style",
+   "swing",
+   "accent",
+   "pattern"
+  ]
+ },
  "choiceWords": {
   "square": "pulse",
   "sawtooth": "saw",
@@ -2715,7 +2756,10 @@
   "written": 3,
   "aswritten": 3,
   "given": 3,
-  "random": 4
+  "random": 4,
+  "updown2": 5,
+  "together": 6,
+  "stab": 6
  },
  "macroWaves": {
   "sine": 0,

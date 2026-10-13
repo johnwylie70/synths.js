@@ -98,10 +98,19 @@ record"): `type` and `part` are `u16`, `a` is `u32` (a handle, or a parameter's 
 | 4 | `param` | part (0 for the settings all share, ids 200 up) | parameter id | value | glide in seconds | | |
 | 6 to 9, 11 | `voice_pitch`, `voice_freq`, `voice_volume`, `voice_pan`, `voice_kill` | part | handle | value | seconds to get there | | |
 | 13, 14 | `arp`, `arp_more` | part | handle | steps a second | order | how many offsets | four offsets as bytes |
+| 17 | `arp_style` | part | handle, or 0 for the part's next note | gate (0: one voice) | octaves | swing | accents, four bits a step |
+| 18 | `arp_beat` | part | handle or 0 | steps to a beat (0: the rate) | | | |
+| 19 | `arp_notes` | part | handle or 0 | steps a second (0: as it was) | order | how many offsets | four offsets as bytes |
+| 21 | `arp_pattern` | part | handle or 0 | a pattern's place, 1 to 64, or 0 for none | | | |
 | 15 | `song` | 0 | what: 0 stop, 1 play, 2 pause, 3 seek (x order, y row), 4 repeat (x 1 or 0), 5 volume (x), 6 a patch's part (x instrument, y part), 7 mute and 8 solo (x channel or -1, y 1 or 0), 9 loop the pattern (x) | | | | |
 
 Any other type in the engine's document may come the same way (5 `pitch_bend`, 12 `macro_tick`, and those a
-later engine adds). A core that only passes events through needs to know none of this: it turns `seconds` into a frame and hands the
+later engine adds). An arpeggio that the engine's arpeggiator plays is sent as 19 (and 14 for more than four offsets), 17, 18 and
+21, all with `a` 0 and the time of the note, and then the `note_on`: the order within one time matters, and a
+core must keep events of the same frame in the order they came. A `tempo` command is also a `param` event for
+parameter 224 (`tempo`, beats a minute), which those arpeggios count their beats by.
+
+A core that only passes events through needs to know none of this: it turns `seconds` into a frame and hands the
 seven numbers to the engine. Handles from the conductor are below `0xc0000000`.
 
 `all_notes_off`, when it is the core that sends it (`stop`, `stopPart`), goes on the frame of now.
@@ -175,6 +184,16 @@ sample that is there. `unsample` frees the slot. If there is no memory: `post({ 
 takes them (the engine's document, "The zone record"); `flags` is its `flags` (1: a note no zone holds is
 silent). `null` or a count of 0 takes the part's map away (`synths_zones_clear`). The slots in the records are
 the conductor's.
+
+### `arpPattern`: a pattern for arpeggios
+
+```js
+["arpPattern", place, text]
+```
+
+`text` is a `Uint8Array` of the pattern's text in UTF-8 (`"1 - 3 2 _ 1 3 5^"`, or the name of one of the engine's),
+to be put in `place` (1 to 64) with `synths_arp_pattern_text`. It is sent before the `arp_pattern` event that
+names the place.
 
 ### `macro`: a part's step macro
 

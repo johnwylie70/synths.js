@@ -54,6 +54,8 @@ The first version.
 
 - For apps: `createPlayer({ core, context })` takes an engine the app runs itself (a native app's, on its own audio thread) and the app's clock, and then fetches no engine and uses no Web Audio. [docs/core.md](docs/core.md) is the contract: every op the player sends a core, what a core says back, and the timing rule.
 
+- Musical arpeggios beside the fast ones: `lead.arp("Am", "whole", { step: "sixteenth", octaves: 2, gate: 0.5 })` strikes a new note at each step, in time with `setTempo` (and follows it while it sounds). `gate`, `octaves`, `swing`, `accent`, a `pattern` (`"1 - 3 2 _ 1 3 5^"` or `"trance"`), the orders `"up-down2"` and `"together"`, and `style: "slide"` for one voice. `chord.change("F")` on one that is held keeps its place. In a `note` command's `arp` the fields are `beats`, `style`, `gate`, `octaves`, `swing`, `accent` and `pattern`, beside `offsets`, `rate` and `order`. `playArp("Cm7")` with nothing said is the C64 chord it always was.
+
 ### Fixed
 
 - `song.channel(n).level()` read zero for a channel whose instrument is a synth patch. It is now what is heard on the channel whichever kind of instrument plays it (the engine, synths-core a0b6535, shows a channel's synth notes on the channel's own meter).
