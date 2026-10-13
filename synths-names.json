@@ -299,6 +299,24 @@
    "scope": "synth"
   },
   {
+   "id": 34,
+   "name": "osc1.reverse",
+   "kind": "bool",
+   "min": 0,
+   "max": 1,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
+   "id": 35,
+   "name": "osc2.reverse",
+   "kind": "bool",
+   "min": 0,
+   "max": 1,
+   "default": 0,
+   "scope": "synth"
+  },
+  {
    "id": 36,
    "name": "sub.level",
    "kind": "float",
@@ -328,6 +346,15 @@
    "min": -2,
    "max": -1,
    "default": -1,
+   "scope": "synth"
+  },
+  {
+   "id": 39,
+   "name": "sample.antialias",
+   "kind": "bool",
+   "min": 0,
+   "max": 1,
+   "default": 1,
    "scope": "synth"
   },
   {
