@@ -46,7 +46,8 @@ const say = (ok, engine, what, got) => {
 }
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
-// ONLY=midi runs the MIDI cases alone, ONLY=voice the microphone's, and ONLY=examples the examples.
+// ONLY=midi runs the MIDI cases alone, ONLY=voice the microphone's, ONLY=examples the examples, and ONLY=busy the
+// fallback on a page that is kept busy.
 const ONLY = process.env.ONLY
 
 // Helpers every test page is given, as window.T.
@@ -81,16 +82,33 @@ window.T = {
   },
   // TAP: a second worklet after the player's that keeps every sample it is given, so timing can be read exactly.
   async tap(player) {
-    const src = 'registerProcessor("tap", class extends AudioWorkletProcessor { constructor() { super(); this.port.onmessage = () => this.port.postMessage("end") } process(i) { if (i[0] && i[0][0]) this.port.postMessage(i[0][0].slice()); return true } })'
+    const src = 'registerProcessor("tap", class extends AudioWorkletProcessor { constructor() { super(); this.first = -1; this.port.onmessage = () => this.port.postMessage(["end", this.first]) } process(i) { if (i[0] && i[0][0]) { if (this.first < 0) this.first = currentFrame; this.port.postMessage(i[0][0].slice()) } return true } })'
     const url = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }))
     await player.context.audioWorklet.addModule(url)
     const node = new AudioWorkletNode(player.context, 'tap', { numberOfInputs: 1, numberOfOutputs: 1 })
     const blocks = []
-    let done
-    node.port.onmessage = (m) => (m.data === 'end' ? done() : blocks.push(m.data))
+    let done, forgotten = 0
+    node.port.onmessage = (m) => (Array.isArray(m.data) ? done(m.data[1]) : blocks.push(m.data))
     player.node.connect(node)
     node.connect(player.context.destination)
-    return { async samples() { await new Promise((yes) => { done = yes; node.port.postMessage('end') }); const all = new Float32Array(blocks.length * 128); blocks.forEach((b, i) => all.set(b, i * 128)); return all } }
+    // What it gives has first, the sound card's frame that the first sample was; forget() starts again from here.
+    return {
+      forget() { forgotten += blocks.length; blocks.length = 0 },
+      async samples() { const first = await new Promise((yes) => { done = yes; node.port.postMessage('end') }); const all = new Float32Array(blocks.length * 128); blocks.forEach((b, i) => all.set(b, i * 128)); all.first = first + forgotten * 128; return all },
+    }
+  },
+  // The breaks in a steady sine: each sample of one follows from the two before it, and where it does not, the
+  // sound was cut. Breaks closer together than 256 frames are one.
+  breaks(a, hz, rate) {
+    const k = 2 * Math.cos(2 * Math.PI * hz / rate)
+    let found = 0, last = -1e9
+    for (let i = 1; i < a.length - 1; i++) if (Math.abs(a[i + 1] - k * a[i] + a[i - 1]) > 0.004) { if (i - last > 256) found++; last = i }
+    return found
+  },
+  // Keep the page's thread busy for some milliseconds, four times a second, as a heavy frame does. It gives back what stops it.
+  busy(ms) {
+    const timer = setInterval(() => { for (const until = performance.now() + ms; performance.now() < until;); }, 250)
+    return () => clearInterval(timer)
   },
   // The frames where sound begins after silence.
   onsets(a, quiet = 200, over = 1e-4) {
@@ -622,10 +640,11 @@ async function notSecure(name, browser) {
     s.flush()
     for (let i = 0; i < 300 && s.player.state !== 'on'; i++) await T.wait(10)
     // No worklet here, so listen with an analyser alone.
-    return { secure: isSecureContext, worklet: 'audioWorklet' in s.player.context, kind: s.player.kind, state: s.player.state, heard: await T.listen(s.player, 400) }
+    return { secure: isSecureContext, worklet: 'audioWorklet' in s.player.context, kind: s.player.kind, state: s.player.state, fallback: s.player.fallback, heard: await T.listen(s.player, 400) }
   })
   say(got.secure === false && got.worklet === false && got.kind === 'fallback' && got.heard.peak > 0.2 && Math.abs(got.heard.hz - 440) < 8, name, 'on a page that is not served securely there is no audio worklet, and the fallback plays the note', got)
-  say(said.filter((t) => /cannot run sound on its own thread \(that needs an https address, or localhost\)/.test(t)).length === 1, name, 'and the console says so once, with what it needs', said)
+  say(got.fallback?.buffer === 2048 && got.fallback.reason === 'insecure' && got.fallback.underruns === 0, name, 'player.fallback says why (the page is not secure), that sound is made 2048 frames at a time, and that none came late', got.fallback)
+  say(said.filter((t) => /cannot run sound on its own thread \(that needs an https address, or localhost\), so the sound is made on the page's thread instead, \d+ ms at a time\. .* a key is heard about \d+ ms after it is pressed, and it may stutter or click when the page is busy for longer than that\. An https address has neither\./.test(t)).length === 1, name, 'and the console says so once: why, how late a key is heard, that a busy page makes it click, and that https has neither', said)
   const refused = await page.evaluate(async () => {
     const { createPlayer } = await import('/synths.js')
     const player = createPlayer({ fallback: false })
@@ -657,6 +676,122 @@ async function notSecure(name, browser) {
   })
   say(mic.ready === false && mic.state === 'unavailable' && said.filter((t) => /microphone/.test(t) && !/howl/.test(t)).length === 1 && said.some((t) => /cannot use the microphone, because that needs an https address, or localhost/.test(t)), name, 'on a page that is not served securely there is no microphone to ask for, and one message says what it needs', { mic, said })
   say(mic.given === true && mic.kind === 'fallback' && mic.heard.peak > 0.1 && Math.abs(mic.heard.hz - 400) < 8, name, `and a stream given by a host is still heard through the fallback (400 Hz comes out at ${Math.round(mic.heard?.hz)})`, mic)
+  await context.close()
+}
+
+/**
+ * A BUSY PAGE AND THE FALLBACK. The fallback makes its sound on the page's thread, so a page that is busy for
+ * longer than a buffer lasts leaves the sound card with nothing new to play. Here the page is kept busy on
+ * purpose while a steady sine plays, and the breaks in what came out are counted (a second worklet keeps every
+ * sample, so this is a page that has worklets and is told to use the fallback all the same).
+ */
+async function busyPage(name, browser) {
+  const context = await browser.newContext()
+  const page = await context.newPage()
+  if (name === 'chromium') await letWorkletsRun(page)
+  const said = []
+  page.on('console', (m) => said.push(m.text()))
+  const BLOCKS = [10, 30, 60, 120]
+  const table = {}
+  // 1024 frames with everything 80 ms ahead is what the fallback did before.
+  for (const size of [1024, 2048, 4096]) {
+    table[size] = []
+    for (const block of BLOCKS) {
+      await fresh(page)
+      table[size].push(await page.evaluate(async ({ size, block }) => {
+        const { createSound } = await import('/synths.js')
+        const s = createSound({ fallback: 'always', share: false, fallbackBuffer: size, ...(size === 1024 ? { latency: 0.08 } : {}) })
+        const synth = s.makeSynth(T.CLICK)
+        await T.on(() => s.player)
+        const tap = await T.tap(s.player)
+        synth.start('A4')
+        await T.wait(700)
+        tap.forget()
+        const stop = T.busy(block)
+        await T.wait(2500)
+        stop()
+        return { breaks: T.breaks(await tap.samples(), 440, s.player.context.sampleRate), counted: s.player.fallback.underruns, buffer: s.player.fallback.buffer }
+      }, { size, block }))
+    }
+  }
+  const row = (size) => table[size].map((g, i) => `${BLOCKS[i]} ms: ${g.breaks}`).join(', ')
+  say(table[2048][0].breaks === 0 && table[2048][1].breaks === 0 && table[2048][1].counted === 0 && table[4096][2].breaks === 0 && table[1024][2].breaks > table[2048][2].breaks && table[2048][3].breaks > table[4096][3].breaks, name,
+    `breaks in a steady note on the fallback in 2.5 seconds, with the page busy four times a second. 1024 frames (as it was): ${row(1024)}. 2048 (now): ${row(2048)}. 4096: ${row(4096)}`, table)
+  say(BLOCKS.every((b, i) => [1024, 2048, 4096].every((size) => (table[size][i].breaks > 0) === (table[size][i].counted > 0) || table[size][i].counted <= 4)) && table[2048][3].counted >= 8 && table[2048][3].buffer === 2048, name,
+    `and the player counts them itself as they happen (player.fallback.underruns: ${table[2048].map((g) => g.counted).join(', ')} at 2048), leaving a buffer that was asked for by its size alone`, table)
+
+  // --- with nothing asked for: the buffer, exact timing while the page is busy, and a key's delay
+  await fresh(page)
+  let got = await page.evaluate(async () => {
+    const { createSound } = await import('/synths.js')
+    const s = createSound({ fallback: 'always', share: false })
+    const synth = s.makeSynth(T.CLICK)
+    await T.on(() => s.player)
+    const rate = s.player.context.sampleRate
+    const tap = await T.tap(s.player)
+    await T.wait(300)
+    const stop = T.busy(30)
+    const t0 = s.soundTime() + 0.3
+    for (let i = 0; i < 12; i++) synth.play('A4', 0.02, { at: t0 + i * 0.1 })
+    s.flush()
+    await T.wait(1900)
+    stop()
+    const on = T.onsets(await tap.samples())
+    const quiet = { ...s.player.fallback }
+    // A key, pressed at moments of no one's choosing: when the sound card says it is now, and when the note comes out.
+    tap.forget()
+    const pressed = []
+    for (let i = 0; i < 12; i++) {
+      await T.wait(150 + Math.random() * 100)
+      pressed.push(s.player.context.currentTime)
+      synth.play('A4', 0.03)
+      s.flush()
+    }
+    await T.wait(500)
+    const heard = await tap.samples()
+    const delays = T.onsets(heard).map((f, i) => ((heard.first + f) / rate - pressed[i]) * 1000)
+    return { rate, gaps: on.slice(1).map((f, i) => f - on[i]), quiet, delays, node: s.player.node.constructor.name }
+  })
+  const worst = Math.max(...got.delays), least = Math.min(...got.delays)
+  say(got.quiet.buffer === 2048 && got.quiet.underruns === 0 && got.gaps.length === 11 && got.gaps.every((g) => Math.abs(g - got.rate / 10) <= 1), name,
+    'with nothing asked for the fallback makes 2048 frames at a time, and twelve scheduled notes are a tenth of a second apart to the sample while the page is busy for 30 ms four times a second, with no under-run', got)
+  say(got.delays.length === 12 && least > 60 && worst < 130, name, `a key pressed on the fallback is heard ${Math.round(least)} to ${Math.round(worst)} ms later by the sound card's clock (at ${got.rate} Hz; 80 ms with the buffer of 1024 it had)`, got)
+
+  // --- a page that stays too busy: the buffer is doubled, once; a quiet page keeps the one it had
+  await fresh(page)
+  said.length = 0
+  got = await page.evaluate(async () => {
+    const { createSound } = await import('/synths.js')
+    const s = createSound({ fallback: 'always', share: false })
+    const synth = s.makeSynth(T.CLICK)
+    await T.on(() => s.player)
+    const tap = await T.tap(s.player)
+    synth.start('A4')
+    await T.wait(1500)
+    const quiet = { ...s.player.fallback }
+    const stop = T.busy(120)
+    await T.wait(2500)
+    const grown = { ...s.player.fallback }
+    await T.wait(2500)
+    stop()
+    const after = { ...s.player.fallback }
+    // The sound goes on through the change of node, and a scheduled note is still exact after it.
+    synth.stop?.()
+    s.stopSound()
+    await T.wait(300)
+    tap.forget()
+    const click = s.makeSynth(T.CLICK)
+    const t0 = s.soundTime() + 0.3
+    for (let i = 0; i < 5; i++) click.play('A4', 0.02, { at: t0 + i * 0.1 })
+    s.flush()
+    await T.wait(1100)
+    const on = T.onsets(await tap.samples())
+    return { quiet, grown, after, rate: s.player.context.sampleRate, gaps: on.slice(1).map((f, i) => f - on[i]) }
+  })
+  const grew = said.filter((t) => /the page is busy for longer than the sound was made ahead/.test(t))
+  say(got.quiet.buffer === 2048 && got.quiet.underruns === 0 && got.grown.buffer === 4096 && got.after.buffer === 4096 && got.after.underruns > got.quiet.underruns && grew.length === 1, name,
+    `a quiet page keeps 2048 frames and counts no under-run; kept busy for 120 ms four times a second, the buffer is doubled to 4096 after ${got.grown.underruns} under-runs, never further, and the console says so once`, { got, said })
+  say(got.gaps.length === 4 && got.gaps.every((g) => Math.abs(g - got.rate / 10) <= 1), name, 'and what is scheduled after the change is still exact to the sample, heard through the same player.node', got)
   await context.close()
 }
 
@@ -1239,6 +1374,7 @@ for (const name of ['chromium', 'webkit']) {
     if (!ONLY || ONLY === 'midi') await midi(name, browser)
     if (!ONLY || ONLY === 'voice') await voice(name, browser, false)
     if (!ONLY || ONLY === 'late') await late(name, browser)
+    if (!ONLY || ONLY === 'busy') await busyPage(name, browser)
   } catch (e) { say(false, name, 'the tests ran to the end', String(e?.stack || e)) }
   await browser.close()
 
