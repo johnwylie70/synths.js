@@ -62,6 +62,8 @@ The first version.
 - A note's pitch can move: `lead.play("A4", 1, { bend: "scoop" })`, `"fall"`, `"dip"`, `{ to: 2, over: "eighth" }`; `{ glide: "sixteenth" }` slides to the note from the synth's last one; `{ slide: 12 }`; `{ vibrato: true }` or `{ depth, rate, delay }`, and `note.vibrato()` on a note that is held. In `play`, `start` and `playNote`.
 - `lead.noteOn("C4", 0.8, { at })` and `lead.noteOff("C4", { at })` take a time of `soundTime()`, exact to the sample, for a sequencer that looks ahead.
 
+- A song's mix, moved while it plays: `song.channel(n).volume`, `.pan`, `.reverb` and `.echo`, and `song.loop([1, 0], [5, 0])` for a stretch that goes round. `reverbLevel` and `echoLevel` are new settings for how loud the shared reverb and echo come back. A song's own `mixer`, `effects` and `loop` are handed to the engine as they are; the effects a song set are put back when it goes.
+
 ### Fixed
 
 - `song.channel(n).level()` read zero for a channel whose instrument is a synth patch. It is now what is heard on the channel whichever kind of instrument plays it (the engine, synths-core a0b6535, shows a channel's synth notes on the channel's own meter).

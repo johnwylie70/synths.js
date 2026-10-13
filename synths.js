@@ -236,7 +236,7 @@ const ALIASES = {
   echo: 'send.delay', delay: 'send.delay', reverb: 'send.reverb', chorus: 'send.chorus',
   masterVolume: 'master.volume', limiter: 'master.limiter',
   echoTime: 'delay.time', echoFeedback: 'delay.feedback', echoTone: 'delay.tone', echoBounce: 'delay.pingpong',
-  reverbSize: 'reverb.size', reverbDamping: 'reverb.damping', reverbType: 'reverb.type', reverbDecay: 'reverb.decay', reverbPredelay: 'reverb.predelay', reverbLowCut: 'reverb.low_cut',
+  reverbSize: 'reverb.size', reverbDamping: 'reverb.damping', reverbType: 'reverb.type', reverbDecay: 'reverb.decay', reverbPredelay: 'reverb.predelay', reverbLowCut: 'reverb.low_cut', reverbLevel: 'reverb.level', echoLevel: 'delay.level',
   chorusRate: 'chorus.rate', chorusDepth: 'chorus.depth',
   micGain: 'input.gain', micGate: 'input.gate', micGateRelease: 'input.gate_release',
 }
@@ -1995,7 +1995,7 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
       }
       for (const tune of scope.tunes) ops.push(['stopTune', tune])
       for (const sample of scope.samples) does.unsample({ id: sample })
-      if (song && song.scope === scope) { dropSongSynths(); ops.push(['songUnload']); song = null }
+      if (song && song.scope === scope) { dropSongSynths(); ops.push(['songUnload']); song = null; if (songSetEffects) { restoreEffects(null); songSetEffects = false } }
       scopes.delete(scope.name)
     },
     // A SONG is read and played by the engine itself. Loading takes a moment (the file is fetched, and the engine
@@ -2011,13 +2011,20 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
           // One of our own songs is JSON, and may name WAV files beside it for its samples.
           if (bytes[bytes.findIndex((b) => b > 32)] === 123) {
             let named = []
-            try { named = (JSON.parse(new TextDecoder().decode(bytes)).samples || []).map((sample) => sample && sample.file).filter((f) => typeof f === 'string') } catch (e) { /* the engine will say what is wrong with it */ }
+            try {
+              const doc = JSON.parse(new TextDecoder().decode(bytes))
+              named = (doc.samples || []).map((sample) => sample && sample.file).filter((f) => typeof f === 'string')
+              // A song that says what the reverb and the echo are sets them in the engine, for everyone, when it is read.
+              mine.effects = !!doc.effects && typeof doc.effects === 'object'
+            } catch (e) { /* the engine will say what is wrong with it */ }
             for (const file of new Set(named)) {
               const given = c.files && c.files[file]
               files.push([new TextEncoder().encode(file), new Uint8Array(await bytesOf(given ? { bytes: given } : { url: c.url ? new URL(file, new URL(c.url, typeof document !== 'undefined' ? document.baseURI : 'file:///')).href : file }))])
             }
           }
           if (song !== mine) return
+          if (songSetEffects) restoreEffects(null)
+          songSetEffects = !!mine.effects
           ops.push(['songLoad', mine.token, bytes, files, parts.length, SAMPLE_SLOTS])
           flush()
         })().catch((e) => { tell(`the song ${shown(mine.name)} could not be loaded (${(e && e.message) || e}), so it will not play.`); if (song === mine) song = null })
@@ -2046,8 +2053,30 @@ function makeConductor(post, load, bytesOf, say = () => {}) {
   let songs = 0
   const SONG = 15
   // One thing asked of the song, as the event that does it on its exact frame.
+  // THE SHARED EFFECTS AFTER A SONG. A song that names effects sets the engine's one reverb and echo when it is read,
+  // and the engine leaves them so. When that song goes (the sender closes, or another song is read in its place)
+  // they are put back to what the page itself last asked for, or to how they began.
+  let songSetEffects = false
+  function restoreEffects(at) {
+    for (const [pid, name, , , , def] of PARAMS) if (pid >= 200 && (name.startsWith('reverb.') || name.startsWith('delay.'))) event(at, PARAM, 0, pid, globals.has(pid) ? globals.get(pid) : def, 0)
+  }
   function steer(c, at) {
     const what = c.do || 'play'
+    // The song's mix, moved while it plays: a channel's fader, where it sits, and how much of it goes to the reverb and the echo.
+    if (what === 'mix' && Number.isInteger(c.channel) && c.channel >= 0) {
+      if (c.volume != null) event(at, SONG, 0, 10, c.channel, clamp(+c.volume, 0, 2))
+      if (c.pan != null) event(at, SONG, 0, 11, c.channel, clamp(+c.pan, -1, 1))
+      if (c.reverb != null) event(at, SONG, 0, 12, c.channel, clamp(+c.reverb, 0, 1))
+      if (c.echo != null) event(at, SONG, 0, 13, c.channel, clamp(+c.echo, 0, 1))
+      return
+    }
+    // A stretch of the song that goes round: from a place in the order and a row, back from another. null for none.
+    if (what === 'loop') {
+      const place = (p) => (Array.isArray(p) ? [Math.max(0, p[0] | 0), Math.max(0, p[1] | 0)] : [-1, 0])
+      if (c.start !== undefined) event(at, SONG, 0, 14, ...place(c.start))
+      if (c.end !== undefined) event(at, SONG, 0, 15, ...place(c.end))
+      return
+    }
     if (what === 'play' || what === 'resume') event(at, SONG, 0, 1, 0, 0)
     else if (what === 'stop') event(at, SONG, 0, 0, 0, 0)
     else if (what === 'pause') event(at, SONG, 0, 2, 0, 0)
@@ -4675,6 +4704,7 @@ export function createSound(options = {}) {
       if (!Number.isInteger(channel) || channel < 0 || channel > 31) throw new Error(`${said} needs the number of a channel, counting from 0, or nothing for every channel, not ${shown(channel)}`)
       return { channel }
     }
+    const mixed = new Map()
     const song = {
       stop: () => say('stop'),
       pause: () => say('pause'),
@@ -4703,8 +4733,31 @@ export function createSound(options = {}) {
       get position() { return transport?.songPosition?.() || NO_SONG },
       /** One channel of the song (the first is 0), for a meter or a scope of its own: song.channel(3).level(), .samples(), .notes(). */
       channel(n) {
-        const read = () => transport?.read?.('song:channel:' + amount(n, 'channel', 0, 31), scope) || NOTHING
-        return { samples: () => read().samples, level: () => read().level, notes: () => read().notes }
+        const channel = Math.round(amount(n, 'channel', 0, 31))
+        if (mixed.has(channel)) return mixed.get(channel)
+        const read = () => transport?.read?.('song:channel:' + channel, scope) || NOTHING
+        // Its place in the song's mix, moved while the song plays. What reads back is what was last set here
+        // (undefined until then: what the song itself says is the song's to know).
+        const now = {}
+        const one = { samples: () => read().samples, level: () => read().level, notes: () => read().notes }
+        for (const [word, least, most] of [['volume', 0, 2], ['pan', -1, 1], ['reverb', 0, 1], ['echo', 0, 1]]) {
+          Object.defineProperty(one, word, { enumerable: true, get: () => now[word], set: (v) => { now[word] = amount(v, `channel(${channel}).${word}`, least, most); say('mix', { channel, [word]: now[word] }) } })
+        }
+        mixed.set(channel, one)
+        return one
+      },
+      /**
+       * A stretch of the song that goes round: song.loop([2, 0], [4, 0]) plays from the top of place 2 in the order
+       * up to the top of place 4 and back, each a place in the order and a row. song.loop(null) lets it run on.
+       */
+      loop(start, end) {
+        const place = (p, said) => {
+          if (p === null || p === undefined || p === false) return null
+          const list = typeof p === 'number' ? [p, 0] : p
+          if (!Array.isArray(list) || !Number.isInteger(list[0]) || list[0] < 0 || (list[1] !== undefined && (!Number.isInteger(list[1]) || list[1] < 0))) throw new Error(`loop: ${said} is a place in the song's order and a row there, as in song.loop([2, 0], [4, 0]), not ${shown(p)}`)
+          return [list[0], list[1] || 0]
+        }
+        return say('loop', { start: place(start, 'the start'), end: place(end, 'the end') })
       },
     }
     song.loop_pattern = song.loopPattern
@@ -4855,7 +4908,7 @@ export function describe() {
     // Several recordings as one instrument: the functions, what a recording and the whole map may say, and the engine's limits.
     zones: { functions: ['loadSamples'], synthFunctions: ['setSamples', 'zones'], words: ['file', 'note', 'from', 'to', 'loud', 'tune', 'volume', 'pan', 'release', 'loop', 'oneShot', 'asRecorded', 'start'], options: ['kit', 'crossfade', 'loop', 'oneShot'], most: ENGINE.zones, layers: ENGINE.zoneLayers },
     // What a `song` command may do.
-    song: { does: ['play', 'resume', 'pause', 'stop', 'seek', 'volume', 'repeat', 'mute', 'solo', 'loopPattern', 'replace'], functions: ['stop', 'pause', 'resume', 'seek', 'mute', 'unmute', 'solo', 'loopPattern', 'replace'] },
+    song: { does: ['play', 'resume', 'pause', 'stop', 'seek', 'volume', 'repeat', 'mute', 'solo', 'loopPattern', 'replace', 'mix', 'loop'], functions: ['stop', 'pause', 'resume', 'seek', 'mute', 'unmute', 'solo', 'loopPattern', 'replace', 'loop', 'channel'], channel: { reads: ['samples', 'level', 'notes'], sets: { volume: [0, 2], pan: [-1, 1], reverb: [0, 1], echo: [0, 1] } }, keys: ['mixer', 'effects', 'loop'] },
     microphone: {
       names: MIC_NAMES, gate: MIC_GATE, states: ['asking', 'on', 'refused', 'none', 'busy', 'unavailable', 'off'],
       functions: ['useMicrophone', 'stopMicrophone', 'recordSound', 'startRecording', 'stopRecording', 'recordOutput', 'saveSound', 'receiveSoundEvents', 'voiceNames'],

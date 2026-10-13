@@ -1747,6 +1747,14 @@
    "setting": "reverb.low_cut",
    "scale": 1
   },
+  "reverbLevel": {
+   "setting": "reverb.level",
+   "scale": 1
+  },
+  "echoLevel": {
+   "setting": "delay.level",
+   "scale": 1
+  },
   "chorusRate": {
    "setting": "chorus.rate",
    "scale": 1
@@ -3086,7 +3094,9 @@
    "mute",
    "solo",
    "loopPattern",
-   "replace"
+   "replace",
+   "mix",
+   "loop"
   ],
   "functions": [
    "stop",
@@ -3097,7 +3107,39 @@
    "unmute",
    "solo",
    "loopPattern",
-   "replace"
+   "replace",
+   "loop",
+   "channel"
+  ],
+  "channel": {
+   "reads": [
+    "samples",
+    "level",
+    "notes"
+   ],
+   "sets": {
+    "volume": [
+     0,
+     2
+    ],
+    "pan": [
+     -1,
+     1
+    ],
+    "reverb": [
+     0,
+     1
+    ],
+    "echo": [
+     0,
+     1
+    ]
+   }
+  },
+  "keys": [
+   "mixer",
+   "effects",
+   "loop"
   ]
  },
  "microphone": {

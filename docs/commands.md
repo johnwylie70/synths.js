@@ -578,9 +578,20 @@ Steering, each on the exact sample of its `t`:
 { op: "song", id: "g1", do: "repeat", repeat: false }
 { op: "song", id: "g1", do: "mute", channel: 2, on: true }      // channels count from 0; no channel: every one
 { op: "song", id: "g1", do: "solo", channel: 0, on: true }      // while any is soloed, only those are heard
+{ op: "song", id: "g1", do: "mix", channel: 0, volume: 0.6, pan: -0.5, reverb: 0.4, echo: 0.3 }   // any of the four
+{ op: "song", id: "g1", do: "loop", start: [1, 0], end: [5, 0] }   // [place in the order, row]; null for none
 { op: "song", id: "g1", do: "loopPattern", on: true }           // stay on the pattern that is playing
 { op: "song", id: "g1", do: "replace", text: "{ … the edited song's JSON … }" }   // or bytes; `files` and `patches` as for play
 ```
+
+`mix` moves a channel of the song's mix while it plays: `volume` 0 to 2, `pan` -1 to 1, `reverb` and `echo` 0 to 1
+(the sends, which reach a channel's sampled instruments; a synth instrument has its own synth's). The engine
+glides each over 20 milliseconds. `loop` sets the stretch that goes round, or with `null` takes that end away.
+A song of the engine's own format may carry `mixer`, `effects` and `loop` keys (synths-core's
+`docs/song-format.md`, "The mix"): the player hands the file to the engine untouched. `effects` there sets the
+engine's one reverb and echo; when that song is unloaded, or another is loaded in its place, the player sends
+every `reverb.*` and `delay.*` setting again as the senders last set it, or at its default. `reverbLevel` and
+`echoLevel` (the engine's `reverb.level` and `delay.level`) are settings whose scope is `all`.
 
 `replace` puts an edited song in the place of the one playing, for an editor. When the two have the same number
 of channels and the same rules, and the new one has no fewer instruments and samples, nothing stops: sounding

@@ -798,6 +798,67 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
   const beep = song.channel(2), none = song.channel(7)
   say(beep.samples().length === 1024 && peak(beep.samples()) > 0.01 && beep.level()[0] > 0.01 && same(player.read('song:channel:2').notes.length > 0, true) && same([none.samples().length, none.level()], [0, [0, 0]]) && song.channel(0).level()[0] > 0.01 && song.channel(1).level()[0] > song.channel(0).level()[0] && peak(song.channel(0).samples()) === 0,
     'song.channel(n).level() is what is heard on a channel whichever kind of instrument plays it: the two channels that play synths read their own levels (the brighter the louder) and the one that plays a sample its own; a channel the song has not got reads nothing; a synth\'s wave and notes are read at the synth', [peak(beep.samples()), beep.level(), song.channel(0).level(), song.channel(1).level(), none.level()])
+  // The song's mix, moved while it plays, and a stretch of it going round.
+  {
+    const mix = { format: 'synths-song', version: 2, speed: 6, tempo: 125, channels: 2, order: [0, 1, 2],
+      patterns: [0, 1, 2].map(() => ({ rows: 8, events: [{ row: 0, ch: 0, note: 'A-4', ins: 1 }, { row: 0, ch: 1, note: 'C-3', ins: 2 }] })),
+      instruments: [{ name: 'beep', sample: 0 }, { name: 'low', patch: 'low', synth: { set: CLICK } }],
+      samples: [{ name: 'square', wave: [100, 100, 100, 100, -100, -100, -100, -100], loop: { start: 0, length: 8 } }] }
+    const player = await createOfflinePlayer()
+    const s = createSound({ sound: player, clock: () => player.time, batch: 'manual' })
+    const song = s.playSong(new TextEncoder().encode(JSON.stringify(mix)))
+    s.flush()
+    await new Promise((yes) => setTimeout(yes, 30))
+    const levels = async () => { await player.render(2); return [song.channel(0).level(), song.channel(1).level()].map((l) => l.map((v) => +v.toFixed(3))) }
+    const plain = await levels()
+    const unset = song.channel(0).volume
+    song.channel(0).volume = 0.5
+    song.channel(1).volume = 0.5
+    s.flush()
+    const halved = await levels()
+    song.channel(0).pan = -1
+    song.channel(1).pan = 1
+    s.flush()
+    const panned = await levels()
+    song.loop([1, 0], [2, 0])
+    s.flush()
+    const places = new Set()
+    await player.render(1.5)
+    for (let i = 0; i < 40; i++) { await player.render(0.1); places.add(song.position.order) }
+    song.loop(null)
+    s.flush()
+    for (let i = 0; i < 20; i++) { await player.render(0.1); places.add('then ' + song.position.order) }
+    const refused = [thrown(() => song.loop('middle')), thrown(() => { song.channel(0).volume = 'loud' })]
+    say(unset === undefined && plain[0][0] > 0.05 && plain[1][0] > 0.05 && Math.abs(halved[0][0] / plain[0][0] - 0.5) < 0.15 && Math.abs(halved[1][0] / plain[1][0] - 0.5) < 0.06 && panned[0][1] < panned[0][0] * 0.15 && panned[1][0] < panned[1][1] * 0.15 && song.channel(0).volume === 0.5 && song.channel(1).pan === 1,
+      'song.channel(n).volume and .pan move a channel in the song\'s mix as it plays, a channel of samples and a channel that plays a synth alike, and read back what was set', [plain, halved, panned])
+    say(same([...places].filter((p) => typeof p === 'number').sort(), [1]) && [...places].includes('then 2') && refused.every((t) => typeof t === 'string'), 'song.loop([1, 0], [2, 0]) keeps the song going round that stretch, and song.loop(null) lets it run on', [[...places], refused])
+  }
+
+  // The reverb's and the echo's own levels, and what a song that sets the effects leaves behind.
+  {
+    const tail = async (set) => { const out = await renderSound((s) => { set(s); s.makeSynth({ ...CLICK, reverb: 1 }).play('A4', 0.05) }, { seconds: 1 }); return peak(out.left.subarray(SR * 0.3)) }
+    const tails = [await tail(() => {}), await tail((s) => s.setEffects({ reverbLevel: 0 })), await tail((s) => s.setEffects({ reverbLevel: 2 }))]
+    const got = { ops: [] }
+    let post = null
+    const clock = { currentTime: 0, sampleRate: 48000, state: 'running', resume: async () => {}, addEventListener() {} }
+    const player = synths.createPlayer({ context: clock, core: (given) => { post = given.post; return { exec: (ops) => got.ops.push(...ops) } } })
+    await player.ready
+    const s = createSound({ sound: player, clock: () => 0, batch: 'manual' })
+    s.setEffects({ reverbSize: 0.9 })
+    s.playSong(new TextEncoder().encode(JSON.stringify({ format: 'synths-song', version: 2, channels: 1, order: [0], patterns: [{ rows: 4, events: [] }], instruments: [], effects: { reverbType: 'hall', echoLevel: 0.5 } })))
+    s.flush()
+    await new Promise((yes) => setTimeout(yes, 20))
+    post({ type: 'song', token: got.ops.find((op) => op[0] === 'songLoad')[1], result: 0, error: null, info: [1, 1, 1, 0, 0, 6, 125, 0], patches: [], replaced: false })
+    const before = got.ops.length
+    s.close()
+    const table = describe().settings
+    const id = (name) => table.find((x) => x.name === name).id
+    const back = got.ops.slice(before).filter((op) => op[0] === 'e' && op[2] === 4 && op[3] === 0)
+    const value = (name) => back.find((op) => op[4] === id(name))?.[5]
+    say(tails[0] > 0.001 && tails[1] === 0 && tails[2] > tails[0] * 1.7 && value('reverb.type') === 0 && value('delay.level') === 1 && Math.abs(value('reverb.size') - 0.9) < 1e-6 && describe().names.echoLevel.setting === 'delay.level',
+      'reverbLevel and echoLevel are settings (a level of 0 and the reverb is not heard); when a song that set the effects goes, the reverb and the echo are put back to what the page itself asked for, or to how they began', [tails, back.length, value('reverb.type'), value('reverb.size')])
+  }
+
   // A song of format version 2, with an arpeggio struck in sixteenths: each row of it is a note of its own.
   {
     const v2 = { format: 'synths-song', version: 2, speed: 6, tempo: 125, channels: 1, order: [0],

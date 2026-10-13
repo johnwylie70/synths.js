@@ -674,6 +674,20 @@ song.loopPattern()                         // stay on the pattern that is playin
 song.replace(edited)                       // an edited song in its place, as it plays (for an editor)
 ```
 
+**The mix.** Each channel has a place in the song's mix that can be moved while it plays, and the changes glide, so a fader can be dragged:
+
+```js
+song.channel(0).volume = 0.6               // its fader, 0 to 2
+song.channel(0).pan = -0.5                 // -1 is left, 1 is right
+song.channel(0).reverb = 0.4               // how much of it goes to the reverb, 0 to 1
+song.channel(0).echo = 0.3                 // and to the echo
+song.loop([1, 0], [5, 0])                  // go round from the top of place 1 in the order to the top of place 5; song.loop(null) runs on
+```
+
+`volume` and `pan` reach a channel whatever plays on it. `reverb` and `echo` reach a channel's sampled instruments; a synth instrument has the sends of its own synth (`reverb` and `echo` in its patch). Each reads back what was last set here. The reverb and the echo are the ones every synth shares, so `setEffects({ reverbType: "hall", reverbLevel: 0.8, echoTime: 0.3, echoLevel: 0.7 })` shapes them; `reverbLevel` and `echoLevel` are how loud each comes back, for everything sent to it.
+
+A song of the library's own format can carry its mix: `mixer` (the song's `volume` and, for each channel, `volume`, `reverb` and `echo`), the `pan` list, `effects` (those same setting names) and `loop`. The player hands them to the engine untouched. A song that names `effects` sets the shared reverb and echo for the whole page while it is loaded; when it goes (another song is played, or the program closes) they are put back to what the page itself last asked for with `setEffects`, or to how they began.
+
 `replace` takes the song's bytes, its JSON as text, or the song itself as an object. When the edited song has the same shape (as many channels, no fewer instruments and samples) nothing stops: it keeps its place and plays the new notes from the next row.
 
 In a song of synths' own, an instrument can be a synth instead of a recording, called by a name. A song can say itself what the synth is, on the instrument, and then nothing more is needed: `"synth": { "preset": "chip", "set": { "decay": 0.16 }, "macro": [{ "wave": "noise", "pitch": 24 }, { "wave": "pulse" }] }` is a ready-made synth to start from, the settings changed from it and a step macro, each of which may be left out. It is what `makeSynth("chip", { decay: 0.16, macro: [...] })` would be given. A name that is a ready-made synth's (`"bass"`, `"chipKick"`) plays as that; any other name is told what it is, and what you say here comes before what the song says:
