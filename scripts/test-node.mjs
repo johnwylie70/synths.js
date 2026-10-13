@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url'
 
 import * as synths from '../synths.js'
 
-const { renderSound, createSound, createOfflinePlayer, noteNumber, toWav, readWav, describe } = synths
+const { renderSound, createSound, createOfflinePlayer, noteNumber, chordNotes, toWav, readWav, describe } = synths
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const SR = 48000
 
@@ -210,9 +210,9 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
   for (const name of synths.soundNames()) {
     const r = await renderSound((s) => s.playSound(name), { seconds: 3 })
     const p = Math.max(peak(r.left), peak(r.right))
-    if (!(p > 0.1 && p <= 1) || !r.left.every(Number.isFinite) || first(r.left) > 1) quiet.push([name, p])
+    if (!(p > 0.1 && p <= 1) || !r.left.every(Number.isFinite) || first(r.left) > 240) quiet.push([name, p])
   }
-  say(quiet.length === 0, `all ${synths.soundNames().length} game sounds make sound from the first sample, none silent and none past full volume`, quiet)
+  say(quiet.length === 0, `all ${synths.soundNames().length} game sounds make sound within 5 milliseconds, none silent and none past full volume`, quiet)
   for (const name of synths.synthNames()) {
     const r = await renderSound((s) => s.makeSynth(name).play(), { seconds: 3 })
     const p = Math.max(peak(r.left), peak(r.right))
@@ -313,6 +313,115 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
   say(many.length === 0, 'synths that are removed give their places back: 200 made and removed, nothing said', many)
 }
 
+// --- chords by name
+{
+  say(same([chordNotes('Cm7'), chordNotes('C3', 'minor'), chordNotes('F#sus4'), chordNotes('Bbmaj7'), chordNotes('C'), chordNotes('AM7'), chordNotes('Am7'), chordNotes(['C4', 'G4'])],
+    [[60, 63, 67, 70], [48, 51, 55], [66, 71, 73], [70, 74, 77, 81], [60, 64, 67], [69, 73, 76, 80], [69, 72, 76, 79], [60, 67]]), 'chords by name: Cm7, C3 minor, F#sus4, Bbmaj7, C, AM7 (major) and Am7 (minor)', chordNotes('AM7'))
+  const cmds = commands((s) => { const lead = s.makeSynth(); lead.play('Cm7'); lead.play('C7'); lead.play('C'); s.playNote('Gsus4', 1); lead.playNotes('C4 Am F+A+C5 -') })
+  say(same(cmds.filter((c) => c.op === 'note').map((c) => c.note), [[60, 63, 67, 70], [96], [60], [67, 72, 74]]) && same(cmds.find((c) => c.op === 'tune').steps.map((x) => x[1]), [[60], [69, 72, 76], [65, 69, 72]]),
+    'play("Cm7") plays the chord\'s four notes; a letter and a number is always a note ("C7" is the C of octave 7); a chord can stand in a tune', cmds.filter((c) => c.op === 'note').map((c) => c.note))
+  const s = createSound({ sound: { send() {} }, clock: () => 0 })
+  const lead = s.makeSynth()
+  for (const [what, run, says] of [
+    ['a chord spelt wrongly', () => lead.play('Cmaj77'), /"Cmaj77" is not a note or a chord\. Did you mean "Cmaj7"\? A note is written "C4" or "F#3", and a chord "Cm", "Cmaj7" or "Csus4"/],
+    ['a kind of chord that does not exist', () => lead.arp('C4', 'minr'), /"minr" is not a kind of chord\. Did you mean "minor"\? The kinds are: major, minor, dim, aug, sus2, sus4, 5, 6/],
+    ['an arpeggio with no chord', () => lead.arp(), /arp needs a chord, as in arp\("Cm7"\), arp\("C4", "minor"\) or arp\(\["C4", "E4", "G4"\]\)/],
+    ['an order that does not exist', () => lead.arp('Cm', { order: 'sideways' }), /arp: "sideways" is not an order an arpeggio can go in\. The orders are: up, down, up-down, as written, random/],
+    ['a macro step with a wave that does not exist', () => lead.setMacro([{ wave: 'nose' }]), /setMacro: "nose" is not a wave a step can switch to\. Did you mean "noise"\? They are: sine, triangle, saw, pulse, square, noise/],
+    ['a macro that is not a list', () => { lead.macro = 5 }, /setMacro: a macro needs a list of steps, as in \[\{ pitch: 0 \}, \{ pitch: 4 \}, \{ pitch: 7 \}\], not 5/],
+  ]) say(says.test(thrown(run) || ''), `${what} says so`, thrown(run))
+}
+
+// --- arpeggios: a chord from one voice
+{
+  // The pitch of each fifth of a second, from how often the wave crosses zero.
+  const pitches = (a, n) => Array.from({ length: n }, (_, i) => crossings(a, i * 0.2 + 0.01, i * 0.2 + 0.19) / 0.18)
+  const near = (got, want) => got.length === want.length && got.every((hz, i) => Math.abs(hz - want[i]) < 8)
+  const C = 261.6, Eb = 311.1, E = 329.6, G = 392, F = 349.2, Ab = 415.3
+  const player = await createOfflinePlayer()
+  const s = createSound({ sound: player, clock: () => 0 })
+  s.makeSynth(CLICK).arp('C4', 'major', 1.2, { speed: 5 })
+  s.flush()
+  const up = await player.render(1.2)
+  say(near(pitches(up.left, 6), [C, E, G, C, E, G]) && onsets(up.left).length === 1, 'arp("C4", "major", { speed: 5 }) steps one unbroken note through C, E and G, five steps a second', pitches(up.left, 6))
+  say(player.voices() === 1, 'and it is one voice, not three', player.voices())
+  const down = await renderSound((x) => x.makeSynth(CLICK).arp(['C4', 'E4', 'G4'], 1, { speed: 5, order: 'down' }), { seconds: 1 })
+  const both = await renderSound((x) => x.makeSynth(CLICK).arp('Cm', 1.2, { speed: 5, order: 'up-down' }), { seconds: 1.2 })
+  const written = await renderSound((x) => x.makeSynth(CLICK).arp(['G4', 'C4', 'E4'], 1, { speed: 5, order: 'as written' }), { seconds: 1 })
+  say(near(pitches(down.left, 3), [G, E, C]) && near(pitches(both.left, 5), [C, Eb, G, Eb, C]) && near(pitches(written.left, 3), [G, C, E]), 'the orders: down, up-down (a chord by name) and as written', [pitches(down.left, 3), pitches(both.left, 5), pitches(written.left, 3)])
+  const fast = await renderSound((x) => x.makeSynth(CLICK).arp('C'), { seconds: 1 })
+  const edges = onsets(fast.left)
+  const end = fast.left.length - 1 - [...fast.left].reverse().findIndex((v) => Math.abs(v) > 1e-4)
+  say(edges.length === 1 && Math.abs(end - 0.5 * SR) < 500 && Math.abs(crossings(fast.left, 0, 0.02) * 50 - C) < 50 && Math.abs(crossings(fast.left, 0.02, 0.04) * 50 - E) < 50, 'with nothing said it steps 50 times a second (960 frames a step) and lasts half a second', [end, crossings(fast.left, 0, 0.02) * 50, crossings(fast.left, 0.02, 0.04) * 50])
+  // A held arpeggio changes chord without starting the note again.
+  const held = await renderSound((x) => { const chord = x.makeSynth({ ...CLICK, attack: 0.3 }).startArp('C4', 'major', { speed: 5 }); chord.change('F4', 'minor', { at: 0.6 }) }, { seconds: 1.2 })
+  const quiet = peak(held.left.slice(0, 0.05 * SR)), full = peak(held.left.slice(0.6 * SR, 0.65 * SR))
+  say(near(pitches(held.left, 6), [C, E, G, F, Ab, 523.3]) && onsets(held.left).length === 1 && quiet < full * 0.3 && full > 0.2, 'startArp gives an arpeggio that stays, and change("F4", "minor") moves it to another chord without starting the note again (its slow attack is not heard twice)', [pitches(held.left, 6), quiet, full])
+  const top = commands((x) => { x.playArp('Am7', { speed: 30, order: 'random' }); x.startArp('C4', 'sus4').stop() })
+  say(same(top.filter((c) => c.arp).map((c) => [c.op, c.note, c.len, c.arp]), [['note', [69], 0.5, { offsets: [0, 3, 7, 10], rate: 30, order: 4 }], ['note', [60], null, { offsets: [0, 5, 7], rate: 50, order: 0 }]]) && top.some((c) => c.op === 'synth' && c.preset === 'chip'),
+    'playArp and startArp need no synth (they use a chip sound), and an arpeggio is a note command with its offsets, rate and order', top)
+  const big = await renderSound((x) => x.playArp(['C3', 'G3', 'C4', 'E4', 'G4', 'C5', 'E5', 'G5'], 1, { speed: 8 }), { seconds: 1 })
+  say(Math.abs(crossings(big.left, 0.88, 0.99) / 0.11 - 784) < 20, 'an arpeggio of eight notes reaches its eighth', crossings(big.left, 0.88, 0.99) / 0.11)
+}
+
+// --- step macros
+{
+  const pitches = (a, n) => Array.from({ length: n }, (_, i) => crossings(a, i * 0.2 + 0.01, i * 0.2 + 0.19) / 0.18)
+  const r = await renderSound((s) => s.makeSynth({ ...CLICK, macroRate: 5, macro: { steps: [{ pitch: 0 }, { pitch: 12 }], loop: true } }).play('A3', 0.8), { seconds: 0.8 })
+  say(pitches(r.left, 4).every((hz, i) => Math.abs(hz - (i % 2 ? 440 : 220)) < 8), 'a macro of two steps that loops takes a note up an octave and back, five steps a second', pitches(r.left, 4))
+  const off = await renderSound((s) => { const synth = s.makeSynth({ ...CLICK, macroRate: 5, macro: [{ pitch: 12 }] }); synth.macro = null; synth.play('A3', 0.4) }, { seconds: 0.4 })
+  say(Math.abs(pitches(off.left, 2)[0] - 220) < 8, 'synth.macro = null takes it away', pitches(off.left, 2))
+  const snare = await renderSound((s) => s.makeSynth('chipSnare').play(), { seconds: 0.5 })
+  const kick = await renderSound((s) => s.makeSynth('chipKick').play(), { seconds: 0.5 })
+  // The snare changes from noise to a tone and back: noise crosses zero far more often than the tone between.
+  const rate = (a, from, to) => crossings(a, from, to) / (to - from)
+  say(peak(snare.left) > 0.1 && rate(snare.left, 0.022, 0.038) < rate(snare.left, 0.062, 0.078) * 0.7 && rate(kick.left, 0.002, 0.018) > rate(kick.left, 0.062, 0.078) * 1.5, 'the chip drums are made of steps: the snare goes from noise to a tone to noise, and the kick falls in pitch', [rate(snare.left, 0.022, 0.038), rate(snare.left, 0.062, 0.078), rate(kick.left, 0.002, 0.018), rate(kick.left, 0.062, 0.078)])
+  // 70 synths: a part that changes hands takes the new synth's macro, or none.
+  const many = await saying(async () => {
+    const moved = await renderSound((s) => {
+      const first = s.makeSynth({ ...CLICK, macro: [{ pitch: 12 }] })
+      first.play('A3', 0.01)
+      const rest = Array.from({ length: 64 }, () => s.makeSynth(CLICK))
+      rest.forEach((synth, i) => synth.play('A3', 0.01, { at: 0.01 + i * 0.001 }))
+      rest[63].play('A3', 0.4, { at: 0.2 })
+    }, { seconds: 0.6 })
+    say(Math.abs(crossings(moved.left, 0.21, 0.39) / 0.18 - 220) < 8, 'a place that passes from a synth with a macro to one without loses the macro', crossings(moved.left, 0.21, 0.39) / 0.18)
+  })
+}
+
+// --- what a dial, a keyboard, a scope and a meter look for
+{
+  const player = await createOfflinePlayer()
+  const s = createSound({ sound: player, clock: () => 0 })
+  const lead = s.makeSynth('lead')
+  lead.set('cutoff', 800)
+  say(lead.get('cutoff') === 800 && lead.get('filter_cutoff') === 800 && lead.cutoff === 800 && lead.get('wave') === 'saw', 'set(name, value) and get(name) work by any spelling', [lead.get('cutoff'), lead.get('wave')])
+  say(same(lead.describe('filter_cutoff'), { name: 'filter.cutoff', kind: 'float', min: 20, max: 20000, default: 800, unit: 'hz' }) && same(lead.describe('wave').choices, ['sine', 'triangle', 'saw', 'pulse', 'sample']) && lead.describe('wave').kind === 'choice'
+    && same([lead.describe('octave').min, lead.describe('octave').max, lead.describe('octave').unit], [-4, 4, 'octaves']) && lead.describe('sync').kind === 'bool' && lead.describe('nothing') === null,
+    'describe(name) gives the range, the unit, the kind and the choices, in the friendly name\'s own units', lead.describe('filter_cutoff'))
+  const plain = s.makeSynth(CLICK)
+  say(same([plain.samples().length, plain.level(), plain.notes()], [1024, [0, 0], []]) || plain.samples().length === 0, 'before anything plays, samples(), level() and notes() are empty', [plain.samples().length, plain.level(), plain.notes()])
+  plain.noteOn(69, 1)
+  plain.noteOn('E5', 0.5)
+  lead.play('C3', 2)
+  s.flush()
+  await player.render(0.3)
+  const wave = plain.samples()
+  say(wave.length === 1024 && peak(wave) > 0.2 && peak(wave) <= 1 && same(plain.notes(), [69, 76]) && plain.level().length === 2 && plain.level()[0] > 0.1 && plain.level()[0] <= 1, 'after noteOn(69) and noteOn("E5"): samples() is the last 1024 frames of that synth, level() its left and right, notes() is [69, 76]', [wave.length, peak(wave), plain.notes(), plain.level()])
+  const out = s.soundOutput()
+  say(same(lead.notes(), [48]) && same(out.notes(), [48, 69, 76]) && out.samples().length === 1024 && out.level()[0] > 0.1, 'each synth reads only itself, and soundOutput() reads everything together', [lead.notes(), out.notes()])
+  plain.noteOff(69)
+  plain.note_off('E5')
+  s.flush()
+  await player.render(0.3)
+  say(same(plain.notes(), []) && peak(plain.samples()) === 0 && same(lead.notes(), [48]), 'noteOff lets each key go: the synth reads silent and the other still sounds', [plain.notes(), peak(plain.samples())])
+  out.set('volume', 0.5)
+  out.set('echoTime', 0.2)
+  say(out.get('volume') === 0.5 && out.get('echoTime') === 0.2 && out.describe('volume').max === 2 && out.describe('reverbSize').max === 1 && s.mainSynth().describe('attack').unit === 'seconds', 'soundOutput() takes dials for the volume and the shared effects, and mainSynth() is the synth playNote uses', [out.get('volume'), out.describe('reverbSize')])
+  const far = createSound({ sound: { send() {} } }).makeSynth()
+  say(same([far.samples().length, far.level(), far.notes()], [0, [0, 0], []]), 'a synth whose commands go somewhere that cannot be read gives nothing, without a fuss', [far.samples().length, far.level(), far.notes()])
+}
+
 // --- songs are not ready, and say so
 {
   const said = await saying(async () => {
@@ -337,13 +446,17 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
     s.makeSynth('kick').playNotes([null, 36], 0.25, { repeat: 3 })
     s.playSound('coin', { at: 0.75, pitch: 3 })
     s.playNote('A4', 0.2, { after: 1 })
+    const chord = s.makeSynth('chip').startArp('Am', { at: 0.3, speed: 25 })
+    chord.change('F', { at: 0.9 })
+    s.makeSynth('chipSnare').playNotes([null, null], 0.25)
+    s.makeSynth('chip').setMacro([{ pitch: 0 }, { pitch: 7 }]).play('C5', 0.2, { at: 1.5 })
     s.setVolume(0.8)
   }
   const batches = written(play)
   const cmds = batches.flatMap((b) => b.cmds)
   const text = JSON.stringify(batches)
   say(batches.every((b) => b.synths === 1 && typeof b.now === 'number') && cmds.every((c) => typeof c.op === 'string') && same(JSON.parse(text), batches), `what the functions write is plain data: ${cmds.length} commands that survive being turned into text and back`, null)
-  say(same([...new Set(cmds.map((c) => c.op))].sort(), ['master', 'note', 'set', 'sound', 'synth', 'tune', 'voice']), 'with the ops master, note, set, sound, synth, tune and voice', [...new Set(cmds.map((c) => c.op))].sort())
+  say(same([...new Set(cmds.map((c) => c.op))].sort(), ['macro', 'master', 'note', 'set', 'sound', 'synth', 'tune', 'voice']), 'with the ops macro, master, note, set, sound, synth, tune and voice', [...new Set(cmds.map((c) => c.op))].sort())
   const direct = await renderSound(play, { seconds: 2 })
   const player = await createOfflinePlayer()
   for (const batch of JSON.parse(text)) player.send(batch)

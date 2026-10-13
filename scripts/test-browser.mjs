@@ -19,6 +19,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const PICTURES = resolve(ROOT, '../pictures.js')
+const CONTROLS = resolve(ROOT, '../controls.js')
 const from = process.env.PLAYWRIGHT || 'playwright'
 const playwright = await import(from.startsWith('/') ? pathToFileURL(join(from, 'index.mjs')).href : from)
 
@@ -27,7 +28,7 @@ const server = createServer(async (req, res) => {
   const path = decodeURIComponent(new URL(req.url, 'http://x').pathname)
   if (path === '/test.html') return res.writeHead(200, { 'content-type': 'text/html' }).end('<!doctype html><body><button id="b" style="width:200px;height:100px">tap</button>')
   // pictures.js, for the example that draws: from the repository beside this one.
-  const file = path.startsWith('/pictures.js/') ? join(PICTURES, path.slice(13)) : join(ROOT, path)
+  const file = path.startsWith('/pictures.js/') ? join(PICTURES, path.slice(13)) : path.startsWith('/controls.js/') ? join(CONTROLS, path.slice(13)) : join(ROOT, path)
   let body
   try { body = await readFile(file) } catch { return res.writeHead(404).end() }
   res.writeHead(200, { 'content-type': TYPES[extname(path)] || 'application/octet-stream', 'access-control-allow-origin': '*' }).end(body)
@@ -165,6 +166,62 @@ async function withSound(name, browser) {
   say(got.kind === 'worklet' && got.heard.peak > 0.2 && Math.abs(got.heard.hz - 440) < 8 && got.voices === 1, name, `a note from the audio worklet is heard: A4 comes out at ${Math.round(got.heard?.hz)} Hz, peak ${got.heard?.peak.toFixed(2)}, 1 voice`, got)
   say(got.after === 0, name, 'stopSound() leaves silence', got.after)
   say(got.worklet === 'blob' && requests.some((r) => r.endsWith('/synths_core.wasm')) && !requests.some((r) => r.endsWith('/synths-worklet.js')), name, 'by default the engine is fetched from beside the library and the worklet comes from a Blob, with no second file', { worklet: got.worklet, requests })
+
+  // --- reading the sound back for a scope, a meter and lit keys: it arrives from the audio thread without being waited for
+  await fresh(page)
+  got = await page.evaluate(async () => {
+    const { createSound } = await import('/synths.js')
+    const s = createSound()
+    const synth = s.makeSynth(T.CLICK)
+    const other = s.makeSynth(T.CLICK)
+    s.flush()
+    await T.on(() => s.player)
+    const before = [synth.samples().length, synth.level(), synth.notes()]
+    synth.noteOn(69)
+    synth.noteOn(72)
+    let reads = 0
+    const began = performance.now()
+    while (synth.notes().length < 2 && performance.now() - began < 2000) { reads++; await T.wait(16) }
+    const took = performance.now() - began
+    other.samples()                        // the first read of anything asks for it; the answer comes a moment later
+    s.soundOutput().samples()
+    await T.wait(150)
+    const wave = synth.samples()
+    let crossings = 0
+    for (let i = 1; i < wave.length; i++) if (wave[i - 1] < 0 && wave[i] >= 0) crossings++
+    const first = { n: wave.length, peak: Math.max(...wave), level: synth.level(), notes: synth.notes(), other: [Math.max(0, ...other.samples()), other.notes()], out: [s.soundOutput().notes(), s.soundOutput().level()[0] > 0.05] }
+    const slow = performance.now()
+    for (let i = 0; i < 10000; i++) synth.samples()
+    const cost = performance.now() - slow
+    synth.noteOff(69)
+    synth.noteOff(72)
+    await T.wait(300)
+    return { before, took, first, cost, after: [synth.notes(), Math.max(...synth.samples()), synth.level()[0]] }
+  })
+  say(JSON.stringify(got.before) === '[0,[0,0],[]]' && got.first.n === 1024 && got.first.peak > 0.2 && got.first.peak <= 1 && got.first.level[0] > 0.1 && JSON.stringify(got.first.notes) === '[69,72]' && got.took < 500, name,
+    `samples(), level() and notes() of a synth come from the worklet: 1024 samples, its level, and the keys 69 and 72, ${Math.round(got.took)} ms after the keys went down`, got)
+  say(JSON.stringify(got.first.other) === '[0,[]]' && JSON.stringify(got.first.out) === '[[69,72],true]' && JSON.stringify(got.after[0]) === '[]' && got.after[1] === 0 && got.after[2] < got.first.level[0] * 0.8, name, 'another synth reads silent, soundOutput() reads everything, and after noteOff the keys are dark, the wave is flat and the level is falling', got)
+  say(got.cost < 100, name, `reading never waits for the audio thread: 10000 reads take ${got.cost.toFixed(1)} ms`, got.cost)
+
+  // --- an arpeggio in the worklet
+  await fresh(page)
+  got = await page.evaluate(async () => {
+    const { createSound } = await import('/synths.js')
+    const s = createSound()
+    const synth = s.makeSynth(T.CLICK)
+    s.flush()
+    await T.on(() => s.player)
+    const tap = await T.tap(s.player)
+    await T.wait(100)
+    synth.arp('A3', 'octave', 0.4, { speed: 10 })
+    await T.wait(700)
+    const all = await tap.samples()
+    const rate = s.player.context.sampleRate
+    const from = T.onsets(all)[0]
+    const hz = (a, b) => { let n = 0; for (let i = from + Math.round(a * rate) + 1; i < from + Math.round(b * rate); i++) if (all[i - 1] < 0 && all[i] >= 0) n++; return n / (b - a) }
+    return { voices: 1, steps: [hz(0.01, 0.09), hz(0.11, 0.19), hz(0.21, 0.29), hz(0.31, 0.39)], onsets: T.onsets(all).length }
+  })
+  say(got.onsets === 1 && got.steps.every((hz, i) => Math.abs(hz - (i % 2 ? 440 : 220)) < 15), name, 'an arpeggio runs inside the engine: one note stepping between A3 and A4 ten times a second', got)
 
   // --- the plain functions of the page, and the worklet from its file
   await fresh(page)
@@ -352,14 +409,16 @@ async function examples(name, browser) {
   let heard = 0
   const silent = []
   for (const file of files) {
-    const scene = (await readFile(join(ROOT, 'examples', file), 'utf8')).includes('function draw()')
-    if (scene && !existsSync(join(PICTURES, 'pictures.js'))) { console.log(`     ${name}: ${file} needs pictures.js beside this repository, skipped`); continue }
+    const source = await readFile(join(ROOT, 'examples', file), 'utf8')
+    const scene = source.includes('await use(')
+    if (scene && !(existsSync(join(PICTURES, 'pictures.js')) && (!source.includes('controls.js') || existsSync(join(CONTROLS, 'controls.js'))))) { console.log(`     ${name}: ${file} needs pictures.js (and controls.js) beside this repository, skipped`); continue }
     await page.goto(`${at}/examples/index.html?run=${file}${scene ? '&pictures=/pictures.js/pictures.js' : ''}`)
     await page.evaluate(HELPERS)
     // A press that is held and moved, as a person would: the theremin sounds only while something is pressed.
     await page.mouse.move(300, 300)
     await page.mouse.down()
     await page.mouse.move(320, 280)
+    await page.keyboard.down('a')            // a white key of the synth panel's keyboard
     const got = await page.evaluate(async () => {
       for (let i = 0; i < 300 && !window.examplePlayer?.(); i++) await T.wait(10)
       const player = window.examplePlayer?.()
@@ -368,10 +427,11 @@ async function examples(name, browser) {
       return T.listen(player, 1500)
     })
     await page.mouse.up()
+    await page.keyboard.up('a')
     if (got.peak > 0.01) heard++
     else silent.push([file, got])
   }
-  say(silent.length === 0 && errors.length === 0 && heard >= 5, name, `all ${heard} examples are heard, with no error`, { silent, errors })
+  say(silent.length === 0 && errors.length === 0 && heard >= 7, name, `all ${heard} examples are heard, with no error`, { silent, errors })
   await context.close()
 }
 

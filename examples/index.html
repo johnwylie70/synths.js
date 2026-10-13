@@ -26,13 +26,13 @@
 <div id="scene"></div>
 <pre id="code">// press an example</pre>
 <script type="module">
-// Runs the examples. A plain example is a module that imports synths.js and plays; Catch is a pictures.js scene,
-// which needs pictures.js: from ?pictures=<address>, or from a copy of its repository beside this one.
+// Runs the examples. A plain example is a module that imports synths.js and plays; Catch and Synth panel are
+// pictures.js scenes, which need pictures.js: from ?pictures=<address>, or from a copy of its repository beside this one.
 import * as synths from "../synths.js"
 
 const EXAMPLES = [
   ["hello.js", "Hello"], ["game_sounds.js", "Game sounds"], ["my_synth.js", "My synth"], ["drum_beat.js", "Drum beat"],
-  ["samples.js", "Samples"], ["theremin.js", "Theremin"], ["catch_game.js", "Catch"],
+  ["arpeggio.js", "Arpeggio"], ["samples.js", "Samples"], ["theremin.js", "Theremin"], ["catch_game.js", "Catch"], ["synth_panel.js", "Synth panel"],
 ]
 const query = new URLSearchParams(location.search)
 const picturesAt = query.get("pictures") || "../../pictures.js/pictures.js"
@@ -52,7 +52,7 @@ async function run(file) {
   const source = await (await fetch(file)).text()
   code.textContent = source
   for (const b of document.querySelectorAll("#buttons button")) b.classList.toggle("on", b.dataset.file === file)
-  if (/^function draw\(\)/m.test(source)) {
+  if (/^const .* = await use\(/m.test(source)) {
     scene.style.display = "block"
     try {
       const { runScene } = await import(picturesAt)

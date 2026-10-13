@@ -6,7 +6,23 @@
   "version": "0.0.0",
   "parts": 64,
   "voices": 64,
-  "samples": 1024
+  "samples": 1024,
+  "events": [
+   "note_on",
+   "note_off",
+   "all_notes_off",
+   "param",
+   "pitch_bend",
+   "voice_pitch",
+   "voice_freq",
+   "voice_volume",
+   "voice_pan",
+   "voice_position",
+   "voice_kill",
+   "macro_tick",
+   "arp",
+   "arp_more"
+  ]
  },
  "settings": [
   {
@@ -16,6 +32,7 @@
    "min": 0,
    "max": 2,
    "default": 1,
+   "unit": "gain",
    "scope": "synth"
   },
   {
@@ -25,6 +42,7 @@
    "min": -1,
    "max": 1,
    "default": 0,
+   "unit": "pan",
    "scope": "synth"
   },
   {
@@ -34,6 +52,7 @@
    "min": -48,
    "max": 48,
    "default": 0,
+   "unit": "semitones",
    "scope": "synth"
   },
   {
@@ -43,6 +62,7 @@
    "min": -100,
    "max": 100,
    "default": 0,
+   "unit": "cents",
    "scope": "synth"
   },
   {
@@ -52,6 +72,7 @@
    "min": -1,
    "max": 1,
    "default": 0,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -61,6 +82,7 @@
    "min": 0,
    "max": 48,
    "default": 2,
+   "unit": "semitones",
    "scope": "synth"
   },
   {
@@ -70,6 +92,7 @@
    "min": 0,
    "max": 10,
    "default": 0,
+   "unit": "seconds",
    "scope": "synth"
   },
   {
@@ -79,6 +102,7 @@
    "min": 0,
    "max": 2,
    "default": 0,
+   "unit": "",
    "choices": [
     "poly",
     "mono",
@@ -93,6 +117,7 @@
    "min": 1,
    "max": 8,
    "default": 1,
+   "unit": "voices",
    "scope": "synth"
   },
   {
@@ -102,6 +127,7 @@
    "min": 0,
    "max": 100,
    "default": 20,
+   "unit": "cents",
    "scope": "synth"
   },
   {
@@ -111,6 +137,7 @@
    "min": 0,
    "max": 1,
    "default": 0.5,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -120,6 +147,7 @@
    "min": 0,
    "max": 1,
    "default": 1,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -129,6 +157,7 @@
    "min": 0,
    "max": 4,
    "default": 1,
+   "unit": "",
    "choices": [
     "sine",
     "triangle",
@@ -145,6 +174,7 @@
    "min": 0,
    "max": 1,
    "default": 1,
+   "unit": "gain",
    "scope": "synth"
   },
   {
@@ -154,6 +184,7 @@
    "min": -48,
    "max": 48,
    "default": 0,
+   "unit": "semitones",
    "scope": "synth"
   },
   {
@@ -163,6 +194,7 @@
    "min": -100,
    "max": 100,
    "default": 0,
+   "unit": "cents",
    "scope": "synth"
   },
   {
@@ -172,6 +204,7 @@
    "min": 0,
    "max": 1,
    "default": 0.5,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -181,6 +214,7 @@
    "min": 0,
    "max": 1023,
    "default": 0,
+   "unit": "slot",
    "scope": "synth"
   },
   {
@@ -190,6 +224,7 @@
    "min": 0,
    "max": 1,
    "default": 0,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -199,6 +234,7 @@
    "min": 0,
    "max": 1,
    "default": 1,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -208,6 +244,7 @@
    "min": 0,
    "max": 4,
    "default": 2,
+   "unit": "",
    "choices": [
     "sine",
     "triangle",
@@ -224,6 +261,7 @@
    "min": 0,
    "max": 1,
    "default": 0,
+   "unit": "gain",
    "scope": "synth"
   },
   {
@@ -233,6 +271,7 @@
    "min": -48,
    "max": 48,
    "default": 0,
+   "unit": "semitones",
    "scope": "synth"
   },
   {
@@ -242,6 +281,7 @@
    "min": -100,
    "max": 100,
    "default": 0,
+   "unit": "cents",
    "scope": "synth"
   },
   {
@@ -251,6 +291,7 @@
    "min": 0,
    "max": 1,
    "default": 0.5,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -260,6 +301,7 @@
    "min": 0,
    "max": 1023,
    "default": 0,
+   "unit": "slot",
    "scope": "synth"
   },
   {
@@ -269,6 +311,7 @@
    "min": 0,
    "max": 1,
    "default": 0,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -278,6 +321,7 @@
    "min": 0,
    "max": 1,
    "default": 1,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -287,6 +331,7 @@
    "min": 0,
    "max": 1,
    "default": 0,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -296,6 +341,7 @@
    "min": 0,
    "max": 1,
    "default": 0,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -305,6 +351,7 @@
    "min": 0,
    "max": 1,
    "default": 0,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -314,6 +361,7 @@
    "min": 0,
    "max": 1,
    "default": 0,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -323,6 +371,7 @@
    "min": 0,
    "max": 1,
    "default": 0,
+   "unit": "gain",
    "scope": "synth"
   },
   {
@@ -332,6 +381,7 @@
    "min": 0,
    "max": 2,
    "default": 0,
+   "unit": "",
    "choices": [
     "sine",
     "square",
@@ -346,6 +396,7 @@
    "min": -2,
    "max": -1,
    "default": -1,
+   "unit": "octaves",
    "scope": "synth"
   },
   {
@@ -355,6 +406,7 @@
    "min": 0,
    "max": 1,
    "default": 1,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -364,6 +416,7 @@
    "min": 0,
    "max": 1,
    "default": 0,
+   "unit": "gain",
    "scope": "synth"
   },
   {
@@ -373,6 +426,7 @@
    "min": 0,
    "max": 3,
    "default": 0,
+   "unit": "",
    "choices": [
     "white",
     "pink",
@@ -388,6 +442,7 @@
    "min": -48,
    "max": 48,
    "default": 0,
+   "unit": "semitones",
    "scope": "synth"
   },
   {
@@ -397,6 +452,7 @@
    "min": 0,
    "max": 7,
    "default": 0,
+   "unit": "",
    "choices": [
     "off",
     "lowpass",
@@ -416,6 +472,7 @@
    "min": 0,
    "max": 1,
    "default": 0,
+   "unit": "",
    "choices": [
     "12db",
     "24db"
@@ -429,6 +486,7 @@
    "min": 20,
    "max": 20000,
    "default": 2000,
+   "unit": "hz",
    "scope": "synth"
   },
   {
@@ -438,6 +496,7 @@
    "min": 0,
    "max": 1,
    "default": 0.15,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -447,6 +506,7 @@
    "min": 0,
    "max": 1,
    "default": 0,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -456,6 +516,7 @@
    "min": -96,
    "max": 96,
    "default": 0,
+   "unit": "semitones",
    "scope": "synth"
   },
   {
@@ -465,6 +526,7 @@
    "min": -96,
    "max": 96,
    "default": 0,
+   "unit": "semitones",
    "scope": "synth"
   },
   {
@@ -474,6 +536,7 @@
    "min": 0,
    "max": 20,
    "default": 0.005,
+   "unit": "seconds",
    "scope": "synth"
   },
   {
@@ -483,6 +546,7 @@
    "min": 0,
    "max": 20,
    "default": 0.1,
+   "unit": "seconds",
    "scope": "synth"
   },
   {
@@ -492,6 +556,7 @@
    "min": 0,
    "max": 1,
    "default": 0.8,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -501,6 +566,7 @@
    "min": 0,
    "max": 20,
    "default": 0.15,
+   "unit": "seconds",
    "scope": "synth"
   },
   {
@@ -510,6 +576,7 @@
    "min": 0,
    "max": 1,
    "default": 0.5,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -519,6 +586,7 @@
    "min": 0,
    "max": 20,
    "default": 0.005,
+   "unit": "seconds",
    "scope": "synth"
   },
   {
@@ -528,6 +596,7 @@
    "min": 0,
    "max": 20,
    "default": 0.2,
+   "unit": "seconds",
    "scope": "synth"
   },
   {
@@ -537,6 +606,7 @@
    "min": 0,
    "max": 1,
    "default": 0.3,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -546,6 +616,7 @@
    "min": 0,
    "max": 20,
    "default": 0.2,
+   "unit": "seconds",
    "scope": "synth"
   },
   {
@@ -555,6 +626,7 @@
    "min": 0,
    "max": 1,
    "default": 0.5,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -564,6 +636,7 @@
    "min": 0,
    "max": 20,
    "default": 0.005,
+   "unit": "seconds",
    "scope": "synth"
   },
   {
@@ -573,6 +646,7 @@
    "min": 0,
    "max": 20,
    "default": 0.2,
+   "unit": "seconds",
    "scope": "synth"
   },
   {
@@ -582,6 +656,7 @@
    "min": 0,
    "max": 1,
    "default": 0,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -591,6 +666,7 @@
    "min": 0,
    "max": 20,
    "default": 0.2,
+   "unit": "seconds",
    "scope": "synth"
   },
   {
@@ -600,6 +676,7 @@
    "min": 0,
    "max": 1,
    "default": 0.5,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -609,6 +686,7 @@
    "min": -48,
    "max": 48,
    "default": 0,
+   "unit": "semitones",
    "scope": "synth"
   },
   {
@@ -618,6 +696,7 @@
    "min": -48,
    "max": 48,
    "default": 0,
+   "unit": "semitones",
    "scope": "synth"
   },
   {
@@ -627,6 +706,7 @@
    "min": -1,
    "max": 1,
    "default": 0,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -636,6 +716,7 @@
    "min": 0,
    "max": 4,
    "default": 0,
+   "unit": "",
    "choices": [
     "sine",
     "triangle",
@@ -652,6 +733,7 @@
    "min": 0.01,
    "max": 50,
    "default": 5,
+   "unit": "hz",
    "scope": "synth"
   },
   {
@@ -661,6 +743,7 @@
    "min": 0,
    "max": 10,
    "default": 0,
+   "unit": "seconds",
    "scope": "synth"
   },
   {
@@ -670,6 +753,7 @@
    "min": 0,
    "max": 10,
    "default": 0,
+   "unit": "seconds",
    "scope": "synth"
   },
   {
@@ -679,6 +763,7 @@
    "min": 0,
    "max": 1,
    "default": 1,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -688,6 +773,7 @@
    "min": -48,
    "max": 48,
    "default": 0,
+   "unit": "semitones",
    "scope": "synth"
   },
   {
@@ -697,6 +783,7 @@
    "min": -1,
    "max": 1,
    "default": 0,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -706,6 +793,7 @@
    "min": -96,
    "max": 96,
    "default": 0,
+   "unit": "semitones",
    "scope": "synth"
   },
   {
@@ -715,6 +803,7 @@
    "min": 0,
    "max": 1,
    "default": 0,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -724,6 +813,7 @@
    "min": 0,
    "max": 1,
    "default": 0,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -733,6 +823,7 @@
    "min": 0,
    "max": 4,
    "default": 1,
+   "unit": "",
    "choices": [
     "sine",
     "triangle",
@@ -749,6 +840,7 @@
    "min": 0.01,
    "max": 50,
    "default": 0.5,
+   "unit": "hz",
    "scope": "synth"
   },
   {
@@ -758,6 +850,7 @@
    "min": 0,
    "max": 10,
    "default": 0,
+   "unit": "seconds",
    "scope": "synth"
   },
   {
@@ -767,6 +860,7 @@
    "min": 0,
    "max": 10,
    "default": 0,
+   "unit": "seconds",
    "scope": "synth"
   },
   {
@@ -776,6 +870,7 @@
    "min": 0,
    "max": 1,
    "default": 0,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -785,6 +880,7 @@
    "min": -48,
    "max": 48,
    "default": 0,
+   "unit": "semitones",
    "scope": "synth"
   },
   {
@@ -794,6 +890,7 @@
    "min": -1,
    "max": 1,
    "default": 0,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -803,6 +900,7 @@
    "min": -96,
    "max": 96,
    "default": 0,
+   "unit": "semitones",
    "scope": "synth"
   },
   {
@@ -812,6 +910,7 @@
    "min": 0,
    "max": 1,
    "default": 0,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -821,6 +920,7 @@
    "min": 0,
    "max": 1,
    "default": 0,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -830,6 +930,7 @@
    "min": 0,
    "max": 1,
    "default": 0,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -839,6 +940,7 @@
    "min": 1,
    "max": 16,
    "default": 16,
+   "unit": "bits",
    "scope": "synth"
   },
   {
@@ -848,6 +950,7 @@
    "min": 1,
    "max": 64,
    "default": 1,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -857,6 +960,7 @@
    "min": 0,
    "max": 1,
    "default": 0,
+   "unit": "gain",
    "scope": "synth"
   },
   {
@@ -866,6 +970,7 @@
    "min": 0,
    "max": 1,
    "default": 0,
+   "unit": "gain",
    "scope": "synth"
   },
   {
@@ -875,6 +980,7 @@
    "min": 0,
    "max": 1,
    "default": 0,
+   "unit": "gain",
    "scope": "synth"
   },
   {
@@ -884,6 +990,7 @@
    "min": 1,
    "max": 1000,
    "default": 50,
+   "unit": "hz",
    "scope": "synth"
   },
   {
@@ -893,6 +1000,7 @@
    "min": 0,
    "max": 1,
    "default": 0,
+   "unit": "",
    "scope": "synth"
   },
   {
@@ -902,6 +1010,7 @@
    "min": 0,
    "max": 2,
    "default": 0.35,
+   "unit": "gain",
    "scope": "all"
   },
   {
@@ -911,6 +1020,7 @@
    "min": 0,
    "max": 1,
    "default": 1,
+   "unit": "",
    "scope": "all"
   },
   {
@@ -920,6 +1030,7 @@
    "min": 0.001,
    "max": 2,
    "default": 0.3,
+   "unit": "seconds",
    "scope": "all"
   },
   {
@@ -929,6 +1040,7 @@
    "min": 0,
    "max": 0.95,
    "default": 0.4,
+   "unit": "",
    "scope": "all"
   },
   {
@@ -938,6 +1050,7 @@
    "min": 200,
    "max": 20000,
    "default": 6000,
+   "unit": "hz",
    "scope": "all"
   },
   {
@@ -947,6 +1060,7 @@
    "min": 0,
    "max": 1,
    "default": 0,
+   "unit": "",
    "scope": "all"
   },
   {
@@ -956,6 +1070,7 @@
    "min": 0,
    "max": 1,
    "default": 0.6,
+   "unit": "",
    "scope": "all"
   },
   {
@@ -965,6 +1080,7 @@
    "min": 0,
    "max": 1,
    "default": 0.4,
+   "unit": "",
    "scope": "all"
   },
   {
@@ -974,6 +1090,7 @@
    "min": 0.05,
    "max": 10,
    "default": 0.8,
+   "unit": "hz",
    "scope": "all"
   },
   {
@@ -983,6 +1100,7 @@
    "min": 0,
    "max": 1,
    "default": 0.5,
+   "unit": "",
    "scope": "all"
   },
   {
@@ -992,6 +1110,7 @@
    "min": 1,
    "max": 64,
    "default": 64,
+   "unit": "voices",
    "scope": "all"
   }
  ],
@@ -1000,7 +1119,7 @@
    "setting": "osc1.wave",
    "scale": 1
   },
-  "level": {
+  "level1": {
    "setting": "osc1.level",
    "scale": 1
   },
@@ -1074,6 +1193,14 @@
   },
   "noise": {
    "setting": "noise.level",
+   "scale": 1
+  },
+  "macroRate": {
+   "setting": "macro.rate",
+   "scale": 1
+  },
+  "macroSync": {
+   "setting": "macro.sync",
    "scale": 1
   },
   "filter": {
@@ -1415,16 +1542,47 @@
    "vibratoRate": 6
   },
   "chipBass": {
-   "wave": "triangle",
+   "wave": "pulse",
    "filter": "off",
    "attack": 0,
    "decay": 0,
    "sustain": 1,
    "release": 0.02,
-   "note": 36
+   "note": 36,
+   "macroRate": 4,
+   "macro": {
+    "steps": [
+     {
+      "width": 0.06
+     },
+     {
+      "width": 0.2
+     },
+     {
+      "width": 0.5
+     },
+     {
+      "width": 0.8
+     },
+     {
+      "width": 0.94
+     },
+     {
+      "width": 0.8
+     },
+     {
+      "width": 0.5
+     },
+     {
+      "width": 0.2
+     }
+    ],
+    "loop": true,
+    "slide": true
+   }
   },
   "chipNoise": {
-   "level": 0,
+   "level1": 0,
    "noise": 1,
    "noise.type": "lfsr",
    "filter": "off",
@@ -1432,6 +1590,109 @@
    "decay": 0.12,
    "sustain": 0,
    "release": 0.05
+  },
+  "chipKick": {
+   "wave": "triangle",
+   "filter": "off",
+   "attack": 0,
+   "decay": 0.16,
+   "sustain": 0,
+   "release": 0.05,
+   "note": 48,
+   "macro": [
+    {
+     "wave": "square",
+     "pitch": 12
+    },
+    {
+     "wave": "triangle",
+     "pitch": 5
+    },
+    {
+     "wave": "triangle",
+     "pitch": 0
+    },
+    {
+     "wave": "triangle",
+     "pitch": -5
+    },
+    {
+     "wave": "triangle",
+     "pitch": -10,
+     "volume": 0.8
+    },
+    {
+     "wave": "triangle",
+     "pitch": -14,
+     "volume": 0.6
+    }
+   ]
+  },
+  "chipSnare": {
+   "wave": "pulse",
+   "noise.type": "lfsr",
+   "filter": "off",
+   "attack": 0,
+   "decay": 0.16,
+   "sustain": 0,
+   "release": 0.05,
+   "note": 57,
+   "macro": [
+    {
+     "wave": "noise",
+     "pitch": 24
+    },
+    {
+     "wave": "square",
+     "pitch": 0
+    },
+    {
+     "wave": "square",
+     "pitch": -5,
+     "volume": 0.9
+    },
+    {
+     "wave": "noise",
+     "pitch": 18,
+     "volume": 0.8
+    },
+    {
+     "wave": "noise",
+     "pitch": 14,
+     "volume": 0.6
+    },
+    {
+     "wave": "noise",
+     "pitch": 12,
+     "volume": 0.45
+    }
+   ]
+  },
+  "chipHat": {
+   "wave": "pulse",
+   "noise.type": "lfsr",
+   "filter": "off",
+   "attack": 0,
+   "decay": 0.05,
+   "sustain": 0,
+   "release": 0.02,
+   "note": 72,
+   "macro": [
+    {
+     "wave": "noise",
+     "pitch": 30
+    },
+    {
+     "wave": "noise",
+     "pitch": 26,
+     "volume": 0.6
+    },
+    {
+     "wave": "noise",
+     "pitch": 24,
+     "volume": 0.3
+    }
+   ]
   },
   "kick": {
    "wave": "sine",
@@ -1447,7 +1708,7 @@
   },
   "snare": {
    "wave": "triangle",
-   "level": 0.6,
+   "level1": 0.6,
    "noise": 1,
    "filter": "highpass",
    "cutoff": 500,
@@ -1462,7 +1723,7 @@
    "note": 52
   },
   "hat": {
-   "level": 0,
+   "level1": 0,
    "noise": 1,
    "filter": "highpass",
    "cutoff": 7000,
@@ -1550,7 +1811,7 @@
   "explosion": {
    "patch": {
     "wave": "sine",
-    "level": 0.9,
+    "level1": 0.9,
     "noise": 1,
     "cutoff": 180,
     "sweep": 50,
@@ -1578,22 +1839,102 @@
   "hit": {
    "patch": {
     "wave": "square",
-    "level": 0.7,
-    "noise": 0.8,
-    "cutoff": 2500,
+    "noise.type": "lfsr",
+    "filter": "off",
     "attack": 0,
-    "decay": 0.1,
+    "decay": 0.12,
     "sustain": 0,
-    "release": 0.05
+    "release": 0.05,
+    "macro": [
+     {
+      "wave": "noise",
+      "pitch": 12
+     },
+     {
+      "wave": "square",
+      "pitch": 0
+     },
+     {
+      "wave": "square",
+      "pitch": -5
+     },
+     {
+      "wave": "noise",
+      "pitch": 4,
+      "volume": 0.7
+     },
+     {
+      "wave": "noise",
+      "pitch": 0,
+      "volume": 0.5
+     },
+     {
+      "wave": "noise",
+      "pitch": -4,
+      "volume": 0.3
+     }
+    ]
    },
    "notes": [
     [
      0,
      50,
-     0.1,
-     0.9,
-     36,
-     0.08
+     0.12,
+     0.9
+    ]
+   ]
+  },
+  "shoot": {
+   "patch": {
+    "wave": "pulse",
+    "width": 0.25,
+    "filter": "off",
+    "attack": 0,
+    "decay": 0.16,
+    "sustain": 0,
+    "release": 0.03,
+    "macroRate": 60,
+    "macro": [
+     {
+      "wave": "noise",
+      "pitch": 30
+     },
+     {
+      "wave": "pulse",
+      "pitch": 19
+     },
+     {
+      "pitch": 14
+     },
+     {
+      "pitch": 9
+     },
+     {
+      "pitch": 4
+     },
+     {
+      "pitch": 0
+     },
+     {
+      "pitch": -5,
+      "volume": 0.8
+     },
+     {
+      "pitch": -10,
+      "volume": 0.6
+     },
+     {
+      "pitch": -15,
+      "volume": 0.4
+     }
+    ]
+   },
+   "notes": [
+    [
+     0,
+     76,
+     0.16,
+     0.8
     ]
    ]
   },
@@ -1605,38 +1946,45 @@
     "decay": 0.2,
     "sustain": 0.5,
     "release": 0.15,
-    "vibrato": 0.3,
-    "vibratoRate": 12
+    "macroRate": 16,
+    "macro": {
+     "steps": [
+      {
+       "pitch": 0
+      },
+      {
+       "pitch": 4
+      },
+      {
+       "pitch": 7
+      },
+      {
+       "pitch": 12
+      },
+      {
+       "pitch": 16
+      },
+      {
+       "pitch": 19
+      },
+      {
+       "pitch": 24
+      },
+      {
+       "pitch": 19
+      }
+     ],
+     "loop": [
+      6,
+      8
+     ]
+    }
    },
    "notes": [
     [
      0,
-     72,
-     0.06,
-     0.7
-    ],
-    [
-     0.06,
-     76,
-     0.06,
-     0.7
-    ],
-    [
-     0.12,
-     79,
-     0.06,
-     0.7
-    ],
-    [
-     0.18,
-     84,
-     0.06,
-     0.7
-    ],
-    [
-     0.24,
-     88,
-     0.3,
+     60,
+     0.6,
      0.7
     ]
    ]
@@ -1820,5 +2168,173 @@
     ]
    ]
   }
+ },
+ "chords": {
+  "5": [
+   0,
+   7
+  ],
+  "6": [
+   0,
+   4,
+   7,
+   9
+  ],
+  "7": [
+   0,
+   4,
+   7,
+   10
+  ],
+  "9": [
+   0,
+   4,
+   7,
+   10,
+   14
+  ],
+  "major": [
+   0,
+   4,
+   7
+  ],
+  "maj": [
+   0,
+   4,
+   7
+  ],
+  "minor": [
+   0,
+   3,
+   7
+  ],
+  "min": [
+   0,
+   3,
+   7
+  ],
+  "m": [
+   0,
+   3,
+   7
+  ],
+  "dim": [
+   0,
+   3,
+   6
+  ],
+  "aug": [
+   0,
+   4,
+   8
+  ],
+  "sus2": [
+   0,
+   2,
+   7
+  ],
+  "sus4": [
+   0,
+   5,
+   7
+  ],
+  "sus": [
+   0,
+   5,
+   7
+  ],
+  "power": [
+   0,
+   7
+  ],
+  "octave": [
+   0,
+   12
+  ],
+  "m6": [
+   0,
+   3,
+   7,
+   9
+  ],
+  "dom7": [
+   0,
+   4,
+   7,
+   10
+  ],
+  "maj7": [
+   0,
+   4,
+   7,
+   11
+  ],
+  "m7": [
+   0,
+   3,
+   7,
+   10
+  ],
+  "min7": [
+   0,
+   3,
+   7,
+   10
+  ],
+  "dim7": [
+   0,
+   3,
+   6,
+   9
+  ],
+  "m7b5": [
+   0,
+   3,
+   6,
+   10
+  ],
+  "mmaj7": [
+   0,
+   3,
+   7,
+   11
+  ],
+  "add9": [
+   0,
+   4,
+   7,
+   14
+  ],
+  "maj9": [
+   0,
+   4,
+   7,
+   11,
+   14
+  ],
+  "m9": [
+   0,
+   3,
+   7,
+   10,
+   14
+  ]
+ },
+ "orders": {
+  "up": 0,
+  "down": 1,
+  "updown": 2,
+  "written": 3,
+  "aswritten": 3,
+  "given": 3,
+  "random": 4
+ },
+ "macroWaves": {
+  "sine": 0,
+  "triangle": 1,
+  "saw": 2,
+  "pulse": 3,
+  "square": 3,
+  "noise": 4
  }
 }

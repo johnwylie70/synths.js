@@ -46,113 +46,113 @@ const BASE = new URL('./', import.meta.url)
 const COMMANDS = 1
 
 // The engine's parameter table, written here by scripts/sync-engine.mjs from the engine itself. Do not edit by hand.
-// Each row: id, name, kind (f float, i whole number, b on or off, c a choice), least, most, default, the choices.
+// Each row: id, name, kind (f float, i whole number, b on or off, c a choice), least, most, default, unit, the choices.
 /* PARAMS:BEGIN */
-const ENGINE = {"abi":1,"version":"0.0.0","parts":64,"voices":64,"samples":1024}
+const ENGINE = {"abi":1,"version":"0.0.0","parts":64,"voices":64,"samples":1024,"events":["note_on","note_off","all_notes_off","param","pitch_bend","voice_pitch","voice_freq","voice_volume","voice_pan","voice_position","voice_kill","macro_tick","arp","arp_more"]}
 const PARAMS = [
-  [0,"volume","f",0,2,1],
-  [1,"pan","f",-1,1,0],
-  [2,"transpose","f",-48,48,0],
-  [3,"tune","f",-100,100,0],
-  [4,"bend","f",-1,1,0],
-  [5,"bend_range","f",0,48,2],
-  [6,"glide","f",0,10,0],
-  [7,"mode","c",0,2,0,["poly","mono","legato"]],
-  [8,"unison.voices","i",1,8,1],
-  [9,"unison.detune","f",0,100,20],
-  [10,"unison.spread","f",0,1,0.5],
-  [11,"velocity","f",0,1,1],
-  [16,"osc1.wave","c",0,4,1,["sine","triangle","saw","pulse","sample"]],
-  [17,"osc1.level","f",0,1,1],
-  [18,"osc1.coarse","f",-48,48,0],
-  [19,"osc1.fine","f",-100,100,0],
-  [20,"osc1.pulse_width","f",0,1,0.5],
-  [21,"osc1.sample","i",0,1023,0],
-  [22,"osc1.start","f",0,1,0],
-  [23,"osc1.keytrack","b",0,1,1],
-  [24,"osc2.wave","c",0,4,2,["sine","triangle","saw","pulse","sample"]],
-  [25,"osc2.level","f",0,1,0],
-  [26,"osc2.coarse","f",-48,48,0],
-  [27,"osc2.fine","f",-100,100,0],
-  [28,"osc2.pulse_width","f",0,1,0.5],
-  [29,"osc2.sample","i",0,1023,0],
-  [30,"osc2.start","f",0,1,0],
-  [31,"osc2.keytrack","b",0,1,1],
-  [32,"osc2.sync","b",0,1,0],
-  [33,"osc2.ring","f",0,1,0],
-  [34,"osc1.reverse","b",0,1,0],
-  [35,"osc2.reverse","b",0,1,0],
-  [36,"sub.level","f",0,1,0],
-  [37,"sub.wave","c",0,2,0,["sine","square","triangle"]],
-  [38,"sub.octave","i",-2,-1,-1],
-  [39,"sample.antialias","b",0,1,1],
-  [40,"noise.level","f",0,1,0],
-  [41,"noise.type","c",0,3,0,["white","pink","lfsr","lfsr_short"]],
-  [42,"noise.pitch","f",-48,48,0],
-  [48,"filter.type","c",0,7,0,["off","lowpass","highpass","bandpass","notch","low_band","band_high","all"]],
-  [49,"filter.slope","c",0,1,0,["12db","24db"]],
-  [50,"filter.cutoff","f",20,20000,2000],
-  [51,"filter.resonance","f",0,1,0.15],
-  [52,"filter.keytrack","f",0,1,0],
-  [53,"filter.env","f",-96,96,0],
-  [54,"filter.velocity","f",-96,96,0],
-  [56,"amp.attack","f",0,20,0.005],
-  [57,"amp.decay","f",0,20,0.1],
-  [58,"amp.sustain","f",0,1,0.8],
-  [59,"amp.release","f",0,20,0.15],
-  [60,"amp.curve","f",0,1,0.5],
-  [64,"filter_env.attack","f",0,20,0.005],
-  [65,"filter_env.decay","f",0,20,0.2],
-  [66,"filter_env.sustain","f",0,1,0.3],
-  [67,"filter_env.release","f",0,20,0.2],
-  [68,"filter_env.curve","f",0,1,0.5],
-  [72,"mod_env.attack","f",0,20,0.005],
-  [73,"mod_env.decay","f",0,20,0.2],
-  [74,"mod_env.sustain","f",0,1,0],
-  [75,"mod_env.release","f",0,20,0.2],
-  [76,"mod_env.curve","f",0,1,0.5],
-  [77,"mod_env.pitch","f",-48,48,0],
-  [78,"mod_env.osc2_pitch","f",-48,48,0],
-  [79,"mod_env.pulse_width","f",-1,1,0],
-  [80,"lfo1.wave","c",0,4,0,["sine","triangle","saw","square","random"]],
-  [81,"lfo1.rate","f",0.01,50,5],
-  [82,"lfo1.delay","f",0,10,0],
-  [83,"lfo1.fade","f",0,10,0],
-  [84,"lfo1.sync","b",0,1,1],
-  [85,"lfo1.pitch","f",-48,48,0],
-  [86,"lfo1.pulse_width","f",-1,1,0],
-  [87,"lfo1.cutoff","f",-96,96,0],
-  [88,"lfo1.amp","f",0,1,0],
-  [89,"lfo1.pan","f",0,1,0],
-  [96,"lfo2.wave","c",0,4,1,["sine","triangle","saw","square","random"]],
-  [97,"lfo2.rate","f",0.01,50,0.5],
-  [98,"lfo2.delay","f",0,10,0],
-  [99,"lfo2.fade","f",0,10,0],
-  [100,"lfo2.sync","b",0,1,0],
-  [101,"lfo2.pitch","f",-48,48,0],
-  [102,"lfo2.pulse_width","f",-1,1,0],
-  [103,"lfo2.cutoff","f",-96,96,0],
-  [104,"lfo2.amp","f",0,1,0],
-  [105,"lfo2.pan","f",0,1,0],
-  [112,"fx.drive","f",0,1,0],
-  [113,"fx.bits","f",1,16,16],
-  [114,"fx.downsample","i",1,64,1],
-  [115,"send.delay","f",0,1,0],
-  [116,"send.reverb","f",0,1,0],
-  [117,"send.chorus","f",0,1,0],
-  [120,"macro.rate","f",1,1000,50],
-  [121,"macro.sync","b",0,1,0],
-  [200,"master.volume","f",0,2,0.35],
-  [201,"master.limiter","b",0,1,1],
-  [202,"delay.time","f",0.001,2,0.3],
-  [203,"delay.feedback","f",0,0.95,0.4],
-  [204,"delay.tone","f",200,20000,6000],
-  [205,"delay.pingpong","b",0,1,0],
-  [208,"reverb.size","f",0,1,0.6],
-  [209,"reverb.damping","f",0,1,0.4],
-  [212,"chorus.rate","f",0.05,10,0.8],
-  [213,"chorus.depth","f",0,1,0.5],
-  [216,"voices","i",1,64,64],
+  [0,"volume","f",0,2,1,"gain"],
+  [1,"pan","f",-1,1,0,"pan"],
+  [2,"transpose","f",-48,48,0,"semitones"],
+  [3,"tune","f",-100,100,0,"cents"],
+  [4,"bend","f",-1,1,0,""],
+  [5,"bend_range","f",0,48,2,"semitones"],
+  [6,"glide","f",0,10,0,"seconds"],
+  [7,"mode","c",0,2,0,"",["poly","mono","legato"]],
+  [8,"unison.voices","i",1,8,1,"voices"],
+  [9,"unison.detune","f",0,100,20,"cents"],
+  [10,"unison.spread","f",0,1,0.5,""],
+  [11,"velocity","f",0,1,1,""],
+  [16,"osc1.wave","c",0,4,1,"",["sine","triangle","saw","pulse","sample"]],
+  [17,"osc1.level","f",0,1,1,"gain"],
+  [18,"osc1.coarse","f",-48,48,0,"semitones"],
+  [19,"osc1.fine","f",-100,100,0,"cents"],
+  [20,"osc1.pulse_width","f",0,1,0.5,""],
+  [21,"osc1.sample","i",0,1023,0,"slot"],
+  [22,"osc1.start","f",0,1,0,""],
+  [23,"osc1.keytrack","b",0,1,1,""],
+  [24,"osc2.wave","c",0,4,2,"",["sine","triangle","saw","pulse","sample"]],
+  [25,"osc2.level","f",0,1,0,"gain"],
+  [26,"osc2.coarse","f",-48,48,0,"semitones"],
+  [27,"osc2.fine","f",-100,100,0,"cents"],
+  [28,"osc2.pulse_width","f",0,1,0.5,""],
+  [29,"osc2.sample","i",0,1023,0,"slot"],
+  [30,"osc2.start","f",0,1,0,""],
+  [31,"osc2.keytrack","b",0,1,1,""],
+  [32,"osc2.sync","b",0,1,0,""],
+  [33,"osc2.ring","f",0,1,0,""],
+  [34,"osc1.reverse","b",0,1,0,""],
+  [35,"osc2.reverse","b",0,1,0,""],
+  [36,"sub.level","f",0,1,0,"gain"],
+  [37,"sub.wave","c",0,2,0,"",["sine","square","triangle"]],
+  [38,"sub.octave","i",-2,-1,-1,"octaves"],
+  [39,"sample.antialias","b",0,1,1,""],
+  [40,"noise.level","f",0,1,0,"gain"],
+  [41,"noise.type","c",0,3,0,"",["white","pink","lfsr","lfsr_short"]],
+  [42,"noise.pitch","f",-48,48,0,"semitones"],
+  [48,"filter.type","c",0,7,0,"",["off","lowpass","highpass","bandpass","notch","low_band","band_high","all"]],
+  [49,"filter.slope","c",0,1,0,"",["12db","24db"]],
+  [50,"filter.cutoff","f",20,20000,2000,"hz"],
+  [51,"filter.resonance","f",0,1,0.15,""],
+  [52,"filter.keytrack","f",0,1,0,""],
+  [53,"filter.env","f",-96,96,0,"semitones"],
+  [54,"filter.velocity","f",-96,96,0,"semitones"],
+  [56,"amp.attack","f",0,20,0.005,"seconds"],
+  [57,"amp.decay","f",0,20,0.1,"seconds"],
+  [58,"amp.sustain","f",0,1,0.8,""],
+  [59,"amp.release","f",0,20,0.15,"seconds"],
+  [60,"amp.curve","f",0,1,0.5,""],
+  [64,"filter_env.attack","f",0,20,0.005,"seconds"],
+  [65,"filter_env.decay","f",0,20,0.2,"seconds"],
+  [66,"filter_env.sustain","f",0,1,0.3,""],
+  [67,"filter_env.release","f",0,20,0.2,"seconds"],
+  [68,"filter_env.curve","f",0,1,0.5,""],
+  [72,"mod_env.attack","f",0,20,0.005,"seconds"],
+  [73,"mod_env.decay","f",0,20,0.2,"seconds"],
+  [74,"mod_env.sustain","f",0,1,0,""],
+  [75,"mod_env.release","f",0,20,0.2,"seconds"],
+  [76,"mod_env.curve","f",0,1,0.5,""],
+  [77,"mod_env.pitch","f",-48,48,0,"semitones"],
+  [78,"mod_env.osc2_pitch","f",-48,48,0,"semitones"],
+  [79,"mod_env.pulse_width","f",-1,1,0,""],
+  [80,"lfo1.wave","c",0,4,0,"",["sine","triangle","saw","square","random"]],
+  [81,"lfo1.rate","f",0.01,50,5,"hz"],
+  [82,"lfo1.delay","f",0,10,0,"seconds"],
+  [83,"lfo1.fade","f",0,10,0,"seconds"],
+  [84,"lfo1.sync","b",0,1,1,""],
+  [85,"lfo1.pitch","f",-48,48,0,"semitones"],
+  [86,"lfo1.pulse_width","f",-1,1,0,""],
+  [87,"lfo1.cutoff","f",-96,96,0,"semitones"],
+  [88,"lfo1.amp","f",0,1,0,""],
+  [89,"lfo1.pan","f",0,1,0,""],
+  [96,"lfo2.wave","c",0,4,1,"",["sine","triangle","saw","square","random"]],
+  [97,"lfo2.rate","f",0.01,50,0.5,"hz"],
+  [98,"lfo2.delay","f",0,10,0,"seconds"],
+  [99,"lfo2.fade","f",0,10,0,"seconds"],
+  [100,"lfo2.sync","b",0,1,0,""],
+  [101,"lfo2.pitch","f",-48,48,0,"semitones"],
+  [102,"lfo2.pulse_width","f",-1,1,0,""],
+  [103,"lfo2.cutoff","f",-96,96,0,"semitones"],
+  [104,"lfo2.amp","f",0,1,0,""],
+  [105,"lfo2.pan","f",0,1,0,""],
+  [112,"fx.drive","f",0,1,0,""],
+  [113,"fx.bits","f",1,16,16,"bits"],
+  [114,"fx.downsample","i",1,64,1,""],
+  [115,"send.delay","f",0,1,0,"gain"],
+  [116,"send.reverb","f",0,1,0,"gain"],
+  [117,"send.chorus","f",0,1,0,"gain"],
+  [120,"macro.rate","f",1,1000,50,"hz"],
+  [121,"macro.sync","b",0,1,0,""],
+  [200,"master.volume","f",0,2,0.35,"gain"],
+  [201,"master.limiter","b",0,1,1,""],
+  [202,"delay.time","f",0.001,2,0.3,"seconds"],
+  [203,"delay.feedback","f",0,0.95,0.4,""],
+  [204,"delay.tone","f",200,20000,6000,"hz"],
+  [205,"delay.pingpong","b",0,1,0,""],
+  [208,"reverb.size","f",0,1,0.6,""],
+  [209,"reverb.damping","f",0,1,0.4,""],
+  [212,"chorus.rate","f",0.05,10,0.8,"hz"],
+  [213,"chorus.depth","f",0,1,0.5,""],
+  [216,"voices","i",1,64,64,"voices"],
 ]
 /* PARAMS:END */
 
@@ -161,11 +161,11 @@ const PARAMS = [
  * or by one of these shorter names. A list is [engine name, how many engine units one unit of the friendly name is].
  */
 const ALIASES = {
-  wave: 'osc1.wave', level: 'osc1.level', width: 'osc1.pulse_width', pulseWidth: 'osc1.pulse_width', sample: 'osc1.sample',
+  wave: 'osc1.wave', level1: 'osc1.level', width: 'osc1.pulse_width', pulseWidth: 'osc1.pulse_width', sample: 'osc1.sample',
   octave: ['transpose', 12], pitch: 'transpose', maxVoices: 'voices',
   voices: 'unison.voices', detune: 'unison.detune', spread: 'unison.spread',
   wave2: 'osc2.wave', level2: 'osc2.level', pitch2: 'osc2.coarse', detune2: 'osc2.fine', width2: 'osc2.pulse_width', sync: 'osc2.sync', ring: 'osc2.ring',
-  sub: 'sub.level', noise: 'noise.level',
+  sub: 'sub.level', noise: 'noise.level', macroRate: 'macro.rate', macroSync: 'macro.sync',
   filter: 'filter.type', slope: 'filter.slope', cutoff: 'filter.cutoff', resonance: 'filter.resonance', keytrack: 'filter.keytrack', sweep: 'filter.env',
   sweepAttack: 'filter_env.attack', sweepDecay: 'filter_env.decay', sweepSustain: 'filter_env.sustain', sweepRelease: 'filter_env.release',
   attack: 'amp.attack', decay: 'amp.decay', sustain: 'amp.sustain', release: 'amp.release', curve: 'amp.curve',
@@ -198,12 +198,20 @@ const PRESETS = {
   // Chip sounds: the plain waves of an 8-bit sound chip, with no filter.
   chip: { wave: 'square', filter: 'off', attack: 0, decay: 0, sustain: 1, release: 0.02 },
   chipLead: { wave: 'pulse', width: 0.25, filter: 'off', attack: 0, decay: 0, sustain: 1, release: 0.02, vibrato: 0.2, vibratoDelay: 0.15, vibratoRate: 6 },
-  chipBass: { wave: 'triangle', filter: 'off', attack: 0, decay: 0, sustain: 1, release: 0.02, note: 36 },
-  chipNoise: { level: 0, noise: 1, 'noise.type': 'lfsr', filter: 'off', attack: 0, decay: 0.12, sustain: 0, release: 0.05 },
+  chipBass: { wave: 'pulse', filter: 'off', attack: 0, decay: 0, sustain: 1, release: 0.02, note: 36, macroRate: 4,
+    macro: { steps: [{ width: 0.06 }, { width: 0.2 }, { width: 0.5 }, { width: 0.8 }, { width: 0.94 }, { width: 0.8 }, { width: 0.5 }, { width: 0.2 }], loop: true, slide: true } },
+  chipNoise: { level1: 0, noise: 1, 'noise.type': 'lfsr', filter: 'off', attack: 0, decay: 0.12, sustain: 0, release: 0.05 },
+  // Chip drums: one voice that changes wave and pitch fifty times a second, as a sound chip's drums do.
+  chipKick: { wave: 'triangle', filter: 'off', attack: 0, decay: 0.16, sustain: 0, release: 0.05, note: 48,
+    macro: [{ wave: 'square', pitch: 12 }, { wave: 'triangle', pitch: 5 }, { wave: 'triangle', pitch: 0 }, { wave: 'triangle', pitch: -5 }, { wave: 'triangle', pitch: -10, volume: 0.8 }, { wave: 'triangle', pitch: -14, volume: 0.6 }] },
+  chipSnare: { wave: 'pulse', 'noise.type': 'lfsr', filter: 'off', attack: 0, decay: 0.16, sustain: 0, release: 0.05, note: 57,
+    macro: [{ wave: 'noise', pitch: 24 }, { wave: 'square', pitch: 0 }, { wave: 'square', pitch: -5, volume: 0.9 }, { wave: 'noise', pitch: 18, volume: 0.8 }, { wave: 'noise', pitch: 14, volume: 0.6 }, { wave: 'noise', pitch: 12, volume: 0.45 }] },
+  chipHat: { wave: 'pulse', 'noise.type': 'lfsr', filter: 'off', attack: 0, decay: 0.05, sustain: 0, release: 0.02, note: 72,
+    macro: [{ wave: 'noise', pitch: 30 }, { wave: 'noise', pitch: 26, volume: 0.6 }, { wave: 'noise', pitch: 24, volume: 0.3 }] },
   // Drums.
   kick: { wave: 'sine', filter: 'off', pitchSweep: 30, pitchSweepDecay: 0.06, pitchSweepAttack: 0, attack: 0, decay: 0.3, sustain: 0, release: 0.1, note: 36 },
-  snare: { wave: 'triangle', level: 0.6, noise: 1, filter: 'highpass', cutoff: 500, resonance: 0.05, pitchSweep: 12, pitchSweepDecay: 0.04, pitchSweepAttack: 0, attack: 0, decay: 0.17, sustain: 0, release: 0.08, note: 52 },
-  hat: { level: 0, noise: 1, filter: 'highpass', cutoff: 7000, attack: 0, decay: 0.05, sustain: 0, release: 0.03, note: 60 },
+  snare: { wave: 'triangle', level1: 0.6, noise: 1, filter: 'highpass', cutoff: 500, resonance: 0.05, pitchSweep: 12, pitchSweepDecay: 0.04, pitchSweepAttack: 0, attack: 0, decay: 0.17, sustain: 0, release: 0.08, note: 52 },
+  hat: { level1: 0, noise: 1, filter: 'highpass', cutoff: 7000, attack: 0, decay: 0.05, sustain: 0, release: 0.03, note: 60 },
   // What loadSample starts from: the recording as it is.
   sample: { wave: 'sample', filter: 'off', attack: 0, decay: 0, sustain: 1, release: 0.03 },
 }
@@ -216,9 +224,13 @@ const SOUNDS = {
   coin: { patch: { wave: 'square', filter: 'off', attack: 0, decay: 0.3, sustain: 0, release: 0.2 }, notes: [[0, 83, 0.07, 0.8], [0.07, 88, 0.4, 0.8]] },
   jump: { patch: { wave: 'square', width: 0.3, filter: 'off', attack: 0, decay: 0.25, sustain: 0, release: 0.05 }, notes: [[0, 57, 0.22, 0.8, 78, 0.2]] },
   laser: { patch: { wave: 'saw', cutoff: 6000, attack: 0, decay: 0.24, sustain: 0, release: 0.05 }, notes: [[0, 98, 0.24, 0.8, 58, 0.22]] },
-  explosion: { patch: { wave: 'sine', level: 0.9, noise: 1, cutoff: 180, sweep: 50, sweepAttack: 0, sweepDecay: 0.55, sweepSustain: 0, pitchSweep: 24, pitchSweepDecay: 0.25, pitchSweepAttack: 0, distortion: 0.5, attack: 0, decay: 0.9, sustain: 0, release: 0.3 }, notes: [[0, 30, 0.9, 1]] },
-  hit: { patch: { wave: 'square', level: 0.7, noise: 0.8, cutoff: 2500, attack: 0, decay: 0.1, sustain: 0, release: 0.05 }, notes: [[0, 50, 0.1, 0.9, 36, 0.08]] },
-  powerup: { patch: { wave: 'square', filter: 'off', attack: 0, decay: 0.2, sustain: 0.5, release: 0.15, vibrato: 0.3, vibratoRate: 12 }, notes: [[0, 72, 0.06, 0.7], [0.06, 76, 0.06, 0.7], [0.12, 79, 0.06, 0.7], [0.18, 84, 0.06, 0.7], [0.24, 88, 0.3, 0.7]] },
+  explosion: { patch: { wave: 'sine', level1: 0.9, noise: 1, cutoff: 180, sweep: 50, sweepAttack: 0, sweepDecay: 0.55, sweepSustain: 0, pitchSweep: 24, pitchSweepDecay: 0.25, pitchSweepAttack: 0, distortion: 0.5, attack: 0, decay: 0.9, sustain: 0, release: 0.3 }, notes: [[0, 30, 0.9, 1]] },
+  hit: { patch: { wave: 'square', 'noise.type': 'lfsr', filter: 'off', attack: 0, decay: 0.12, sustain: 0, release: 0.05,
+    macro: [{ wave: 'noise', pitch: 12 }, { wave: 'square', pitch: 0 }, { wave: 'square', pitch: -5 }, { wave: 'noise', pitch: 4, volume: 0.7 }, { wave: 'noise', pitch: 0, volume: 0.5 }, { wave: 'noise', pitch: -4, volume: 0.3 }] }, notes: [[0, 50, 0.12, 0.9]] },
+  shoot: { patch: { wave: 'pulse', width: 0.25, filter: 'off', attack: 0, decay: 0.16, sustain: 0, release: 0.03, macroRate: 60,
+    macro: [{ wave: 'noise', pitch: 30 }, { wave: 'pulse', pitch: 19 }, { pitch: 14 }, { pitch: 9 }, { pitch: 4 }, { pitch: 0 }, { pitch: -5, volume: 0.8 }, { pitch: -10, volume: 0.6 }, { pitch: -15, volume: 0.4 }] }, notes: [[0, 76, 0.16, 0.8]] },
+  powerup: { patch: { wave: 'square', filter: 'off', attack: 0, decay: 0.2, sustain: 0.5, release: 0.15, macroRate: 16,
+    macro: { steps: [{ pitch: 0 }, { pitch: 4 }, { pitch: 7 }, { pitch: 12 }, { pitch: 16 }, { pitch: 19 }, { pitch: 24 }, { pitch: 19 }], loop: [6, 8] } }, notes: [[0, 60, 0.6, 0.7]] },
   blip: { patch: { wave: 'square', filter: 'off', attack: 0, decay: 0.06, sustain: 0, release: 0.02 }, notes: [[0, 81, 0.06, 0.7]] },
   click: { patch: { wave: 'sine', noise: 0.4, filter: 'off', attack: 0, decay: 0.015, sustain: 0, release: 0.01 }, notes: [[0, 96, 0.02, 0.8]] },
   zap: { patch: { wave: 'saw', cutoff: 5000, vibrato: 7, vibratoRate: 32, attack: 0, decay: 0.3, sustain: 0, release: 0.05 }, notes: [[0, 84, 0.3, 0.8, 55, 0.3]] },
@@ -228,12 +240,25 @@ const SOUNDS = {
   lose: { patch: { wave: 'triangle', wave2: 'square', level2: 0.3, cutoff: 2500, attack: 0, decay: 0.3, sustain: 0.5, release: 0.2 }, notes: [[0, 67, 0.16, 0.8], [0.17, 63, 0.16, 0.8], [0.34, 60, 0.16, 0.8], [0.51, 55, 0.5, 0.8, 43, 0.5]] },
 }
 
+/** CHORDS, as semitones above the root. A chord is a root and one of these: "Cm7", "F#sus4", or ("C4", "minor"). */
+const CHORDS = {
+  major: [0, 4, 7], maj: [0, 4, 7], minor: [0, 3, 7], min: [0, 3, 7], m: [0, 3, 7],
+  dim: [0, 3, 6], aug: [0, 4, 8], sus2: [0, 2, 7], sus4: [0, 5, 7], sus: [0, 5, 7], 5: [0, 7], power: [0, 7], octave: [0, 12],
+  6: [0, 4, 7, 9], m6: [0, 3, 7, 9], 7: [0, 4, 7, 10], dom7: [0, 4, 7, 10], maj7: [0, 4, 7, 11], m7: [0, 3, 7, 10], min7: [0, 3, 7, 10],
+  dim7: [0, 3, 6, 9], m7b5: [0, 3, 6, 10], mmaj7: [0, 3, 7, 11], add9: [0, 4, 7, 14], 9: [0, 4, 7, 10, 14], maj9: [0, 4, 7, 11, 14], m9: [0, 3, 7, 10, 14],
+}
+/** The orders an arpeggio can go in, as the engine numbers them. */
+const ORDERS = { up: 0, down: 1, updown: 2, written: 3, aswritten: 3, given: 3, random: 4 }
+/** The waves a step of a macro can switch to. */
+const MACRO_WAVES = { sine: 0, triangle: 1, saw: 2, pulse: 3, square: 3, noise: 4 }
+
 // --- names, notes and mistakes ---------------------------------------------------------------
 
 const key = (name) => String(name).toLowerCase().replace(/[_.\s-]/g, '')
 const camel = (name) => name.replace(/[._]+(\w)/g, (_, c) => c.toUpperCase())
 const shown = (v) => (typeof v === 'string' ? JSON.stringify(v) : Array.isArray(v) ? '[' + v.map(shown).join(', ') + ']' : String(v))
 const clamp = (v, low, high) => Math.min(high, Math.max(low, v))
+const KINDS = { f: 'float', i: 'int', b: 'bool', c: 'choice' }
 
 /** Every way a setting can be written, as key(name) -> { id, name, kind, min, max, def, choices, part, scale }. */
 let settings = null
@@ -243,8 +268,8 @@ function allSettings() {
   if (settings) return settings
   settings = new Map()
   const byName = new Map()
-  for (const [id, name, kind, min, max, def, choices] of PARAMS) {
-    const entry = { id, name, kind, min, max, def, choices: choices || null, part: id < 200, scale: 1 }
+  for (const [id, name, kind, min, max, def, unit, choices] of PARAMS) {
+    const entry = { id, name, kind, min, max, def, unit, choices: choices || null, part: id < 200, scale: 1 }
     byName.set(name, entry)
     settings.set(key(name), entry)
   }
@@ -321,7 +346,7 @@ function settingValue(entry, value, said) {
  */
 function patchOf(given, said, strict, into = new Map(), sampleSlot = null) {
   for (const [name, value] of Object.entries(given || {})) {
-    if (name === 'note' || name === 'preset') continue
+    if (name === 'note' || name === 'preset' || name === 'macro') continue
     const entry = setting(name)
     if (!entry) {
       if (strict) throw new Error(`${said}: there is no setting called ${shown(name)}.${meant(name, namesToShow)}`)
@@ -354,7 +379,83 @@ export function noteNumber(note) {
   }
   throw new Error(`${shown(note)} is not a note. Write a note as a name like "C4", "F#3" or "Bb5", or as a number, where 60 is middle C`)
 }
-const noteNumbers = (note) => (Array.isArray(note) ? note.map(noteNumber) : [noteNumber(note)])
+
+// The kind of chord a person named: "m7", "Maj7", "M7" (a capital M is major), "minor".
+function chordKind(kind) {
+  let k = String(kind).trim()
+  if (/^M(?!aj|in|AJ|IN)/.test(k)) k = 'maj' + k.slice(1)
+  k = k.toLowerCase().replace(/[\s_-]/g, '')
+  if (k === 'maj' || k === '') k = 'major'
+  return Object.prototype.hasOwnProperty.call(CHORDS, k) ? CHORDS[k] : null
+}
+const kindsToShow = () => ['major', 'minor', 'dim', 'aug', 'sus2', 'sus4', '5', '6', 'm6', '7', 'maj7', 'm7', 'dim7', 'm7b5', 'mmaj7', 'add9', '9', 'maj9', 'm9', 'octave']
+
+/**
+ * The notes of a chord, as numbers: chordNotes("Cm7") is [60, 63, 67, 70], chordNotes("C3", "minor") is [48, 51, 55].
+ * A letter followed by a number is always a note, so "C7" is the note C in octave 7: a seventh chord is "Cdom7",
+ * or ("C", "7"). With no kind at all, it is a major chord.
+ */
+export function chordNotes(name, kind) {
+  if (Array.isArray(name)) return name.map(noteNumber)
+  let root = name
+  if (kind === undefined && typeof name === 'string') {
+    const m = /^\s*([a-gA-G][#b♯♭]*(?:-?\d+)?)\s*(.*?)\s*$/.exec(name)
+    if (m) { root = m[1]; kind = m[2] }
+  }
+  const base = noteNumber(root)
+  const steps = chordKind(kind === undefined ? '' : kind)
+  if (!steps) throw new Error(`${shown(kind)} is not a kind of chord.${meant(String(kind), Object.keys(CHORDS))} The kinds are: ${kindsToShow().join(', ')}`)
+  return steps.map((s) => base + s)
+}
+
+// What play() is given -> a list of note numbers: a note, a list of notes, or a chord by name ("Cm7").
+function notesOf(what) {
+  if (Array.isArray(what)) return what.map(noteNumber)
+  if (typeof what === 'string' && !/^\s*[a-gA-G][#b♯♭]*(-?\d+)?\s*$/.test(what) && /^\s*[a-gA-G]/.test(what) && !Number.isFinite(+what)) {
+    const m = /^\s*([a-gA-G][#b♯♭]*(?:-?\d+)?)\s*(.*?)\s*$/.exec(what)
+    if (m && chordKind(m[2])) return chordNotes(what)
+    if (m) throw new Error(`${shown(what)} is not a note or a chord.${meant(m[2], Object.keys(CHORDS)) && ` Did you mean ${shown(m[1] + nearest(m[2], Object.keys(CHORDS)))}?`} A note is written "C4" or "F#3", and a chord "Cm", "Cmaj7" or "Csus4"`)
+  }
+  return [noteNumber(what)]
+}
+
+// The order of an arpeggio as the engine's number, from "up", "down", "up-down", "as written" or "random".
+function orderOf(order, strict, said) {
+  if (order === undefined || order === null) return 0
+  if (typeof order === 'number' && order >= 0 && order <= 4) return Math.floor(order)
+  const k = key(order)
+  if (Object.prototype.hasOwnProperty.call(ORDERS, k)) return ORDERS[k]
+  if (strict) throw new Error(`${said}: ${shown(order)} is not an order an arpeggio can go in.${meant(String(order), ['up', 'down', 'up-down', 'as written', 'random'])} The orders are: up, down, up-down, as written, random`)
+  return 0
+}
+
+/**
+ * A STEP MACRO as the engine takes it, from what a person wrote: a list of steps, or { steps, loop, release, slide }.
+ * A step is { wave, pitch, width, cutoff, volume } with any of them left out, or the five as a list.
+ * `loop` is true (the whole list goes round while the note is held) or [first step, step after the last].
+ */
+function macroOf(given, strict, said) {
+  if (given === null || given === undefined || given === false) return null
+  const spec = Array.isArray(given) ? { steps: given } : given
+  const bad = (why) => { if (strict) throw new Error(`${said}: ${why}`); return null }
+  if (!spec || !Array.isArray(spec.steps) || !spec.steps.length) return bad(`a macro needs a list of steps, as in [{ pitch: 0 }, { pitch: 4 }, { pitch: 7 }], not ${shown(given)}`)
+  if (spec.steps.length > 64) return bad(`a macro has room for 64 steps, and this has ${spec.steps.length}`)
+  const flat = []
+  for (const step of spec.steps) {
+    const o = Array.isArray(step) ? { wave: step[0], pitch: step[1], width: step[2], cutoff: step[3], volume: step[4] } : step || {}
+    let wave = -1
+    if (typeof o.wave === 'number') wave = o.wave
+    else if (o.wave !== undefined && o.wave !== null) {
+      wave = MACRO_WAVES[String(o.wave).toLowerCase()]
+      if (wave === undefined) return bad(`${shown(o.wave)} is not a wave a step can switch to.${meant(String(o.wave), Object.keys(MACRO_WAVES))} They are: ${Object.keys(MACRO_WAVES).join(', ')}`)
+    }
+    for (const name of ['pitch', 'width', 'cutoff', 'volume']) if (o[name] !== undefined && o[name] !== null && (typeof o[name] !== 'number' || !Number.isFinite(o[name]))) return bad(`a step's ${name} needs a number, not ${shown(o[name])}`)
+    flat.push(wave, o.pitch ?? 0, o.width ?? (String(o.wave).toLowerCase() === 'square' ? 0.5 : -1), o.cutoff ?? 0, o.volume ?? 1)
+  }
+  const count = spec.steps.length
+  const loop = spec.loop === true ? [0, count] : Array.isArray(spec.loop) ? spec.loop : [0, 0]
+  return { flat, count, loopStart: loop[0] | 0, loopEnd: loop[1] | 0, release: Number.isInteger(spec.release) ? spec.release : 255, flags: spec.slide ? 1 : 0 }
+}
 
 /** Each thing said once in the console, however often it happens. */
 const told = new Set()
@@ -464,7 +565,7 @@ function makeCore(wasm, sampleRate, post) {
   const outRoom = x.synths_output_capacity()
   const NOTE_ON = 1, NOTE_OFF = 2, ALL_OFF = 3, EVERY = 0xffff
 
-  /** Events not yet handed to the engine: [frame, type, part, a, x, y], soonest first. */
+  /** Events not yet handed to the engine: [frame, type, part, a, x, y, z, b], soonest first. */
   const queue = []
   /** Tunes that are playing: id -> { part, steps, length, start, cycle, i, repeat }. */
   const tunes = new Map()
@@ -482,6 +583,7 @@ function makeCore(wasm, sampleRate, post) {
     voices: () => x.synths_active_voices(engine),
     exec,
     render,
+    taps,
     close() { x.synths_destroy(engine) },
   }
 
@@ -489,14 +591,14 @@ function makeCore(wasm, sampleRate, post) {
   // that arrive late keep the order they were asked in.
   const frameOf = (seconds) => (seconds == null ? core.time : Math.max(core.time, Math.round(seconds * sampleRate + core.delta)))
 
-  function add(frame, type, part, a, xv, y) {
+  function add(frame, type, part, a, xv, y, z, b) {
     let low = 0, high = queue.length
     while (low < high) {
       const mid = (low + high) >> 1
       if (queue[mid][0] <= frame) low = mid + 1
       else high = mid
     }
-    queue.splice(low, 0, [frame, type, part, a, xv, y])
+    queue.splice(low, 0, [frame, type, part, a, xv, y, z || 0, b || 0])
   }
 
   function exec(ops) {
@@ -506,8 +608,8 @@ function makeCore(wasm, sampleRate, post) {
         // A note that reaches this thread more than a quarter of a second after it was due is not started:
         // a page that was stuck would otherwise have all its late notes at once.
         if (op[2] === NOTE_ON && op[1] != null && op[1] * sampleRate + core.delta < core.time - sampleRate / 4) continue
-        add(frameOf(op[1]), op[2], op[3], op[4], op[5], op[6] || 0)
-      }
+        add(frameOf(op[1]), op[2], op[3], op[4], op[5], op[6] || 0, op[7], op[8])
+      } else if (kind === 'macro') setMacro(op)
       else if (kind === 'sample') loadSample(op)
       else if (kind === 'unsample') x.synths_sample_free(engine, op[1])
       else if (kind === 'tune') {
@@ -537,6 +639,40 @@ function makeCore(wasm, sampleRate, post) {
     const ok = x.synths_sample_load(engine, slot, at, frames, channels, rate)
     x.synths_free(at)
     if (ok === 0) x.synths_sample_config(engine, slot, base, loopMode, loopStart, loopEnd || frames)
+  }
+
+  // A part's step macro: [, part, the steps' numbers (five a step), count, loop start, loop end, release, flags].
+  function setMacro([, part, flat, count, loopStart, loopEnd, release, flags]) {
+    if (!x.synths_macro_set) return post({ type: 'unsupported', what: 'macro' })
+    if (!count) return x.synths_macro_set(engine, part, 0, 0, 0, 0, 255, 0)
+    const at = x.synths_alloc(flat.length * 4)
+    if (!at) return
+    new Float32Array(memory.buffer, at, flat.length).set(flat)
+    x.synths_macro_set(engine, part, at, count, loopStart, loopEnd, release, flags)
+    x.synths_free(at)
+  }
+
+  /**
+   * WHAT IS SOUNDING, for a display: for each source (a part, or 65535 for everything) its latest `frames` samples,
+   * its peak level left and right, and the notes sounding as four words of bits. The engine keeps these as it
+   * renders; reading them costs the sound nothing. An engine without them gives an empty list.
+   */
+  let tapAt = 0
+  function taps(sources, frames) {
+    if (!x.synths_scope_read || !x.synths_levels_read || !x.synths_notes_read) return []
+    if (!tapAt) tapAt = x.synths_alloc(4096 * 4)
+    if (!tapAt) return []
+    const out = []
+    for (const source of sources) {
+      const n = x.synths_scope_read(engine, source, tapAt, Math.min(frames, 4096))
+      const samples = new Float32Array(memory.buffer, tapAt, n).slice()
+      x.synths_levels_read(engine, source, 1, tapAt)
+      const levels = new Float32Array(memory.buffer, tapAt, 4)
+      const peakLeft = levels[0], peakRight = levels[1]
+      x.synths_notes_read(engine, source, tapAt)
+      out.push([source, samples, peakLeft, peakRight, new Uint32Array(memory.buffer, tapAt, 8).slice(4)])
+    }
+    return out
   }
 
   // Put the notes of every tune that fall before `end` into the queue.
@@ -572,8 +708,8 @@ function makeCore(wasm, sampleRate, post) {
         events.setUint32(at + 12, e[3], true)
         events.setFloat32(at + 16, e[4], true)
         events.setFloat32(at + 20, e[5], true)
-        events.setFloat32(at + 24, 0, true)
-        events.setUint32(at + 28, 0, true)
+        events.setFloat32(at + 24, e[6], true)
+        events.setUint32(at + 28, e[7], true)
         n++
       }
       const taken = x.synths_push_events(engine, n)
@@ -612,6 +748,11 @@ function registerSynths(makeCore) {
       super()
       this.core = null
       this.over = false
+      // A page that is drawing a scope or a meter says which sources it is watching, and goes on saying so;
+      // while it does, what they are doing is posted to it about 40 times a second. Unwatched, nothing is posted.
+      this.watch = null
+      this.watchFor = 0
+      this.blocks = 0
       this.port.onmessage = (m) => {
         const core = this.core
         if (!core) return
@@ -625,6 +766,10 @@ function registerSynths(makeCore) {
         if (m.data.ops) {
           core.delta = core.time - currentFrame
           core.exec(m.data.ops)
+        }
+        if (m.data.watch) {
+          this.watch = m.data.watch
+          this.watchFor = Math.ceil(sampleRate * 1.5 / 128)
         }
         if (m.data.ask) this.port.postMessage({ type: 'state', ask: m.data.ask, voices: core.voices(), time: core.time, frame: currentFrame })
       }
@@ -643,6 +788,10 @@ function registerSynths(makeCore) {
       if (!out || !out[0]) return true
       core.delta = core.time - currentFrame
       core.render(out[0], out[1], out[0].length)
+      if (this.watch && (++this.blocks & 7) === 0) {
+        if ((this.watchFor -= 8) <= 0) this.watch = null
+        else this.port.postMessage({ type: 'taps', taps: core.taps(this.watch, 1024) })
+      }
       return true
     }
   })
@@ -666,13 +815,14 @@ function makeConductor(post, load) {
   const params = allSettings()
   const partParams = PARAMS.filter((p) => p[0] < 200)
   const id = (name) => params.get(key(name)).id
-  const PARAM = 4, NOTE_ON = 1, NOTE_OFF = 2, VOICE_PITCH = 6, VOICE_FREQ = 7, VOICE_VOLUME = 8, VOICE_PAN = 9, VOICE_KILL = 11
+  const PARAM = 4, NOTE_ON = 1, NOTE_OFF = 2, VOICE_PITCH = 6, VOICE_FREQ = 7, VOICE_VOLUME = 8, VOICE_PAN = 9, VOICE_KILL = 11, ARP = 13, ARP_MORE = 14
+  const canArp = ENGINE.events.includes('arp')
   const MASTER = id('master.volume')
 
   /** id -> { patch: Map of engine id -> value, part: its part or -1, used, note } */
   const synths = new Map()
   /** For each part: who has it, and what every parameter was last set to. */
-  const parts = Array.from({ length: ENGINE.parts }, () => ({ owner: null, values: new Map() }))
+  const parts = Array.from({ length: ENGINE.parts }, () => ({ owner: null, values: new Map(), macro: null }))
   const slots = new Map()
   const freeSlots = []
   let nextSlot = 0
@@ -684,7 +834,17 @@ function makeConductor(post, load) {
   /** Samples still being read: the offline player waits for these before it renders. */
   const loading = new Set()
 
-  const event = (at, type, part, a, x, y) => ops.push(['e', at, type, part, a >>> 0, x, y || 0])
+  const event = (at, type, part, a, x, y, z, b) => ops.push(['e', at, type, part, a >>> 0, x, y || 0, z || 0, b || 0])
+
+  // Give the note with a handle an arpeggio (or change the one it has, or with no offsets take it away): the
+  // engine steps one voice through the offsets, in semitones, so many times a second.
+  function arpeggio(at, part, h, arp) {
+    if (!canArp) return tell('arpeggios are not ready yet in this version, so an arpeggio plays as its lowest note alone.')
+    const offsets = arp && Array.isArray(arp.offsets) ? arp.offsets.slice(0, 8).map((v) => clamp(Math.round(+v || 0), -128, 127)) : []
+    const pack = (o) => ((o[0] & 255) | (o[1] & 255) << 8 | (o[2] & 255) << 16 | (o[3] & 255) << 24) >>> 0
+    event(at, ARP, part, h, arp && arp.rate > 0 ? clamp(arp.rate, 0.1, 1000) : 50, orderOf(arp && arp.order, false), offsets.length, pack(offsets))
+    if (offsets.length > 4) event(at, ARP_MORE, part, h, 0, 0, 0, pack(offsets.slice(4)))
+  }
   const autoHandle = () => (handle = handle >= 0xbffffff0 ? 0x80000001 : handle + 1)
   const plain = () => patchOf(PLAIN, '', false)
 
@@ -711,6 +871,11 @@ function makeConductor(post, load) {
         event(at, PARAM, rec.part, pid, want, 0)
       }
     }
+    if (part.macro !== rec.macro) {
+      part.macro = rec.macro
+      const m = rec.macro
+      ops.push(m ? ['macro', rec.part, m.flat, m.count, m.loopStart, m.loopEnd, m.release, m.flags] : ['macro', rec.part, [], 0, 0, 0, 255, 0])
+    }
   }
 
   // A synth needs a part. When all are taken, the one used longest ago gives its part up (and takes one back
@@ -734,7 +899,7 @@ function makeConductor(post, load) {
   function synthFor(sid, at) {
     let rec = synths.get(sid)
     if (!rec) {
-      rec = { patch: patchOf(PRESETS.keys, '', false, plain()), part: -1, used: 0, note: 60 }
+      rec = { patch: patchOf(PRESETS.keys, '', false, plain()), part: -1, used: 0, note: 60, macro: null }
       synths.set(sid, rec)
     }
     seat(rec, at)
@@ -764,15 +929,21 @@ function makeConductor(post, load) {
   const does = {
     synth(c, at) {
       let rec = synths.get(c.id)
-      if (!rec) synths.set(c.id, rec = { patch: null, part: -1, used: ++uses, note: 60 })
+      if (!rec) synths.set(c.id, rec = { patch: null, part: -1, used: ++uses, note: 60, macro: null })
       const preset = c.preset == null ? null : PRESETS[c.preset] || PRESETS.keys
       rec.patch = patchOf(c.set, '', false, patchOf(preset, '', false, plain()), slotOf)
       rec.note = (preset && preset.note) || 60
+      rec.macro = macroOf(c.macro !== undefined ? c.macro : preset && preset.macro, false)
       for (const [pid, value] of rec.patch) if (pid >= 200) { rec.patch.delete(pid); if (pid !== MASTER) event(at, PARAM, 0, pid, value, 0) }
       if (rec.part >= 0) dress(rec, at)
       else seat(rec, at)
     },
     set(c, at) { setAll(c.id == null ? null : synthFor(c.id, at), c.set, at, c.glide > 0 ? c.glide : 0) },
+    macro(c, at) {
+      const rec = synthFor(c.id, at)
+      rec.macro = macroOf(c.macro, false)
+      dress(rec, at)
+    },
     free(c) {
       const rec = synths.get(c.id)
       if (!rec) return
@@ -784,6 +955,7 @@ function makeConductor(post, load) {
       const list = c.note == null ? [rec.note] : notes(c.note)
       for (const n of list) event(at, NOTE_ON, rec.part, h, n, c.vel == null ? 0.8 : clamp(c.vel, 0, 1))
       if (c.pan) event(at, VOICE_PAN, rec.part, h, clamp(c.pan, -1, 1))
+      if (c.arp) arpeggio(at, rec.part, h, c.arp)
       if (c.len != null && list.length) event(at + Math.max(0.001, c.len), NOTE_OFF, rec.part, h, 0)
     },
     off(c, at) {
@@ -801,13 +973,14 @@ function makeConductor(post, load) {
       if (c.freq > 0) event(at, VOICE_FREQ, rec.part, c.h, c.freq, glide)
       if (c.vol != null) event(at, VOICE_VOLUME, rec.part, c.h, clamp(c.vol, 0, 4))
       if (c.pan != null) event(at, VOICE_PAN, rec.part, c.h, clamp(c.pan, -1, 1))
+      if (c.arp !== undefined) arpeggio(at, rec.part, c.h, c.arp)
       if (c.kill) event(at, VOICE_KILL, rec.part, c.h, 0)
     },
     sound(c, at) {
       const sound = SOUNDS[c.name]
       if (!sound) return
       const sid = 'sound:' + c.name
-      if (!synths.has(sid)) synths.set(sid, { patch: patchOf(sound.patch, '', false, plain()), part: -1, used: 0, note: 60 })
+      if (!synths.has(sid)) synths.set(sid, { patch: patchOf(sound.patch, '', false, plain()), part: -1, used: 0, note: 60, macro: macroOf(sound.patch.macro, false) })
       const rec = synthFor(sid, at)
       for (const [after, n, len, vel, slideTo, slideTime] of sound.notes) {
         const h = autoHandle()
@@ -882,6 +1055,10 @@ function makeConductor(post, load) {
     /** Set the engine to how a new conductor expects to find it. */
     begin() { master(null); flush() },
     loading,
+    /** The engine's part a synth has now: 65535 for no id (everything), -1 for a synth with no part. */
+    partOf(sid) { return sid == null ? 0xffff : synths.get(sid)?.part ?? -1 },
+    /** How much everything is turned down or up after the parts are mixed. */
+    gain: () => (muted ? 0 : clamp(volume * 0.5, 0, 2)),
   }
 }
 
@@ -935,6 +1112,20 @@ async function decode(bytes, context) {
   return { pcm, channels, rate: buffer.sampleRate }
 }
 
+// --- reading the sound back -------------------------------------------------------------------
+
+/** What a display is given when there is nothing to show. */
+const NOTHING = { samples: new Float32Array(0), level: [0, 0], notes: [] }
+/** One source's taps from the core -> { samples, level: [left, right] from 0 to 1, notes: the notes sounding }. */
+function reading([source, samples, left, right, words], gain) {
+  const notes = []
+  for (let n = 0; n < 128; n++) if ((words[n >> 5] >>> (n & 31)) & 1) notes.push(n)
+  // The engine measures a part before the volume of everything is applied; a display should show what is heard.
+  if (source === 0xffff) gain = 1
+  else for (let i = 0; i < samples.length; i++) samples[i] = clamp(samples[i] * gain, -1, 1)
+  return { samples, level: [Math.min(1, left * gain), Math.min(1, right * gain)], notes }
+}
+
 // --- the real-time player --------------------------------------------------------------------
 
 /** Commands that make a sound once. One that could not be played near the time it was asked for is dropped, never played late. */
@@ -963,9 +1154,12 @@ const KEPT_WHILE_LOADING = 10
  *   `latency` is how far ahead of the sound card everything is scheduled, in seconds (0.04).
  *   `context` and `destination` put the sound into an AudioContext and a node of your own (a recorder, an analyser).
  *   `fallback: false` refuses the slower way of working when the browser has no audio worklet; 'always' uses it regardless.
- * @returns {{ send(batch): void, state: 'loading'|'waiting'|'on'|'failed', kind: 'worklet'|'fallback'|null, ready: Promise<void>,
+ * @returns {{ send(batch): void, read(id?): { samples: Float32Array, level: number[], notes: number[] },
+ *             state: 'loading'|'waiting'|'on'|'failed', kind: 'worklet'|'fallback'|null, ready: Promise<void>,
  *             context: AudioContext, node: AudioNode, unlock(): void, pause(): void, resume(): void, ask(): Promise<object>, close(): void }}
  *   `state` is 'waiting' while the browser keeps the page silent until a tap. `ready` resolves when sound is on.
+ *   `read(id)` is what a synth is doing now, for a scope, a meter and lit keys (no id: all the sound). It never waits:
+ *   it gives the latest the audio thread has posted, which starts to arrive a moment after the first read.
  */
 export function createPlayer(options = {}) {
   const Context = globalThis.AudioContext || globalThis.webkitAudioContext
@@ -987,7 +1181,7 @@ export function createPlayer(options = {}) {
   const player = {
     state: 'loading', kind: null, context: null, node: null,
     ready: new Promise((yes) => { ready = yes }),
-    send, unlock, close,
+    send, unlock, close, read,
     /** Silence, with everything kept as it is: for a scene that is paused or out of view. */
     pause() { paused = true; player.context?.suspend?.() },
     resume() { paused = false; unlock() },
@@ -1085,6 +1279,27 @@ export function createPlayer(options = {}) {
     conductor.flush()
   }
 
+  // READING BACK. The page says which parts it is watching (again every half second while it goes on reading), and
+  // the worklet posts what they are doing; a read gives the latest and never waits. The fallback's engine is on
+  // this thread, and is read directly.
+  const tapped = new Map()
+  const watched = new Map()
+  let watchSaid = 0
+  function read(id) {
+    const part = conductor ? conductor.partOf(id) : -1
+    if (part < 0 || closed) return NOTHING
+    if (core) { const now = core.taps([part], 1024)[0]; return now ? reading(now, conductor.gain()) : NOTHING }
+    if (!port) return NOTHING
+    const at = local()
+    if (!watched.has(part) || at - watchSaid > 0.5) {
+      watched.set(part, at)
+      for (const [p, last] of watched) if (at - last > 2) { watched.delete(p); tapped.delete(p) }
+      watchSaid = at
+      port.postMessage({ watch: [...watched.keys()] })
+    } else watched.set(part, at)
+    return tapped.get(part) || NOTHING
+  }
+
   function close() {
     if (closed) return
     closed = true
@@ -1104,7 +1319,8 @@ export function createPlayer(options = {}) {
   }
 
   function onMessage(m) {
-    if (m.type === 'state') { waiting.get(m.ask)?.(m); waiting.delete(m.ask) }
+    if (m.type === 'taps') for (const tap of m.taps) tapped.set(tap[0], reading(tap, conductor.gain()))
+    else if (m.type === 'state') { waiting.get(m.ask)?.(m); waiting.delete(m.ask) }
     else if (m.type === 'problem') tell('there was not enough memory for a sample, so it will be silent.')
   }
 
@@ -1215,6 +1431,12 @@ export async function createOfflinePlayer(options = {}) {
     },
     get time() { return core.time / sampleRate },
     voices: () => core.voices(),
+    /** What a synth (or, with no id, everything) is doing at the point rendering has reached: { samples, level, notes }. */
+    read(id) {
+      const part = conductor.partOf(id)
+      const now = part < 0 ? null : core.taps([part], 1024)[0]
+      return now ? reading(now, conductor.gain()) : NOTHING
+    },
     close() { core.close() },
   }
 }
@@ -1320,6 +1542,49 @@ export function createSound(options = {}) {
     set pan(v) { command({ op: 'voice', id: this.synth, h: this.h, pan: amount(v, 'pan', -1, 1), t: clock() }) }
   }
 
+  // The chord an arpeggio is given -> its notes as numbers: a list of notes, a chord by name, or a root and a kind.
+  function chordOf(chord, kind, said) {
+    if (chord === undefined || chord === null) throw new Error(`${said} needs a chord, as in ${said}("Cm7"), ${said}("C4", "minor") or ${said}(["C4", "E4", "G4"])`)
+    const notes = chordNotes(chord, kind)
+    if (notes.length > 8) throw new Error(`${said}: an arpeggio has room for 8 notes, and this chord has ${notes.length}`)
+    return notes
+  }
+  // An arpeggio as a command carries it: semitones from the note the voice was started on, a rate and an order.
+  function arpOf(notes, root, o, said) {
+    const offsets = notes.map((n) => n - root)
+    if (offsets.some((v) => !Number.isInteger(v) || v < -128 || v > 127)) throw new Error(`${said}: the notes of an arpeggio have to be whole notes within ten octaves of the first one`)
+    return { offsets, rate: o.speed === undefined ? 50 : amount(o.speed, `${said}: speed`, 0.1, 1000), order: orderOf(o.order, true, said) }
+  }
+  // What arp() was given: a chord, then in any order a kind of chord (text), a length (a number) and options.
+  function arpArgs(args) {
+    const o = {}
+    let kind, length
+    for (const arg of args.slice(1)) {
+      if (typeof arg === 'string') kind = arg
+      else if (typeof arg === 'number') length = arg
+      else if (arg && typeof arg === 'object') Object.assign(o, arg)
+    }
+    if (o.kind !== undefined) kind = o.kind
+    if (o.length !== undefined) length = o.length
+    return { chord: args[0], kind, length, o }
+  }
+
+  /** An arpeggio that is sounding: what arp() and startArp() give back. Its chord can be changed as it plays. */
+  class Arp extends Note {
+    constructor(synth, h, root, o) { super(synth, h); this.root = root; this.o = o }
+    /** Another chord, without starting the note again: arp.change("Fm"), arp.change("F4", "minor"), or a list of notes. */
+    change(chord, kind, o = {}) {
+      if (kind && typeof kind === 'object') { o = kind; kind = undefined }
+      this.o = { ...this.o, ...o }
+      command({ op: 'voice', id: this.synth, h: this.h, arp: arpOf(chordOf(chord, kind, 'change'), this.root, this.o, 'change'), t: when(o, 'change') })
+      this.now = [chord, kind]
+      return this
+    }
+    set chord(chord) { this.change(chord) }
+    set speed(speed) { this.change(...this.now, { speed }) }
+    set order(order) { this.change(...this.now, { order }) }
+  }
+
   /** A tune that is playing: what playNotes() gives back. */
   class Tune {
     constructor(id) { this.id = id }
@@ -1343,7 +1608,7 @@ export function createSound(options = {}) {
         if (/^[-._~]*$/.test(what)) what = null
         else if (what.includes('+')) what = what.split('+')
       }
-      if (what !== null && what !== undefined) steps.push([at * step, noteNumbers(what), long * step * hold, vel])
+      if (what !== null && what !== undefined) steps.push([at * step, notesOf(what), long * step * hold, vel])
       at += long
     }
     return { steps, length: at * step }
@@ -1356,12 +1621,13 @@ export function createSound(options = {}) {
       this._patch = patch
       this._note = note
       this._length = length
+      this._held = new Map()
     }
 
     /** play(note, length, volume) or play(note, { length, volume, pan, after, at, beat }). No note: the synth's own. */
     play(...args) {
       const o = choices(args, ['note', 'length', 'volume'])
-      const c = { op: 'note', id: this._id, note: o.note === undefined || o.note === null ? null : noteNumbers(o.note), len: o.length === null ? null : o.length === undefined ? this._length : seconds(o.length, 'play: the length'), t: when(o, 'play') }
+      const c = { op: 'note', id: this._id, note: o.note === undefined || o.note === null ? null : notesOf(o.note), len: o.length === null ? null : o.length === undefined ? this._length : seconds(o.length, 'play: the length'), t: when(o, 'play') }
       if (o.volume !== undefined) c.vel = amount(o.volume, 'play: volume')
       if (o.pan !== undefined) c.pan = amount(o.pan, 'play: pan', -1, 1)
       command(c)
@@ -1372,7 +1638,7 @@ export function createSound(options = {}) {
     start(...args) {
       const o = choices(args, ['note', 'volume'])
       const h = (handles = handles >= 0x7ffffff0 ? 1 : handles + 1)
-      const c = { op: 'note', id: this._id, note: o.note === undefined || o.note === null ? null : noteNumbers(o.note), len: null, h, t: when(o, 'start') }
+      const c = { op: 'note', id: this._id, note: o.note === undefined || o.note === null ? null : notesOf(o.note), len: null, h, t: when(o, 'start') }
       if (o.volume !== undefined) c.vel = amount(o.volume, 'start: volume')
       if (o.pan !== undefined) c.pan = amount(o.pan, 'start: pan', -1, 1)
       command(c)
@@ -1382,7 +1648,7 @@ export function createSound(options = {}) {
     /** Let go of every note of this synth, or of one note: lead.stop("C4"). */
     stop(note) {
       const c = { op: 'off', id: this._id, t: clock() }
-      if (note !== undefined) c.note = noteNumbers(note)
+      if (note !== undefined) c.note = notesOf(note)
       command(c)
       return this
     }
@@ -1400,8 +1666,83 @@ export function createSound(options = {}) {
     }
     play_notes(...args) { return this.playNotes(...args) }
 
-    /** Change several settings at once: lead.set({ cutoff: 800, resonance: 0.4 }), and { glide: seconds } to slide there. */
+    /**
+     * A chord from one voice, as a fast arpeggio: the sound of a C64 tune. lead.arp("Cm7"), lead.arp("C4", "minor"),
+     * lead.arp(["C4", "E4", "G4"]), then a length in seconds (half a second unless you say) and
+     * { speed: steps a second (50), order: "up" | "down" | "up-down" | "as written" | "random", volume, pan, after }.
+     */
+    arp(...args) { return this._arp(args, 'arp', 0.5) }
+    /** The same, staying until it is stopped: `const chord = lead.startArp("Am")`, `chord.change("F")`, `chord.stop()`. */
+    startArp(...args) { return this._arp(args, 'startArp', null) }
+    start_arp(...args) { return this.startArp(...args) }
+    _arp(args, said, usual) {
+      const { chord, kind, length, o } = arpArgs(args)
+      const notes = chordOf(chord, kind, said)
+      const h = (handles = handles >= 0x7ffffff0 ? 1 : handles + 1)
+      const c = { op: 'note', id: this._id, note: [notes[0]], len: length === undefined ? usual : length === null ? null : seconds(length, `${said}: the length`), h, arp: arpOf(notes, notes[0], o, said), t: when(o, said) }
+      if (o.volume !== undefined) c.vel = amount(o.volume, `${said}: volume`)
+      if (o.pan !== undefined) c.pan = amount(o.pan, `${said}: pan`, -1, 1)
+      command(c)
+      const arp = new Arp(this._id, h, notes[0], { speed: o.speed, order: o.order })
+      arp.now = [chord, kind]
+      return arp
+    }
+
+    /**
+     * A step macro: a short list of steps that every note of this synth plays through, fifty a second (the setting
+     * `macroRate`), each changing the wave, pitch, pulse width, cutoff or volume. It is what makes chip drums.
+     * lead.setMacro([{ wave: "noise", pitch: 24 }, { wave: "square" }, { pitch: -5, volume: 0.8 }]), and null takes it away.
+     * { steps, loop: true, slide: true, release: a step } says more.
+     */
+    setMacro(macro) {
+      macroOf(macro, true, 'setMacro')
+      command({ op: 'macro', id: this._id, macro: macro ?? null, t: clock() })
+      return this
+    }
+    set_macro(macro) { return this.setMacro(macro) }
+
+    // --- what a dial, a keyboard, a scope and a meter look for (controls.js binds to anything that has these)
+
+    /** The value of a setting: lead.get("cutoff"). */
+    get(name) {
+      const entry = setting(name)
+      if (!entry) throw new Error(`get: there is no setting called ${shown(name)}.${meant(String(name), namesToShow)}`)
+      const value = (this._patch.has(entry.id) ? this._patch.get(entry.id) : entry.def) / entry.scale
+      return entry.kind === 'c' ? entry.choices[value] : entry.kind === 'b' ? value === 1 : value
+    }
+    /** What a setting is: { name, min, max, default, unit, kind, choices }, for a control that takes its range from it. */
+    describe(name) {
+      const entry = setting(name)
+      if (!entry) return null
+      const def = (this._patch.has(entry.id) ? this._patch.get(entry.id) : entry.def) / entry.scale
+      return { name: entry.name, kind: KINDS[entry.kind], min: entry.min / entry.scale, max: entry.max / entry.scale, default: entry.kind === 'c' ? entry.choices[def] : def,
+        unit: entry.scale === 12 ? 'octaves' : entry.unit, ...(entry.choices ? { choices: [...entry.choices] } : {}) }
+    }
+    /** A key goes down, and comes up: what a keyboard plays. The note stays until its noteOff. */
+    noteOn(note, velocity = 0.8) {
+      const n = noteNumber(note)
+      this._held.get(n)?.stop()
+      this._held.set(n, this.start(n, amount(velocity, 'noteOn: velocity')))
+      return this
+    }
+    noteOff(note) {
+      const n = noteNumber(note)
+      this._held.get(n)?.stop()
+      this._held.delete(n)
+      return this
+    }
+    note_on(note, velocity) { return this.noteOn(note, velocity) }
+    note_off(note) { return this.noteOff(note) }
+    /** The wave this synth is making now, numbers from -1 to 1: a scope draws it. */
+    samples() { return (transport?.read?.(this._id) || NOTHING).samples }
+    /** How loud this synth is now, [left, right], each from 0 to 1: a meter shows it. */
+    level() { return (transport?.read?.(this._id) || NOTHING).level }
+    /** The notes this synth is sounding now, as numbers: a keyboard lights them. */
+    notes() { return (transport?.read?.(this._id) || NOTHING).notes }
+
+    /** Change several settings at once: lead.set({ cutoff: 800, resonance: 0.4 }), and { glide: seconds } to slide there. Or one: lead.set("cutoff", 800). */
     set(given, o = {}) {
+      if (typeof given === 'string') return this.set({ [given]: o })
       if (!given || typeof given !== 'object') throw new Error(`set needs settings in braces, as in set({ cutoff: 800 }), not ${shown(given)}`)
       patchOf(given, 'set', true, this._patch, () => 0)
       const c = { op: 'set', id: this._id, set: sendable(given), t: when(o, 'set') }
@@ -1422,12 +1763,10 @@ export function createSound(options = {}) {
   const asSynth = (synth) => new Proxy(synth, {
     get(target, name, self) {
       if (typeof name !== 'string' || name in target) return Reflect.get(target, name, target)
-      const entry = setting(name)
-      if (!entry) return undefined
-      const value = (target._patch.has(entry.id) ? target._patch.get(entry.id) : entry.def) / entry.scale
-      return entry.kind === 'c' ? entry.choices[value] : entry.kind === 'b' ? value === 1 : value
+      return setting(name) ? target.get(name) : undefined
     },
     set(target, name, value) {
+      if (name === 'macro') { target.setMacro(value); return true }
       if (typeof name !== 'string' || name in target) return Reflect.set(target, name, value, target)
       if (!setting(name)) {
         const near = nearest(name, namesToShow)
@@ -1449,6 +1788,9 @@ export function createSound(options = {}) {
     }
     if (typeof o.preset === 'string') preset = o.preset
     delete o.preset
+    const macro = o.macro
+    delete o.macro
+    macroOf(macro, true, 'makeSynth')
     const names = Object.keys(PRESETS).filter((n) => n !== 'sample')
     if (preset !== null && !PRESETS[preset]) throw new Error(`makeSynth(${shown(preset)}): there is no synth called ${shown(preset)}.${meant(preset, names)} The synths are: ${names.join(', ')}`)
     const said = `makeSynth(${preset ? shown(preset) : ''})`
@@ -1457,6 +1799,7 @@ export function createSound(options = {}) {
     const c = { op: 'synth', id, t: clock() }
     if (preset) c.preset = preset
     if (Object.keys(o).length) c.set = sendable(o)
+    if (macro !== undefined) c.macro = macro
     command(c)
     return asSynth(new Synth(id, patch, (preset && PRESETS[preset].note) || 60, 0.3))
   }
@@ -1495,6 +1838,26 @@ export function createSound(options = {}) {
 
   function playNotes(...args) { return mainSynth().playNotes(...args) }
 
+  // Arpeggios with no synth named are played on a plain square wave, as a sound chip would.
+  let chip = null
+  const arpSynth = () => chip || (chip = makeSynth('chip'))
+
+  /** Everything that is sounding, as a target for a scope, a meter and dials for the volume and the shared effects. */
+  let volumeNow = 1
+  const output = {
+    samples: () => (transport?.read?.() || NOTHING).samples,
+    level: () => (transport?.read?.() || NOTHING).level,
+    notes: () => (transport?.read?.() || NOTHING).notes,
+    describe(name) {
+      if (key(name) === 'volume') return { name: 'volume', kind: 'float', min: 0, max: 2, default: 1, unit: 'gain' }
+      const entry = setting(name)
+      return entry && !entry.part ? { name: entry.name, kind: KINDS[entry.kind], min: entry.min, max: entry.max, default: entry.def, unit: entry.unit, ...(entry.choices ? { choices: [...entry.choices] } : {}) } : null
+    },
+    get(name) { return key(name) === 'volume' ? volumeNow : effects.has(key(name)) ? effects.get(key(name)) : setting(name)?.def },
+    set(name, value) { if (key(name) === 'volume') api.setVolume(value); else api.setEffects({ [name]: value }) },
+  }
+  const effects = new Map()
+
   function playSound(...args) {
     const o = choices(args, ['name', 'volume'])
     const name = o.name
@@ -1523,11 +1886,19 @@ export function createSound(options = {}) {
 
   const api = {
     playSound, playNote, playNotes, makeSynth, loadSample, playSong,
+    /** A chord as a fast arpeggio on a chip sound: playArp("Cm7"), playArp("C4", "minor", 1, { speed: 30, order: "down" }). */
+    playArp(...args) { return arpSynth().arp(...args) },
+    /** The same, staying until it is stopped, and able to change chord: `const chord = startArp("Am")`, `chord.change("F")`. */
+    startArp(...args) { return arpSynth().startArp(...args) },
+    /** The synth that playNote and playNotes use: change it (`mainSynth().cutoff = 900`), or tie a keyboard to it. */
+    mainSynth,
+    /** All the sound together: soundOutput().samples() for a scope, .level() for a meter, .notes() for lit keys. */
+    soundOutput: () => output,
     stopSong() { command({ op: 'song', do: 'stop', t: clock() }) },
     /** Stop everything that is sounding or waiting to sound. Synths and their settings stay. */
     stopSound() { command({ op: 'stop', t: clock() }) },
     /** How loud everything is: 1 is normal, 0 is silent, 2 is twice as loud. */
-    setVolume(v) { command({ op: 'master', volume: amount(v, 'setVolume', 0, 4), t: clock() }) },
+    setVolume(v) { volumeNow = amount(v, 'setVolume', 0, 4); command({ op: 'master', volume: volumeNow, t: clock() }) },
     muteSound(on = true) { command({ op: 'master', mute: !!on, t: clock() }) },
     unmuteSound() { command({ op: 'master', mute: false, t: clock() }) },
     /** The effects every synth shares: setEffects({ echoTime: 0.3, echoFeedback: 0.5, reverbSize: 0.8 }). */
@@ -1535,6 +1906,7 @@ export function createSound(options = {}) {
       if (!given || typeof given !== 'object') throw new Error(`setEffects needs settings in braces, as in setEffects({ echoTime: 0.3 }), not ${shown(given)}`)
       const patch = patchOf(given, 'setEffects', true)
       for (const pid of patch.keys()) if (pid < 200) throw new Error(`setEffects is for the effects every synth shares: ${namesToShow.filter((n) => !setting(n).part).join(', ')}. A synth's own settings are set on the synth, as in lead.echo = 0.4`)
+      for (const [name, value] of Object.entries(given)) effects.set(key(name), value)
       command({ op: 'master', set: given, t: clock() })
     },
     /** How fast the beat is, in beats a minute. Beat 0 is now. */
@@ -1587,9 +1959,9 @@ export function configure(options = {}) {
 export function describe() {
   return {
     version, commands: COMMANDS, engine: ENGINE,
-    settings: PARAMS.map(([id, name, kind, min, max, def, choices]) => ({ id, name, kind: { f: 'float', i: 'int', b: 'bool', c: 'choice' }[kind], min, max, default: def, ...(choices ? { choices } : {}), scope: id < 200 ? 'synth' : 'all' })),
+    settings: PARAMS.map(([id, name, kind, min, max, def, unit, choices]) => ({ id, name, kind: KINDS[kind], min, max, default: def, unit, ...(choices ? { choices } : {}), scope: id < 200 ? 'synth' : 'all' })),
     names: Object.fromEntries(Object.entries(ALIASES).map(([alias, to]) => [alias, Array.isArray(to) ? { setting: to[0], scale: to[1] } : { setting: to, scale: 1 }])),
-    choiceWords: CHOICE_WORDS, plain: PLAIN, synths: PRESETS, sounds: SOUNDS,
+    choiceWords: CHOICE_WORDS, plain: PLAIN, synths: PRESETS, sounds: SOUNDS, chords: CHORDS, orders: ORDERS, macroWaves: MACRO_WAVES,
   }
 }
 
@@ -1601,6 +1973,10 @@ export function settingNames() { allSettings(); return [...namesToShow] }
 export const playSound = (...a) => mine().playSound(...a)
 export const playNote = (...a) => mine().playNote(...a)
 export const playNotes = (...a) => mine().playNotes(...a)
+export const playArp = (...a) => mine().playArp(...a)
+export const startArp = (...a) => mine().startArp(...a)
+export const mainSynth = () => mine().mainSynth()
+export const soundOutput = () => mine().soundOutput()
 export const makeSynth = (...a) => mine().makeSynth(...a)
 export const loadSample = (...a) => mine().loadSample(...a)
 export const playSong = (...a) => mine().playSong(...a)
@@ -1621,5 +1997,6 @@ export {
   playSong as play_song, stopSong as stop_song, stopSound as stop_sound, setVolume as set_volume, muteSound as mute_sound,
   unmuteSound as unmute_sound, setEffects as set_effects, setTempo as set_tempo, soundTime as sound_time,
   soundNames as sound_names, synthNames as synth_names, settingNames as setting_names, noteNumber as note_number,
-  createSound as create_sound, renderSound as render_sound,
+  createSound as create_sound, renderSound as render_sound, playArp as play_arp, startArp as start_arp, mainSynth as main_synth,
+  soundOutput as sound_output, chordNotes as chord_notes,
 }

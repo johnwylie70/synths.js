@@ -29,7 +29,7 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
   const outRoom = x.synths_output_capacity()
   const NOTE_ON = 1, NOTE_OFF = 2, ALL_OFF = 3, EVERY = 0xffff
 
-  /** Events not yet handed to the engine: [frame, type, part, a, x, y], soonest first. */
+  /** Events not yet handed to the engine: [frame, type, part, a, x, y, z, b], soonest first. */
   const queue = []
   /** Tunes that are playing: id -> { part, steps, length, start, cycle, i, repeat }. */
   const tunes = new Map()
@@ -47,6 +47,7 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
     voices: () => x.synths_active_voices(engine),
     exec,
     render,
+    taps,
     close() { x.synths_destroy(engine) },
   }
 
@@ -54,14 +55,14 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
   // that arrive late keep the order they were asked in.
   const frameOf = (seconds) => (seconds == null ? core.time : Math.max(core.time, Math.round(seconds * sampleRate + core.delta)))
 
-  function add(frame, type, part, a, xv, y) {
+  function add(frame, type, part, a, xv, y, z, b) {
     let low = 0, high = queue.length
     while (low < high) {
       const mid = (low + high) >> 1
       if (queue[mid][0] <= frame) low = mid + 1
       else high = mid
     }
-    queue.splice(low, 0, [frame, type, part, a, xv, y])
+    queue.splice(low, 0, [frame, type, part, a, xv, y, z || 0, b || 0])
   }
 
   function exec(ops) {
@@ -71,8 +72,8 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
         // A note that reaches this thread more than a quarter of a second after it was due is not started:
         // a page that was stuck would otherwise have all its late notes at once.
         if (op[2] === NOTE_ON && op[1] != null && op[1] * sampleRate + core.delta < core.time - sampleRate / 4) continue
-        add(frameOf(op[1]), op[2], op[3], op[4], op[5], op[6] || 0)
-      }
+        add(frameOf(op[1]), op[2], op[3], op[4], op[5], op[6] || 0, op[7], op[8])
+      } else if (kind === 'macro') setMacro(op)
       else if (kind === 'sample') loadSample(op)
       else if (kind === 'unsample') x.synths_sample_free(engine, op[1])
       else if (kind === 'tune') {
@@ -102,6 +103,40 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
     const ok = x.synths_sample_load(engine, slot, at, frames, channels, rate)
     x.synths_free(at)
     if (ok === 0) x.synths_sample_config(engine, slot, base, loopMode, loopStart, loopEnd || frames)
+  }
+
+  // A part's step macro: [, part, the steps' numbers (five a step), count, loop start, loop end, release, flags].
+  function setMacro([, part, flat, count, loopStart, loopEnd, release, flags]) {
+    if (!x.synths_macro_set) return post({ type: 'unsupported', what: 'macro' })
+    if (!count) return x.synths_macro_set(engine, part, 0, 0, 0, 0, 255, 0)
+    const at = x.synths_alloc(flat.length * 4)
+    if (!at) return
+    new Float32Array(memory.buffer, at, flat.length).set(flat)
+    x.synths_macro_set(engine, part, at, count, loopStart, loopEnd, release, flags)
+    x.synths_free(at)
+  }
+
+  /**
+   * WHAT IS SOUNDING, for a display: for each source (a part, or 65535 for everything) its latest `frames` samples,
+   * its peak level left and right, and the notes sounding as four words of bits. The engine keeps these as it
+   * renders; reading them costs the sound nothing. An engine without them gives an empty list.
+   */
+  let tapAt = 0
+  function taps(sources, frames) {
+    if (!x.synths_scope_read || !x.synths_levels_read || !x.synths_notes_read) return []
+    if (!tapAt) tapAt = x.synths_alloc(4096 * 4)
+    if (!tapAt) return []
+    const out = []
+    for (const source of sources) {
+      const n = x.synths_scope_read(engine, source, tapAt, Math.min(frames, 4096))
+      const samples = new Float32Array(memory.buffer, tapAt, n).slice()
+      x.synths_levels_read(engine, source, 1, tapAt)
+      const levels = new Float32Array(memory.buffer, tapAt, 4)
+      const peakLeft = levels[0], peakRight = levels[1]
+      x.synths_notes_read(engine, source, tapAt)
+      out.push([source, samples, peakLeft, peakRight, new Uint32Array(memory.buffer, tapAt, 8).slice(4)])
+    }
+    return out
   }
 
   // Put the notes of every tune that fall before `end` into the queue.
@@ -137,8 +172,8 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
         events.setUint32(at + 12, e[3], true)
         events.setFloat32(at + 16, e[4], true)
         events.setFloat32(at + 20, e[5], true)
-        events.setFloat32(at + 24, 0, true)
-        events.setUint32(at + 28, 0, true)
+        events.setFloat32(at + 24, e[6], true)
+        events.setUint32(at + 28, e[7], true)
         n++
       }
       const taken = x.synths_push_events(engine, n)
@@ -175,6 +210,11 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
       super()
       this.core = null
       this.over = false
+      // A page that is drawing a scope or a meter says which sources it is watching, and goes on saying so;
+      // while it does, what they are doing is posted to it about 40 times a second. Unwatched, nothing is posted.
+      this.watch = null
+      this.watchFor = 0
+      this.blocks = 0
       this.port.onmessage = (m) => {
         const core = this.core
         if (!core) return
@@ -188,6 +228,10 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
         if (m.data.ops) {
           core.delta = core.time - currentFrame
           core.exec(m.data.ops)
+        }
+        if (m.data.watch) {
+          this.watch = m.data.watch
+          this.watchFor = Math.ceil(sampleRate * 1.5 / 128)
         }
         if (m.data.ask) this.port.postMessage({ type: 'state', ask: m.data.ask, voices: core.voices(), time: core.time, frame: currentFrame })
       }
@@ -206,6 +250,10 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
       if (!out || !out[0]) return true
       core.delta = core.time - currentFrame
       core.render(out[0], out[1], out[0].length)
+      if (this.watch && (++this.blocks & 7) === 0) {
+        if ((this.watchFor -= 8) <= 0) this.watch = null
+        else this.port.postMessage({ type: 'taps', taps: core.taps(this.watch, 1024) })
+      }
       return true
     }
   })
