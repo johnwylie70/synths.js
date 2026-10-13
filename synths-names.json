@@ -29,7 +29,10 @@
    "arp_style",
    "arp_beat",
    "arp_notes",
-   "arp_step"
+   "arp_step",
+   "arp_pattern",
+   "clock",
+   "voice_vibrato"
   ]
  },
  "settings": [
@@ -1120,6 +1123,66 @@
    "scope": "synth"
   },
   {
+   "id": 90,
+   "name": "gate.depth",
+   "kind": "float",
+   "min": 0,
+   "max": 1,
+   "default": 0,
+   "unit": "",
+   "scope": "synth"
+  },
+  {
+   "id": 91,
+   "name": "gate.rate",
+   "kind": "float",
+   "min": 0.25,
+   "max": 16,
+   "default": 4,
+   "unit": "steps",
+   "scope": "synth"
+  },
+  {
+   "id": 92,
+   "name": "gate.smooth",
+   "kind": "float",
+   "min": 0.001,
+   "max": 0.5,
+   "default": 0.008,
+   "unit": "seconds",
+   "scope": "synth"
+  },
+  {
+   "id": 93,
+   "name": "gate.swing",
+   "kind": "float",
+   "min": 0,
+   "max": 0.75,
+   "default": 0,
+   "unit": "",
+   "scope": "synth"
+  },
+  {
+   "id": 94,
+   "name": "gate.sends",
+   "kind": "bool",
+   "min": 0,
+   "max": 1,
+   "default": 1,
+   "unit": "",
+   "scope": "synth"
+  },
+  {
+   "id": 95,
+   "name": "gate.stereo",
+   "kind": "bool",
+   "min": 0,
+   "max": 1,
+   "default": 0,
+   "unit": "",
+   "scope": "synth"
+  },
+  {
    "id": 200,
    "name": "master.volume",
    "kind": "float",
@@ -1340,6 +1403,26 @@
    "max": 999,
    "default": 120,
    "unit": "bpm",
+   "scope": "all"
+  },
+  {
+   "id": 225,
+   "name": "reverb.level",
+   "kind": "float",
+   "min": 0,
+   "max": 2,
+   "default": 1,
+   "unit": "gain",
+   "scope": "all"
+  },
+  {
+   "id": 226,
+   "name": "delay.level",
+   "kind": "float",
+   "min": 0,
+   "max": 2,
+   "default": 1,
+   "unit": "gain",
    "scope": "all"
   }
  ],

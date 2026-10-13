@@ -796,8 +796,27 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
   say(one.get('cutoff') === 200 && two.get('cutoff') === 8000 && player.target('song:lead').get('cutoff') === 200 && player.target('song:lead#2').get('cutoff') === 8000 && one.level()[0] > 0 && two.level()[0] > one.level()[0],
     'two instruments that give one name to synths that differ each keep their own: "song:ins:1" and "song:ins:2" read them by number, and the second is the brighter', [one.get('cutoff'), two.get('cutoff'), one.level(), two.level()])
   const beep = song.channel(2), none = song.channel(7)
-  say(beep.samples().length === 1024 && peak(beep.samples()) > 0.01 && beep.level()[0] > 0.01 && same(player.read('song:channel:2').notes.length > 0, true) && same([none.samples().length, none.level()], [0, [0, 0]]) && peak(song.channel(0).samples()) === 0,
-    'song.channel(2) reads a channel that plays a sample (its wave and level); a channel the song has not got reads nothing, and one that plays a synth is read at the synth', [peak(beep.samples()), beep.level(), none.level()])
+  say(beep.samples().length === 1024 && peak(beep.samples()) > 0.01 && beep.level()[0] > 0.01 && same(player.read('song:channel:2').notes.length > 0, true) && same([none.samples().length, none.level()], [0, [0, 0]]) && song.channel(0).level()[0] > 0.01 && song.channel(1).level()[0] > song.channel(0).level()[0] && peak(song.channel(0).samples()) === 0,
+    'song.channel(n).level() is what is heard on a channel whichever kind of instrument plays it: the two channels that play synths read their own levels (the brighter the louder) and the one that plays a sample its own; a channel the song has not got reads nothing; a synth\'s wave and notes are read at the synth', [peak(beep.samples()), beep.level(), song.channel(0).level(), song.channel(1).level(), none.level()])
+  // A song whose channels all play synths, as most chiptunes do, and one that changes instrument on a channel.
+  {
+    const chip = { format: 'synths-song', version: 1, speed: 6, tempo: 125, channels: 3, order: [0],
+      patterns: [{ rows: 16, events: [{ row: 0, ch: 0, note: 'C-3', ins: 1 }, { row: 0, ch: 1, note: 'E-4', ins: 2 }, { row: 8, ch: 2, note: 'G-4', ins: 2 }, { row: 8, ch: 0, note: 'C-4', ins: 3 }] }],
+      instruments: [{ name: 'low', patch: 'bass' }, { name: 'high', patch: 'lead' }, { name: 'beep', sample: 0 }],
+      samples: [{ name: 'square', wave: [100, 100, 100, 100, -100, -100, -100, -100], loop: { start: 0, length: 8 } }] }
+    const player = await createOfflinePlayer()
+    const s = createSound({ sound: player, clock: () => 0 })
+    const song = s.playSong(new TextEncoder().encode(JSON.stringify(chip)), { repeat: false })
+    s.flush()
+    await new Promise((yes) => setTimeout(yes, 30))
+    const levels = () => [0, 1, 2].map((ch) => +song.channel(ch).level()[0].toFixed(3))
+    await player.render(0.3)
+    const early = [levels(), peak(song.channel(0).samples())]
+    await player.render(0.95)
+    const late = [levels(), peak(song.channel(0).samples()), player.read('song:ins:1').level[0] > 0]
+    say(early[0][0] > 0.01 && early[0][1] > 0.01 && early[0][2] === 0 && early[1] === 0 && late[0][0] > 0.01 && late[0][2] > 0.01 && late[1] > 0.01,
+      'in a song whose channels play synths every channel\'s level moves with its own notes (the third reads nothing until its first note), and a channel that goes from a synth to a sample is followed: its wave is read once it plays the sample', [early, late])
+  }
 }
 
 // --- the commands are the contract
@@ -1089,6 +1108,9 @@ say(/"H4" is not a note\. Write a note as a name like "C4"/.test(thrown(() => no
   far.flush()
   await player.render(0.01)
   const got = [lead.describe('reverbDecay'), s.soundOutput().describe('reverbDecay'), player.target(synth._id).describe('reverbDecay'), mic.describe('gate'), lead.describe('reverbPredelay'), lead.describe('cutoff')]
+  const waves = [lead.describe('wave'), player.target(synth._id).describe('wave'), lead.describe('filter'), s.soundOutput().describe('reverbType'), lead.describe('cutoff')]
+  say(same(waves[0].aliases, { square: 'pulse', sawtooth: 'saw', tri: 'triangle', sin: 'sine' }) && same(waves[1].aliases, waves[0].aliases) && waves[2].aliases.low === 'lowpass' && waves[2].aliases.none === 'off' && waves[3].aliases === undefined && waves[4].aliases === undefined && !waves[0].choices.includes('square'),
+    'describe gives aliases for a choice that may be set by other words (square for pulse, low for lowpass), on a synth and on a player\'s target, and none where there are none', waves)
   const table = describe().settings
   say(got.slice(0, 3).every((d) => d && same(d.labels, { 0: 'auto' }) && d.min === 0) && same(got[3].labels, { '-100': 'off' }) && got[4].labels === undefined && got[5].labels === undefined
     && same(table.find((x) => x.name === 'reverb.decay').labels, { 0: 'auto' }) && same(table.find((x) => x.name === 'input.gate').labels, { '-100': 'off' }),

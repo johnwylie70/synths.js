@@ -566,8 +566,11 @@ Two more ids read a song, both additive:
   `target`, `set`. When two instruments give the same patch name to synths of their own that differ (each with
   its own `synth` in the song), the first has `song:<name>` and each later one `song:<name>#<its number>`.
 - `song:channel:<n>` (from 0) is a channel of the song, one of the engine's parts from 32 up, for
-  `player.read`: the wave, level and notes of what that channel plays from samples. Notes a channel plays on a
-  synth are read at that synth. A channel the song has not got reads as nothing.
+  `player.read`. Its `level` is what is heard on that channel whichever kind of instrument plays it, a sample
+  or a synth patch, and follows a channel that changes instrument. Its `samples` and `notes` are those of the
+  channel's own part, which is what it plays from samples; the wave and notes of a synth instrument are read
+  at `song:ins:<number>`, which is the instrument and not the channel (two channels playing one synth
+  instrument are read there together). A channel the song has not got reads as nothing.
 
 Where the song is comes from the player, like the rest of [reading back](#reading-back):
 `player.songPosition()` gives `{ state: "none" | "stopped" | "playing" | "paused", order, pattern, row, tick,
@@ -714,7 +717,8 @@ second and a half). Before anything has arrived, and for a synth that has no par
 
 `player.target(id)` is a synth that exists by its id, as an object for controls on the player's side to be tied
 to when the program that made it is elsewhere: `set(name, value)`, `get(name)`, `describe(name)` (`{ name, kind,
-min, max, default, unit, choices, labels }`, where `labels` is there for a setting some of whose values mean
+min, max, default, unit, choices, aliases, labels }`, where `aliases` is the other words a choice may be set by
+(`{ square: "pulse" }`) and `labels` is there for a setting some of whose values mean
 something else, as `{ 0: "auto" }` for `reverbDecay`; `voice` is described as a choice and set by name or place), `noteOn(note, velocity)`, `noteOff(note)`, `samples()`, `level()`,
 `notes()`. It writes ordinary commands for that id, and answers `get` and `describe` from the commands the player
 has carried out, so it is told nothing. The sender is not told what a dial changed.

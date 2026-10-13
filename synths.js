@@ -73,7 +73,7 @@ const COMMANDS = 1
 // Each row: id, name, kind (f float, i whole number, b on or off, c a choice), least, most, default, unit, the choices.
 // VOICES are the engine's voice changers: for each, what it is and the settings it gives the part it is put on.
 /* PARAMS:BEGIN */
-const ENGINE = {"abi":1,"version":"0.0.0","parts":64,"voices":64,"samples":1024,"zones":512,"zoneLayers":4,"events":["note_on","note_off","all_notes_off","param","pitch_bend","voice_pitch","voice_freq","voice_volume","voice_pan","voice_position","voice_kill","macro_tick","arp","arp_more","song","record","arp_style","arp_beat","arp_notes","arp_step"]}
+const ENGINE = {"abi":1,"version":"0.0.0","parts":64,"voices":64,"samples":1024,"zones":512,"zoneLayers":4,"events":["note_on","note_off","all_notes_off","param","pitch_bend","voice_pitch","voice_freq","voice_volume","voice_pan","voice_position","voice_kill","macro_tick","arp","arp_more","song","record","arp_style","arp_beat","arp_notes","arp_step","arp_pattern","clock","voice_vibrato"]}
 const PARAMS = [
   [0,"volume","f",0,2,1,"gain"],
   [1,"pan","f",-1,1,0,"pan"],
@@ -177,6 +177,12 @@ const PARAMS = [
   [122,"fx.comb_feedback","f",-0.97,0.97,0.7,""],
   [123,"fx.comb_rate","f",0.01,10,0.3,"hz"],
   [124,"fx.comb_depth","f",0,1,0,""],
+  [90,"gate.depth","f",0,1,0,""],
+  [91,"gate.rate","f",0.25,16,4,"steps"],
+  [92,"gate.smooth","f",0.001,0.5,0.008,"seconds"],
+  [93,"gate.swing","f",0,0.75,0,""],
+  [94,"gate.sends","b",0,1,1,""],
+  [95,"gate.stereo","b",0,1,0,""],
   [200,"master.volume","f",0,2,0.35,"gain"],
   [201,"master.limiter","b",0,1,1,""],
   [202,"delay.time","f",0.001,2,0.3,"seconds"],
@@ -198,6 +204,8 @@ const PARAMS = [
   [222,"reverb.predelay","f",0,0.2,0,"seconds"],
   [223,"reverb.low_cut","f",20,1000,120,"hz"],
   [224,"tempo","f",20,999,120,"bpm"],
+  [225,"reverb.level","f",0,2,1,"gain"],
+  [226,"delay.level","f",0,2,1,"gain"],
 ]
 const VOICES = {"robot":{"help":"A machine: the voice multiplied by a 50 Hz wave, ringing in a metal pipe.","values":{"fx.ring":1,"fx.ring_freq":50,"fx.comb":0.45,"fx.comb_freq":110,"fx.comb_feedback":0.8,"fx.bits":10}},"chipmunk":{"help":"Small and squeaky: everything seven semitones higher.","values":{"fx.pitch":7}},"monster":{"help":"Huge and deep: seven semitones lower, with a growl and a little room.","values":{"fx.pitch":-7,"fx.drive":0.25,"send.reverb":0.3,"reverb.size":0.7,"reverb.damping":0.6}},"cave":{"help":"Far inside a cave: long echoes and an enormous, dark space.","values":{"send.delay":0.5,"send.reverb":0.6,"delay.time":0.38,"delay.feedback":0.55,"delay.tone":2500,"reverb.type":3,"reverb.size":0.4,"reverb.damping":0.55}},"telephone":{"help":"Down an old phone line: only the middle of the voice, coarse and a little crushed.","values":{"filter.type":3,"filter.slope":1,"filter.cutoff":1200,"filter.resonance":0.2,"fx.drive":0.2,"fx.bits":8,"fx.downsample":6}},"alien":{"help":"Not from here: higher, multiplied by a 180 Hz wave, with a slow metallic sweep.","values":{"fx.pitch":4,"fx.ring":0.8,"fx.ring_freq":180,"fx.comb":0.4,"fx.comb_freq":600,"fx.comb_feedback":0.75,"fx.comb_rate":0.4,"fx.comb_depth":0.5,"send.chorus":0.4}},"whisper":{"help":"Hoarse and breathy: the voice's pitch blurred into noise, with its low end taken off.","values":{"filter.type":2,"filter.cutoff":500,"filter.resonance":0,"fx.ring":1,"fx.ring_wave":1,"fx.ring_freq":350}}}
 /* PARAMS:END */
@@ -361,12 +369,14 @@ const setting = (name) => (typeof name === 'string' ? allSettings().get(key(name
 // VALUES THAT MEAN SOMETHING ELSE, by the engine's name of the setting: the text a control shows in place of the
 // number (dials.js reads `labels` from what describe gives). A reverb's decay of 0 is the type's own.
 const LABELS = { 'reverb.decay': { 0: 'auto' }, 'input.gate': { '-100': 'off' } }
+// Other words a choice may be set by (square for pulse), for a control that is handed one to find the choice it means.
+const aliasesOf = (entry) => { if (!entry.choices) return {}; const words = Object.fromEntries(Object.entries(CHOICE_WORDS).filter(([, to]) => entry.choices.includes(to))); return Object.keys(words).length ? { aliases: words } : {} }
 const labelsOf = (entry, scale = entry.scale) => (LABELS[entry.name] ? { labels: Object.fromEntries(Object.entries(LABELS[entry.name]).map(([value, text]) => [value / scale, text])) } : {})
 /** What a setting is, for a control that takes its range from it; `now` is its value in the engine's units, if it is not the default. */
 function describeSetting(entry, now) {
   const value = (now === undefined ? entry.def : now) / entry.scale
   return { name: entry.name, kind: KINDS[entry.kind], min: entry.min / entry.scale, max: entry.max / entry.scale, default: entry.kind === 'c' ? entry.choices[value] : entry.kind === 'b' ? value === 1 : value,
-    unit: entry.scale === 12 ? 'octaves' : entry.unit, ...(entry.choices ? { choices: [...entry.choices] } : {}), ...labelsOf(entry) }
+    unit: entry.scale === 12 ? 'octaves' : entry.unit, ...(entry.choices ? { choices: [...entry.choices] } : {}), ...aliasesOf(entry), ...labelsOf(entry) }
 }
 /** Which setting holds the sample of the oscillator whose wave this is, or null for a setting that is not an oscillator's wave. */
 const sampleOfWave = (entry) => (entry.name === 'osc1.wave' || entry.name === 'osc2.wave' ? setting(entry.name.replace('wave', 'sample')) : null)
@@ -4258,7 +4268,7 @@ export function createSound(options = {}) {
     describe(name) {
       if (key(name) === 'volume') return { name: 'volume', kind: 'float', min: 0, max: 2, default: 1, unit: 'gain' }
       const entry = setting(name)
-      return entry && !entry.part ? { name: entry.name, kind: KINDS[entry.kind], min: entry.min, max: entry.max, default: entry.def, unit: entry.unit, ...(entry.choices ? { choices: [...entry.choices] } : {}), ...labelsOf(entry, 1) } : null
+      return entry && !entry.part ? { name: entry.name, kind: KINDS[entry.kind], min: entry.min, max: entry.max, default: entry.def, unit: entry.unit, ...(entry.choices ? { choices: [...entry.choices] } : {}), ...aliasesOf(entry), ...labelsOf(entry, 1) } : null
     },
     get(name) { const entry = setting(name); return key(name) === 'volume' ? volumeNow : entry && !entry.part ? readSetting(entry, forAll.get(entry.id)) : undefined },
     set(name, value) { if (key(name) === 'volume') api.setVolume(value); else api.setEffects({ [name]: value }) },
