@@ -309,6 +309,21 @@ async function through(input, set, seconds = 1) {
   const hz = [loudest(cut(squeaky, 0.3, 0.9), 100, 500), loudest(cut(plain, 0.3, 0.9), 100, 500), loudest(cut(deep, 0.3, 0.9), 80, 500)]
   say(peak(during) === 0 && near(hz[0], 200 * 2 ** (7 / 12), 2) && near(hz[1], 200, 0.5) && near(hz[2], 200 * 2 ** (-7 / 12), 2), `recorded while muted with the chipmunk voice on, the take plays back as a chipmunk (${hz[0].toFixed(0)} Hz); it is the plain voice underneath (take.voice = "none": ${hz[1].toFixed(0)} Hz) and can be a monster afterwards (${hz[2].toFixed(0)} Hz)`, hz)
 
+  // soundLike: the take as the microphone is now, whatever was chosen and turned since.
+  mic.voice = 'none'
+  mic.pitch = 12
+  take.soundLike(mic).play()
+  const high = await st.go(1.2)
+  mic.voice = 'chipmunk'
+  mic.pitch = -12
+  take.soundLike(mic).play()
+  const low = await st.go(1.5)
+  mic.voice = 'none'
+  take.soundLike(mic).play()
+  const again = await st.go(1.2)
+  const like = [loudest(cut(high, 0.3, 0.9), 100, 500), loudest(cut(low, 0.3, 0.9), 80, 500), loudest(cut(again, 0.3, 0.9), 100, 500)]
+  say(near(like[0], 400, 2) && near(like[1], 100, 1) && near(like[2], 400, 2) && take.voice === 'none' && take.get('pitchShift') === 12 && mic.pitch === 12, `take.soundLike(mic) gives the take the microphone's voice and dials as they are now: an octave up (${like[0].toFixed(0)} Hz), a chipmunk turned an octave down (${like[1].toFixed(0)} Hz), and with the voice taken off, the octave up it had before (${like[2].toFixed(0)} Hz)`, like)
+
   // With effects: true and the microphone listened to, the changed voice itself is recorded.
   const st2 = await studio({ microphone: tone(200, 4) })
   const mic2 = st2.s.useMicrophone({ gate: 'off', voice: 'chipmunk', listen: true })

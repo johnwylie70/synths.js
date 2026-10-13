@@ -2026,10 +2026,14 @@ function micSide(hooks) {
     if (why) tell(why)
     say(null)
     knows.add(asker)
+    if (now === 'on' && listened) howl()
     const kept = waiting
     waiting = []
     for (const [c, at, scope] of kept) if (take(c, scope)) hooks.run(c, at, scope)
   }
+  // Said once, when a real microphone is first listened to.
+  let listened = false
+  const howl = () => { if (hooks.live) tell('the microphone is being listened to. Through loudspeakers that can howl, so headphones are best; mic.mute() stops it.', 'info') }
   let asker = ''
   function open(c, scope) {
     if (state !== 'off') return
@@ -2057,7 +2061,8 @@ function micSide(hooks) {
       }
       if (state === 'off') open(c, scope)
       else if (state !== 'asking' && !knows.has(scope || '')) say(scope)
-      if (c.listen && hooks.live) tell('the microphone is being listened to. Through loudspeakers that can howl, so headphones are best; mic.mute() stops it.', 'info')
+      if (c.listen != null) listened = !!c.listen
+      if (c.listen && state === 'on') howl()
     } else if (c.op === 'record' && c.do !== 'stop' && (c.from === 'mic' || c.from == null)) {
       if (state === 'asking') { waiting.push([c, at, scope]); return false }
       if (state !== 'on') { hooks.emit(scope, [{ type: 'recorded', id: c.id, frames: 0, seconds: 0, full: false }]); return false }
@@ -2931,6 +2936,11 @@ export function createSound(options = {}) {
       this._note = note
       this._length = length
       this._held = new Map()
+      // A voice that is on and what was under it, what the synth had before it was made to sound like another, a sample's loop, and the synth as the program holds it.
+      this._worn = null
+      this._plain = null
+      this._loop = false
+      this._self = null
     }
 
     /** play(note, length, volume) or play(note, { length, volume, pan, after, at, beat }). No note: the synth's own. */
@@ -3061,11 +3071,22 @@ export function createSound(options = {}) {
       command({ op: 'set', id: this._id, voice, t: at })
     }
 
+    /**
+     * Give this the voice and the voice effects of another: take.soundLike(mic) makes a recording sound as the
+     * microphone does now, whatever voice has been chosen and however its dials have been turned since.
+     */
+    soundLike(other) {
+      if (!(other instanceof Synth)) throw new Error(`soundLike needs the microphone or a synth to sound like, as in take.soundLike(mic), not ${shown(other)}`)
+      dressLike(this, other)
+      return this._self || this
+    }
+    sound_like(other) { return this.soundLike(other) }
+
     /** Record what this synth plays into a sample: `const take = lead.record(4)`. On the microphone, it records the microphone. See recordSound. */
     record(...args) { return recordFrom({ ...choices(args, ['length']), from: this._self || this }, 'record') }
 
     /** A sample or a recording that goes round and round while its note is held: drum.loop = true, or [first frame, the frame after the last]. */
-    get loop() { return this._loop ?? false }
+    get loop() { return this._loop }
     set loop(on) {
       this._loop = Array.isArray(on) ? on : !!on
       if (this._sample) command({ op: 'sample', id: this._sample, loop: this._loop, t: clock() })
@@ -3372,18 +3393,26 @@ export function createSound(options = {}) {
     if (!settingName) settingName = new Map(PARAMS.map((p) => [p[0], p[1]]))
     return Object.fromEntries(list.map(([pid, value]) => [settingName.get(pid), value]))
   }
-  // A recording of the plain microphone is given the voice the microphone has, so it plays back as it was heard:
-  // what was set before any voice, the voice, and what was turned after it.
-  function dressLike(take, from) {
+  // One synth is given the voice and the voice effects of another, as ordinary commands: what the other had before
+  // any voice, its voice, and what was turned after that. So a recording of the plain microphone plays back as the
+  // microphone sounds, and both sides of the commands still agree on what "none" puts back.
+  function dressLike(synth, from) {
     const part = [...voices().all].filter((pid) => pid < 200)
-    const worn = from._worn
-    if (worn && worn.under) {
-      const under = part.filter((pid) => worn.under.has(pid)).map((pid) => [pid, worn.under.get(pid)])
-      if (under.length) take.set(named(under))
-      take.voice = worn.voice
+    const now = (pid) => (synth._patch.has(pid) ? synth._patch.get(pid) : engineDefault(pid))
+    if (synth.voice !== 'none') synth.voice = 'none'
+    // What it had before it was first dressed is what a setting goes back to when the other has nothing to say.
+    if (!synth._plain) synth._plain = new Map(part.map((pid) => [pid, now(pid)]))
+    const send = (has, get) => {
+      const list = part.map((pid) => [pid, has(pid) ? get(pid) : synth._plain.get(pid)]).filter(([pid, value]) => value !== now(pid))
+      if (list.length) synth.set(named(list))
     }
-    const differs = part.filter((pid) => from._patch.has(pid) && from._patch.get(pid) !== (take._patch.has(pid) ? take._patch.get(pid) : engineDefault(pid))).map((pid) => [pid, from._patch.get(pid)])
-    if (differs.length) take.set(named(differs))
+    const under = from._worn && from._worn.under
+    if (under) {
+      send((pid) => under.has(pid), (pid) => under.get(pid))
+      synth.voice = from._worn.voice
+      const list = part.filter((pid) => from._patch.has(pid) && from._patch.get(pid) !== now(pid)).map((pid) => [pid, from._patch.get(pid)])
+      if (list.length) synth.set(named(list))
+    } else send((pid) => from._patch.has(pid), (pid) => from._patch.get(pid))
   }
   // What recordSound, recordOutput, startRecording and a synth's record() all do.
   function recordFrom(o, said) {

@@ -33,6 +33,7 @@ import * as synths from "../synths.js"
 const EXAMPLES = [
   ["hello.js", "Hello"], ["melody.js", "Melody"], ["game_sounds.js", "Game sounds"], ["my_synth.js", "My synth"], ["drum_beat.js", "Drum beat"],
   ["arpeggio.js", "Arpeggio"], ["song.js", "Song"], ["samples.js", "Samples"], ["theremin.js", "Theremin"], ["catch_game.js", "Catch"], ["synth_panel.js", "Synth panel"],
+  ["voice_changer.js", "Voice changer"], ["sampler.js", "Sampler"], ["record_tune.js", "Record a tune"],
   ["midi_keyboard.js", "MIDI keyboard"], ["midi_scene.js", "MIDI scene"], ["midi_sequencer.js", "MIDI sequencer"], ["midi_dials.js", "MIDI dials"],
 ]
 const query = new URLSearchParams(location.search)
@@ -50,6 +51,7 @@ async function run(file) {
   running = null
   synths.stopSound()
   synths.stopMidi()
+  synths.stopMicrophone()
   scene.style.display = "none"
   const source = await (await fetch(file)).text()
   code.textContent = source
@@ -75,7 +77,7 @@ for (const [file, title] of EXAMPLES) {
 }
 const stop = document.createElement("button")
 stop.textContent = "Stop"
-stop.onclick = () => { running?.stop(); running = null; synths.stopSound(); synths.stopMidi() }
+stop.onclick = () => { running?.stop(); running = null; synths.stopSound(); synths.stopMidi(); synths.stopMicrophone() }
 buttons.append(stop)
 
 // ?run=hello.js runs one straight away, filling the page (sound still waits for the first tap, as browsers insist).

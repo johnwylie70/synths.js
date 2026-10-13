@@ -46,7 +46,7 @@ const say = (ok, engine, what, got) => {
 }
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
-// ONLY=midi runs the MIDI cases alone, and ONLY=examples the examples.
+// ONLY=midi runs the MIDI cases alone, ONLY=voice the microphone's, and ONLY=examples the examples.
 const ONLY = process.env.ONLY
 
 // Helpers every test page is given, as window.T.
@@ -465,7 +465,10 @@ async function examples(name, browser) {
   if (name === 'chromium') await letWorkletsRun(page)
   const errors = []
   page.on('pageerror', (e) => errors.push(e.message))
-  page.on('console', (m) => { if (m.type() === 'error' || /synths\.js: .*(could not|no sound)/.test(m.text())) errors.push(m.text()) })
+  // There is no microphone here, and the examples that use one are expected to say so and carry on.
+  page.on('console', (m) => { if (m.type() === 'error' || (/synths\.js: .*(could not|no sound)/.test(m.text()) && !/microphone/.test(m.text()))) errors.push(m.text()) })
+  const noMic = []
+  page.on('console', (m) => { if (/synths\.js: .*microphone/.test(m.text())) noMic.push(m.text()) })
   const files = (await readdir(join(ROOT, 'examples'))).filter((f) => f.endsWith('.js')).sort()
   let heard = 0
   const silent = []
@@ -491,9 +494,12 @@ async function examples(name, browser) {
     await page.mouse.up()
     await page.keyboard.up('a')
     if (got.peak > 0.01) heard++
-    else silent.push([file, got])
+    // The voice changer is a microphone and nothing else: with none, silence is right.
+    else if (file !== 'voice_changer.js') silent.push([file, got])
   }
-  say(silent.length === 0 && errors.length === 0 && heard >= 8, name, `all ${heard} examples are heard, with no error`, { silent, errors })
+  say(silent.length === 0 && errors.length === 0 && heard >= 8, name, `all ${heard} examples are heard, with no error (the sampler plays its bell and the voice changer is silent, there being no microphone)`, { silent, errors })
+  if (!noMic.length) console.log(`     ${name}: the browser here never answers when asked for a microphone, so the examples that want one say nothing and carry on`)
+  else say(noMic.every((t) => /Everything else carries on/.test(t)), name, 'and the examples that want a microphone say why there is none here, and carry on', noMic)
   await context.close()
 }
 
@@ -627,6 +633,30 @@ async function notSecure(name, browser) {
     return player.state
   })
   say(refused === 'failed' && said.some((t) => /the sound engine could not start, so there will be no sound \(this page has no audio worklet: it needs an https address, or localhost\)/.test(t)), name, 'with the fallback refused it reports plainly that there will be no sound, and why', { refused, said })
+  // The microphone on such a page: the browser gives none, and says nothing about why, so the library does. A
+  // stream from a host still goes in, through the fallback.
+  await page.evaluate(MIC)
+  said.length = 0
+  const mic = await page.evaluate(async () => {
+    const { createSound } = await import('/synths.js')
+    const s = createSound({ share: false })
+    const none = s.useMicrophone()
+    const take = s.recordSound(0.2)
+    const ready = await none.whenReady()
+    const out = { has: !!navigator.mediaDevices, ready, state: none.state }
+    s.close()
+    const given = createSound({ share: false, microphone: toneStream(400).stream })
+    const mic = given.useMicrophone({ gate: 'off', listen: true })
+    given.flush()
+    for (let i = 0; i < 300 && given.player.state !== 'on'; i++) await T.wait(10)
+    out.given = await mic.whenReady()
+    await T.wait(300)
+    out.kind = given.player.kind
+    out.heard = await T.listen(given.player, 500)
+    return out
+  })
+  say(mic.ready === false && mic.state === 'unavailable' && said.filter((t) => /microphone/.test(t) && !/howl/.test(t)).length === 1 && said.some((t) => /cannot use the microphone, because that needs an https address, or localhost/.test(t)), name, 'on a page that is not served securely there is no microphone to ask for, and one message says what it needs', { mic, said })
+  say(mic.given === true && mic.kind === 'fallback' && mic.heard.peak > 0.1 && Math.abs(mic.heard.hz - 400) < 8, name, `and a stream given by a host is still heard through the fallback (400 Hz comes out at ${Math.round(mic.heard?.hz)})`, mic)
   await context.close()
 }
 
@@ -752,6 +782,375 @@ async function midi(name, browser) {
   }
 }
 
+/**
+ * THE MICROPHONE in a real browser. There is none here, so its place is taken three ways: by a stream made from an
+ * oscillator in the page (the `microphone` option, as a host would give one), by frames pushed in by hand (as a
+ * native app would), and in Chromium by its own pretend device, which is the only one that goes through
+ * getUserMedia itself. What cannot be tested here is a real microphone and a real person's answer to the browser.
+ */
+const MIC = `
+// A context with a steady tone in it, as a stream: what a host hands over in place of a microphone.
+window.toneStream = (hz = 440, level = 0.5) => {
+  const context = new AudioContext()
+  const osc = context.createOscillator()
+  osc.frequency.value = hz
+  const gain = context.createGain()
+  gain.gain.value = level
+  const out = context.createMediaStreamDestination()
+  osc.connect(gain).connect(out)
+  osc.start()
+  return { context, stream: out.stream, osc, gain }
+}
+// The level of one frequency in what a player is putting out now, from an analyser.
+window.spectrum = async (player, ms = 400) => {
+  const a = player.context.createAnalyser()
+  a.fftSize = 16384
+  a.smoothingTimeConstant = 0
+  player.node.connect(a)
+  await T.wait(ms)
+  const bins = new Float32Array(a.frequencyBinCount)
+  a.getFloatFrequencyData(bins)
+  const data = new Float32Array(a.fftSize)
+  a.getFloatTimeDomainData(data)
+  let peak = 0
+  for (const v of data) peak = Math.max(peak, Math.abs(v))
+  player.node.disconnect(a)
+  const width = player.context.sampleRate / a.fftSize
+  const at = (hz) => { let most = -200; for (let i = Math.round(hz / width) - 2; i <= Math.round(hz / width) + 2; i++) most = Math.max(most, bins[i]); return most }
+  let best = 1
+  for (let i = 1; i < bins.length; i++) if (bins[i] > bins[best]) best = i
+  return { peak, hz: best * width, at }
+}
+`
+async function voice(name, browser, pretend) {
+  const context = await browser.newContext(pretend ? { permissions: ['microphone'] } : {})
+  const page = await context.newPage()
+  if (name === 'chromium') await letWorkletsRun(page)
+  const said = []
+  page.on('console', (m) => said.push(m.text()))
+  page.on('pageerror', (e) => said.push('ERROR ' + e.message))
+  const requests = []
+  page.on('request', (r) => requests.push(r.url()))
+  const begin = async () => { await fresh(page); await page.evaluate(MIC); said.length = 0; requests.length = 0 }
+
+  if (pretend) {
+    // --- Chromium's pretend microphone, through getUserMedia itself: what is asked for, and that it is let go
+    await begin()
+    const got = await page.evaluate(async () => {
+      const asked = []
+      const real = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices)
+      let stream = null
+      navigator.mediaDevices.getUserMedia = async (c) => { asked.push(c); return (stream = await real(c)) }
+      const { createSound } = await import('/synths.js')
+      const s = createSound()
+      s.makeSynth(T.CLICK)
+      s.flush()
+      await T.on(() => s.player)
+      const before = asked.length
+      const mic = s.useMicrophone()
+      const ready = await mic.whenReady()
+      let level = 0
+      for (let i = 0; i < 100; i++) { level = Math.max(level, mic.level()[0]); await T.wait(20) }
+      const silent = await T.listen(s.player, 200)
+      mic.listen()
+      const heard = await T.listen(s.player, 600)
+      const settings = stream.getAudioTracks()[0].getSettings()
+      const take = s.recordSound(0.5)
+      await take.whenDone()
+      s.stopMicrophone()
+      await T.wait(200)
+      return { before, asked, ready, state: mic.state, level, silent: silent.peak, heard: heard.peak, track: stream.getAudioTracks()[0].readyState, seconds: take.seconds, settings, rate: s.player.context.sampleRate }
+    })
+    say(got.before === 0 && got.asked.length === 1 && same(got.asked[0], { audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 }, video: false }), name, 'the browser is asked for the microphone only when useMicrophone() is called, once, and for the plain one: no echo cancelling, noise removal or automatic level, one channel', got.asked)
+    say(got.ready === true && got.level > 0.01 && got.silent === 0 && got.heard > 0.01 && got.seconds === 0.5, name, `its pretend microphone comes in through getUserMedia: it shows on the meter (${got.level?.toFixed(2)}), is silent until listen() and heard after (${got.heard?.toFixed(2)}), and records half a second`, got)
+    say(got.track === 'ended', name, 'stopMicrophone() lets the microphone go, so the browser\'s recording light goes out', got.track)
+    console.log(`     ${name}: the pretend microphone's stream is at ${got.settings.sampleRate || 'an unstated rate'} Hz and the sound card at ${got.rate} Hz; the source node brings one to the other`)
+    await context.close()
+    return
+  }
+
+  // --- a stream in the microphone's place: silent until it is listened to, then heard, through each voice
+  await begin()
+  let got = await page.evaluate(async () => {
+    const { createSound } = await import('/synths.js')
+    const from = toneStream(400)
+    const s = createSound({ microphone: from.stream })
+    const mic = s.useMicrophone({ gate: 'off' })
+    s.flush()
+    await T.on(() => s.player)
+    const ready = await mic.whenReady()
+    await T.wait(200)
+    const muted = await T.listen(s.player, 300)
+    const scope = [0, 0]
+    for (let i = 0; i < 20; i++) { scope[1] = Math.max(scope[1], ...mic.samples()); await T.wait(20) }
+    scope[0] = mic.samples().length
+    mic.listen()
+    await T.wait(200)
+    const plain = await spectrum(s.player)
+    const out = { ready, kind: s.player.kind, muted: muted.peak, scope, plain: { peak: plain.peak, hz: plain.hz }, rate: s.player.context.sampleRate, from: from.context.sampleRate }
+    mic.mute()
+    await T.wait(200)
+    out.after = (await T.listen(s.player, 200)).peak
+    mic.listen()
+    mic.voice = 'chipmunk'
+    await T.wait(300)
+    out.chipmunk = (await spectrum(s.player)).hz
+    mic.voice = 'monster'
+    await T.wait(300)
+    out.monster = (await spectrum(s.player)).hz
+    mic.voice = 'robot'
+    mic.comb = 0
+    await T.wait(300)
+    const robot = await spectrum(s.player)
+    out.robot = [robot.at(350), robot.at(400), robot.at(450)]
+    return out
+  })
+  say(got.ready === true && got.kind === 'worklet' && got.muted === 0 && got.scope[0] === 1024 && got.scope[1] > 0.3, name, 'a stream given in the microphone\'s place reaches the worklet: nothing is heard until listen(), and the scope shows it meanwhile', got)
+  say(got.plain.peak > 0.1 && Math.abs(got.plain.hz - 400) < 4 && got.after === 0, name, `listen() lets it be heard as it is (400 Hz comes out at ${got.plain?.hz.toFixed(0)}), and mute() is silence again`, got)
+  say(Math.abs(got.chipmunk / 400 - 2 ** (7 / 12)) < 0.02 && Math.abs(got.monster / 400 - 2 ** (-7 / 12)) < 0.02, name, `the chipmunk voice moves it to ${got.chipmunk?.toFixed(0)} Hz and the monster to ${got.monster?.toFixed(0)} Hz, seven semitones each way`, got)
+  say(got.robot[0] > got.robot[1] + 20 && got.robot[2] > got.robot[1] + 20, name, `the robot voice puts tones 50 Hz either side of it and takes it away (${got.robot?.map((v) => v.toFixed(0)).join(', ')} dB at 350, 400 and 450 Hz)`, got.robot)
+  say(said.filter((t) => /synths\.js/.test(t)).length === 1 && /Through loudspeakers that can howl, so headphones are best/.test(said.find((t) => /synths\.js/.test(t))), name, 'and one thing is said, once, when it is first listened to: that loudspeakers can howl', said)
+
+  // --- recording: the right length, played back at pitch and transposed; what is played; a WAV file
+  await begin()
+  got = await page.evaluate(async () => {
+    const synths = await import('/synths.js')
+    const from = toneStream(300)
+    const files = []
+    const s = synths.createSound({ microphone: from.stream, save: (file) => files.push(file) })
+    const mic = s.useMicrophone({ gate: 'off' })
+    s.flush()
+    await T.on(() => s.player)
+    await mic.whenReady()
+    await T.wait(200)
+    const take = s.recordSound(1)
+    const first = [take.done, take.seconds]
+    const began = performance.now()
+    await take.whenDone()
+    const took = performance.now() - began
+    const out = { first, took, seconds: take.seconds, frames: take.frames, rate: s.player.context.sampleRate }
+    take.loop = true
+    const note = take.start()
+    await T.wait(150)
+    out.same = (await spectrum(s.player)).hz
+    note.stop()
+    const up = take.start('G4')
+    await T.wait(150)
+    out.up = (await spectrum(s.player)).hz
+    up.stop()
+    await T.wait(200)
+    const bytes = await s.saveSound(take, 'word')
+    const wav = synths.readWav(bytes)
+    out.file = { names: files.map((f) => f.name), type: files[0]?.type, channels: wav.channels, rate: wav.rate, frames: wav.pcm.length, peak: Math.max(...wav.pcm.subarray(0, 4800)) }
+    // What is played, recorded and played again.
+    const lead = s.makeSynth(T.CLICK)
+    const tune = s.recordOutput(0.5)
+    lead.play('A4', 0.4)
+    await tune.whenDone()
+    await T.wait(200)
+    tune.loop = true
+    tune.start()
+    await T.wait(150)
+    out.tune = [tune.seconds, (await spectrum(s.player)).hz]
+    const stereo = synths.readWav(await s.saveSound(tune, { download: false }))
+    out.stereo = [stereo.channels, stereo.pcm.length, files.length]
+    return out
+  })
+  say(same(got.first, [false, 0]) && got.seconds === 1 && got.frames === got.rate && got.took > 900 && got.took < 1600, name, `recordSound(1) gives a take at once and it is done a second later (${Math.round(got.took)} ms), exactly ${got.frames} frames long`, got)
+  say(Math.abs(got.same - 300) < 4 && Math.abs(got.up / 300 - 2 ** (7 / 12)) < 0.02, name, `the take plays back at its pitch (${got.same?.toFixed(0)} Hz) and seven semitones up at ${got.up?.toFixed(0)} Hz`, got)
+  say(same(got.file.names, ['word.wav']) && got.file.type === 'audio/wav' && got.file.channels === 1 && got.file.rate === got.rate && got.file.frames === got.rate && got.file.peak > 0.4, name, 'saveSound gives a WAV file of it to the host that asked for saved files: one channel, a second long, with the sound in it', got.file)
+  say(got.tune[0] === 0.5 && Math.abs(got.tune[1] - 440) < 4 && got.stereo[0] === 2 && got.stereo[1] === got.rate && got.stereo[2] === 1, name, 'recordOutput records what is played (an A4, heard again from the recording), in stereo, and { download: false } hands the file to nobody', got)
+
+  // --- frames pushed in by a host, at the sound card's rate and at another
+  await begin()
+  got = await page.evaluate(async () => {
+    const { createSound } = await import('/synths.js')
+    const calls = []
+    let timer = null
+    const pushing = (rate, hz) => ({
+      open(wants) {
+        calls.push(['open', wants.sampleRate, wants.raw, typeof wants.push, wants.constraints.echoCancellation])
+        const sr = rate || wants.sampleRate
+        let n = 0
+        const lump = Math.round(sr / 50)
+        const began = performance.now()
+        // 20 milliseconds at a time, as many lumps as are due.
+        timer = setInterval(() => {
+          while (n * lump < (performance.now() - began) / 1000 * sr) {
+            const frames = new Float32Array(lump)
+            for (let i = 0; i < lump; i++) frames[i] = 0.5 * Math.sin(2 * Math.PI * hz * (n * lump + i) / sr)
+            wants.push(frames, rate)
+            n++
+          }
+        }, 5)
+        return true
+      },
+      close() { calls.push(['close']); clearInterval(timer) },
+    })
+    const out = {}
+    for (const [key, rate] of [['same', 0], ['other', 16000]]) {
+      const s = createSound({ microphone: pushing(rate, 500), share: false })
+      const mic = s.useMicrophone({ gate: 'off', listen: true })
+      s.flush()
+      await T.on(() => s.player)
+      out[key + 'Ready'] = await mic.whenReady()
+      await T.wait(400)
+      const heard = await spectrum(s.player, 500)
+      out[key] = { peak: heard.peak, hz: heard.hz }
+      s.close()
+      await T.wait(100)
+    }
+    out.calls = calls
+    return out
+  })
+  say(got.sameReady && got.same.peak > 0.1 && Math.abs(got.same.hz - 500) < 4, name, `a host that pushes the frames itself is heard: 500 Hz in lumps of 20 ms comes out at ${got.same?.hz.toFixed(0)} Hz`, got)
+  say(got.otherReady && got.other.peak > 0.1 && Math.abs(got.other.hz - 500) < 4, name, `and at 16000 frames a second, which is not the sound card's rate, it still comes out at ${got.other?.hz.toFixed(0)} Hz`, got)
+  say(got.calls.filter((c) => c[0] === 'open').length === 2 && got.calls[0][2] === true && got.calls[0][3] === 'function' && got.calls[0][4] === false && got.calls.filter((c) => c[0] === 'close').length === 2, name, 'the host is told the sample rate, that the plain microphone is wanted and where to push, and is told when to stop', got.calls)
+
+  // --- no microphone: refused, missing, and turned off by the host. One message each, and nothing throws.
+  for (const [why, error, state, words] of [['refused', 'NotAllowedError', 'refused', /the microphone was not allowed\. To allow it, .* allow="microphone"/], ['missing', 'NotFoundError', 'none', /no microphone was found\. Plug one in/], ['in use', 'NotReadableError', 'busy', /another program may be using it/]]) {
+    await begin()
+    got = await page.evaluate(async (error) => {
+      if (!navigator.mediaDevices) Object.defineProperty(navigator, 'mediaDevices', { value: {}, configurable: true })
+      navigator.mediaDevices.getUserMedia = () => Promise.reject(new DOMException('no', error))
+      const { createSound } = await import('/synths.js')
+      const s = createSound()
+      const lead = s.makeSynth(T.CLICK)
+      const mic = s.useMicrophone({ voice: 'robot', listen: true })
+      mic.pitch = 4
+      const take = s.recordSound(1)
+      const began = performance.now()
+      await take.whenDone()
+      take.play()
+      take.voice = 'chipmunk'
+      const bytes = await s.saveSound(take, { download: false })
+      s.useMicrophone().listen()
+      s.recordSound(0.2)
+      lead.start('A4')
+      await T.on(() => s.player)
+      const heard = await T.listen(s.player, 300)
+      return { ready: await mic.whenReady(), state: mic.state, done: take.done, seconds: take.seconds, took: performance.now() - began, bytes: bytes.length, heard: heard.peak, level: mic.level() }
+    }, error)
+    const about = said.filter((t) => /microphone/.test(t))
+    say(got.ready === false && got.state === state && got.done && got.seconds === 0 && got.bytes === 44 && got.heard > 0.2 && !said.some((t) => /ERROR/.test(t)), name, `a microphone that is ${why}: nothing throws, the microphone says "${got.state}", a recording is empty and done at once, and the rest of the sound plays`, { got, said })
+    say(about.length === 1 && words.test(about[0]) && /Everything else carries on/.test(about[0]), name, 'and one message says why, and what to do', about)
+  }
+  await begin()
+  got = await page.evaluate(async () => {
+    let asked = 0
+    if (navigator.mediaDevices) navigator.mediaDevices.getUserMedia = () => { asked++; return Promise.reject(new Error('should not be asked')) }
+    const { createSound } = await import('/synths.js')
+    const s = createSound({ microphone: false })
+    const mic = s.useMicrophone()
+    const take = s.recordSound(1)
+    await take.whenDone()
+    return { asked, ready: await mic.whenReady(), state: mic.state, seconds: take.seconds }
+  })
+  say(got.asked === 0 && got.ready === false && got.state === 'unavailable' && said.filter((t) => /microphone/.test(t)).length === 1 && said.some((t) => /turned off for this page by the app that shows it/.test(t)), name, 'a host can turn the microphone off (microphone: false): the browser is never asked, and one message says so', { got, said })
+
+  // --- what the browser itself says here, with no permission given and no pretending
+  await begin()
+  got = await page.evaluate(async () => {
+    const { createSound } = await import('/synths.js')
+    const s = createSound()
+    const mic = s.useMicrophone()
+    const take = s.recordSound(0.3)
+    const ready = await Promise.race([mic.whenReady(), T.wait(4000).then(() => 'never answered')])
+    return { ready, state: mic.state, done: take.done, has: !!navigator.mediaDevices?.getUserMedia }
+  })
+  if (got.ready === 'never answered') console.log(`     ${name}: asked for a real microphone, the browser here never answers, so nothing is said and nothing fails`)
+  else say(got.ready === true || (said.filter((t) => /microphone/.test(t)).length === 1 && got.done), name, `asked for a real microphone, this browser ${got.ready ? 'gives one' : `gives none (${got.state}), and one message says so`}`, { got, said })
+
+  // --- a frame that may not ask: sandboxed, with no origin and no allow="microphone"
+  await begin()
+  got = await page.evaluate(async () => {
+    const inner = '<!doctype html><body><script type="module">' +
+      'const said = []; for (const how of ["warn", "info", "error"]) console[how] = (...a) => said.push(a.join(" "));' +
+      'try { const { createSound } = await import("' + location.origin + '/synths.js");' +
+      'const s = createSound(); const mic = s.useMicrophone({ listen: true }); const take = s.recordSound(0.2);' +
+      'const ready = await Promise.race([mic.whenReady(), new Promise((yes) => setTimeout(() => yes("never answered"), 4000))]);' +
+      'parent.postMessage({ ready, state: mic.state, done: take.done, said }, "*") } catch (e) { parent.postMessage({ error: String(e), said }, "*") }' +
+      '</scr' + 'ipt>'
+    const frame = document.createElement('iframe')
+    frame.sandbox = 'allow-scripts'
+    frame.srcdoc = inner
+    const answer = new Promise((yes) => addEventListener('message', (m) => yes(m.data), { once: true }))
+    document.body.append(frame)
+    return answer
+  })
+  if (got.ready === 'never answered') console.log(`     ${name}: in a sandboxed frame the browser here never answers the question, so nothing is said and nothing fails`)
+  else say(!got.error && got.ready === false && got.said.filter((t) => /microphone/.test(t)).length === 1, name, `in a sandboxed frame with no allow="microphone" there is no microphone (${got.state}), one message says so, and nothing throws`, got)
+
+  // --- a program with no microphone in it asks for nothing and costs nothing
+  await begin()
+  got = await page.evaluate(async () => {
+    let asked = 0
+    if (navigator.mediaDevices) { const real = navigator.mediaDevices.getUserMedia; navigator.mediaDevices.getUserMedia = function (...a) { asked++; return real.apply(this, a) } }
+    const { createSound } = await import('/synths.js')
+    const s = createSound()
+    s.makeSynth(T.CLICK).start('A4')
+    await T.on(() => s.player)
+    const heard = await T.listen(s.player, 300)
+    return { asked, heard: heard.peak, inputs: s.player.node.numberOfInputs }
+  })
+  say(got.asked === 0 && got.heard > 0.2 && same(requests.filter((r) => !r.startsWith('blob:')).map((r) => r.split('/').pop()).filter((r) => r !== 'test.html').sort(), ['synths.js', 'synths_core.wasm']) && !said.some((t) => /microphone/.test(t)), name, 'a program that does not use the microphone never asks the browser for one, fetches nothing more than the library and the engine, and is told nothing', { got, requests, said })
+
+  // --- how late the microphone is: the same click, straight to the output and through the engine
+  await begin()
+  got = await page.evaluate(async () => {
+    const { createSound } = await import('/synths.js')
+    const context = new AudioContext()
+    const src = 'registerProcessor("pair", class extends AudioWorkletProcessor { constructor() { super(); this.port.onmessage = () => this.port.postMessage("end") } process(i) { if (i[0] && i[0][0]) this.port.postMessage([i[0][0].slice(), (i[0][1] || i[0][0]).slice()]); return true } })'
+    await context.audioWorklet.addModule(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })))
+    const osc = context.createOscillator()
+    osc.frequency.value = 200
+    const gate = context.createGain()
+    gate.gain.value = 0
+    const stream = context.createMediaStreamDestination()
+    osc.connect(gate)
+    gate.connect(stream)
+    osc.start()
+    const s = createSound({ context, microphone: stream.stream })
+    const mic = s.useMicrophone({ gate: 'off', listen: true })
+    s.flush()
+    await T.on(() => s.player)
+    await mic.whenReady()
+    // One listener with two ears: the click as it left, and as it came back out of the engine.
+    const merge = context.createChannelMerger(2)
+    gate.connect(merge, 0, 0)
+    s.player.node.connect(merge, 0, 1)
+    const pair = new AudioWorkletNode(context, 'pair', { numberOfInputs: 1, numberOfOutputs: 1, channelCount: 2, channelCountMode: 'explicit', channelInterpretation: 'discrete' })
+    merge.connect(pair)
+    pair.connect(context.destination)
+    const blocks = []
+    let ended
+    pair.port.onmessage = (m) => (m.data === 'end' ? ended() : blocks.push(m.data))
+    const late = async (set) => {
+      set()
+      await T.wait(300)
+      blocks.length = 0
+      gate.gain.setValueAtTime(1, context.currentTime + 0.1)
+      await T.wait(500)
+      gate.gain.setValueAtTime(0, context.currentTime)
+      await new Promise((yes) => { ended = yes; pair.port.postMessage('end') })
+      const a = new Float32Array(blocks.length * 128), b = new Float32Array(blocks.length * 128)
+      blocks.forEach((p, i) => { a.set(p[0], i * 128); b.set(p[1], i * 128) })
+      const first = (x) => x.findIndex((v) => Math.abs(v) > 0.002)
+      await T.wait(200)
+      return first(b) - first(a)
+    }
+    const plain = await late(() => { mic.voice = 'none' })
+    const up = await late(() => { mic.voice = 'chipmunk' })
+    const down = await late(() => { mic.voice = 'monster' })
+    return { plain, up, down, rate: context.sampleRate, base: context.baseLatency, out: context.outputLatency }
+  })
+  const ms = (frames) => (frames / got.rate * 1000).toFixed(1)
+  say(got.plain >= 0 && got.plain < got.rate * 0.1 && got.up >= got.plain && got.up < got.rate * 0.13 && got.down < got.rate * 0.13, name, `a click given as a stream comes out of the engine ${got.plain} frames later (${ms(got.plain)} ms), ${ms(got.up)} ms later through the chipmunk voice and ${ms(got.down)} ms through the monster`, got)
+  console.log(`     ${name}: that is inside the browser, stream to worklet to output. A real microphone and loudspeaker add their own: here the sound card says ${((got.base || 0) * 1000).toFixed(1)} ms for a block and ${((got.out || 0) * 1000).toFixed(1)} ms to the loudspeaker`)
+
+  await context.close()
+}
+
 const ALLOWED = { chromium: { args: ['--autoplay-policy=no-user-gesture-required'] }, webkit: {} }
 for (const name of ['chromium', 'webkit']) {
   let browser
@@ -760,14 +1159,22 @@ for (const name of ['chromium', 'webkit']) {
     if (!ONLY) await withSound(name, browser)
     if (!ONLY || ONLY === 'examples') await examples(name, browser)
     if (!ONLY || ONLY === 'midi') await midi(name, browser)
+    if (!ONLY || ONLY === 'voice') await voice(name, browser, false)
   } catch (e) { say(false, name, 'the tests ran to the end', String(e?.stack || e)) }
   await browser.close()
+
+  if (name === 'chromium' && (!ONLY || ONLY === 'voice')) {
+    // Chromium's own pretend microphone (a beep every second), with its question answered yes.
+    browser = await playwright[name].launch({ args: [...ALLOWED[name].args, '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] })
+    try { await voice(name, browser, true) } catch (e) { say(false, name, 'the pretend-microphone tests ran to the end', String(e?.stack || e)) }
+    await browser.close()
+  }
 
   browser = await playwright[name].launch(ALLOWED[name])
   try { if (!ONLY) await waitingForATap(name, browser) } catch (e) { say(false, name, 'the tap tests ran to the end', String(e?.stack || e)) }
   await browser.close()
 
-  if (name === 'chromium' && !ONLY) {
+  if (name === 'chromium' && (!ONLY || ONLY === 'insecure')) {
     // A name that is not localhost, pointed at this machine: the same page, not a secure context.
     browser = await playwright[name].launch({ args: [...ALLOWED[name].args, `--host-resolver-rules=MAP plain.test 127.0.0.1`] })
     try { await notSecure(name, browser) } catch (e) { say(false, name, 'the not-secure tests ran to the end', String(e?.stack || e)) }
