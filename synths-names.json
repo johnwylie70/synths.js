@@ -2630,6 +2630,8 @@
    "midiDevices",
    "useMidiInput",
    "useMidiOutput",
+   "midiInput",
+   "midiOutput",
    "receiveMidi",
    "stopMidi"
   ],
@@ -2638,8 +2640,19 @@
    "sendToMidi",
    "mapMidi",
    "learn",
-   "unmapMidi"
-  ]
+   "unmapMidi",
+   "midiInput",
+   "midiOutput"
+  ],
+  "choices": {
+   "settings": [
+    "device",
+    "channel"
+   ],
+   "all": "all",
+   "none": "no devices",
+   "unavailable": "no MIDI here"
+  }
  },
  "voices": {
   "robot": {

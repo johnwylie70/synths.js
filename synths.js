@@ -25,6 +25,7 @@
  *   setTempo(120), beats(2)                beats(2) is how many seconds two beats last
  *   lead.playFromMidi()                    a MIDI keyboard plays a synth; onMidiNote, onMidiControl, sendMidiNote("C4"),
  *   lead.learn("cutoff")                   lead.sendToMidi(), midiDevices(): MIDI, which is in synths-midi.js
+ *   midiInput(), lead.midiInput()          the MIDI device and channel listened to, for a select on the screen: "device", "channel"
  *   const mic = useMicrophone()            the microphone (the browser asks first); nothing is heard until mic.listen()
  *   mic.voice = "robot"                    a voice changer: robot, chipmunk, monster, cave, telephone, alien, whisper, "none"
  *   mic.pitch = 7, mic.echo = 0.4          and the settings a synth has; a synth has them too: lead.pitchShift, ringMod, comb
@@ -1992,13 +1993,15 @@ let midiFile = null
 const loadMidi = (given) => (given ? Promise.resolve(typeof given === 'string' ? hidden(given) : given) : midiFile || (midiFile = hidden(new URL('synths-midi.js', BASE).href)))
 const midiMissing = (e) => tell(`MIDI could not be loaded, so there will be none (${(e && e.message) || e}). It is in the file synths-midi.js, which belongs beside synths.js.`, 'error')
 /** MIDI's functions: createSound's, and every synth's. They are in synths-midi.js; these are the names it is asked for by. */
-const MIDI_FUNCTIONS = ['onMidi', 'onMidiNote', 'onMidiNoteOff', 'onMidiControl', 'onMidiDevices', 'useMidiHooks', 'sendMidi', 'sendMidiNote', 'sendMidiNoteOff', 'sendMidiControl', 'sendMidiBend', 'sendMidiProgram', 'sendMidiClock', 'midiDevices', 'useMidiInput', 'useMidiOutput', 'receiveMidi', 'stopMidi']
-const MIDI_SYNTH_FUNCTIONS = ['playFromMidi', 'sendToMidi', 'mapMidi', 'learn', 'unmapMidi']
+const MIDI_FUNCTIONS = ['onMidi', 'onMidiNote', 'onMidiNoteOff', 'onMidiControl', 'onMidiDevices', 'useMidiHooks', 'sendMidi', 'sendMidiNote', 'sendMidiNoteOff', 'sendMidiControl', 'sendMidiBend', 'sendMidiProgram', 'sendMidiClock', 'midiDevices', 'useMidiInput', 'useMidiOutput', 'midiInput', 'midiOutput', 'receiveMidi', 'stopMidi']
+const MIDI_SYNTH_FUNCTIONS = ['playFromMidi', 'sendToMidi', 'mapMidi', 'learn', 'unmapMidi', 'midiInput', 'midiOutput']
+/** What midiInput() and midiOutput() can be asked for by name, and the words among their choices that are not a device or a channel. */
+const MIDI_CHOICES = { settings: ['device', 'channel'], all: 'all', none: 'no devices', unavailable: 'no MIDI here' }
 /** The kinds of MIDI message, and what a `midi` command may do: for a binding in another language. */
 const MIDI = {
   types: ['noteOff', 'noteOn', 'notePressure', 'control', 'program', 'pressure', 'bend', 'sysex', 'timeCode', 'songPosition', 'songSelect', 'tuneRequest', 'clock', 'start', 'continue', 'stop', 'sensing', 'reset', 'other', 'devices', 'tempo', 'learned', 'set'],
   does: ['devices', 'listen', 'input', 'output', 'send', 'play', 'through', 'map', 'learn', 'unmap', 'clock', 'stop'],
-  functions: MIDI_FUNCTIONS, synthFunctions: MIDI_SYNTH_FUNCTIONS,
+  functions: MIDI_FUNCTIONS, synthFunctions: MIDI_SYNTH_FUNCTIONS, choices: MIDI_CHOICES,
 }
 
 /**
@@ -2897,6 +2900,7 @@ export function createSound(options = {}) {
       midiComing = loadMidi(options.midiModule).then((m) => {
         const made = m.makeMidiApi({
           command, choices, notesOf, shown, amount, length, tell, api,
+          storage: options.midiStorage,
           clock: () => midiNow ?? clock(),
           // When a kept call should happen: counted from when it was asked, not from now.
           when: (o, said) => when(o, said) - (midiNow === null || o.at !== undefined || o.beat !== undefined ? 0 : clock() - midiNow),
@@ -2930,6 +2934,53 @@ export function createSound(options = {}) {
     return back
   }
   let midiComing = null
+  /**
+   * midiInput() and midiOutput(): the device and the channel as a TARGET, which a select on the screen is tied to
+   * as a dial is tied to a synth. It is here, and not in synths-midi.js, so that it can be given at once: until
+   * that file has arrived it says there are no devices, and what is set on it waits like every other MIDI call.
+   */
+  const midiPorts = new Map()
+  function midiPort(which, synth) {
+    const key = which + (synth ? synth._id : '')
+    if (midiPorts.has(key)) return midiPorts.get(key)
+    const input = which === 'input'
+    const name = input ? 'midiInput' : 'midiOutput'
+    let real = null
+    const it = () => real || (midi ? (real = midi[name](synth)) : null)
+    const numbers = Array.from({ length: 16 }, (_, i) => String(i + 1))
+    const first = { device: MIDI_CHOICES.none, channel: input ? MIDI_CHOICES.all : '1' }
+    const port = {
+      names: [...MIDI_CHOICES.settings],
+      get: (setting) => (it() ? real.get(setting) : first[setting]),
+      set(setting, value) { midiCall('setMidiChoice', [which, synth, setting, value]); return port },
+      describe(setting) {
+        if (it()) return real.describe(setting)
+        if (!(setting in first)) return undefined
+        return { name: setting, kind: 'text', choices: setting === 'device' ? [first.device] : input ? [first.channel, ...numbers] : numbers, default: first[setting] }
+      },
+      /** midiIn.onChange((name) => { ... }): "device" or "channel" has another value, or other choices (a device was plugged in). It gives back a function that stops it. */
+      onChange(fn) {
+        if (typeof fn !== 'function') throw new Error(`${name}().onChange needs a function to call, as in onChange((name) => { ... }), not ${shown(fn)}`)
+        const heard = (...args) => { if (stopped !== true) fn(...args) }
+        let stopped = midiCall('watchMidiChoice', [which, synth, heard])
+        return () => { if (typeof stopped === 'function') stopped(); stopped = true }
+      },
+      get device() { return port.get('device') },
+      set device(value) { port.set('device', value) },
+      get channel() { return it() ? real.channel : input ? first.channel : 1 },
+      set channel(value) { port.set('channel', value) },
+    }
+    port.on_change = port.onChange
+    if (input) {
+      /** How hard the last note was hit, fading away: from 0 to 1, for a meter that is an activity light. */
+      port.level = () => (it() ? real.level() : 0)
+      /** The keys held down on this input now, as numbers. */
+      port.notes = () => (it() ? real.notes() : [])
+    }
+    midiPorts.set(key, port)
+    midiCall(name, [synth])
+    return port
+  }
 
   /** A note that is sounding: what start() gives back. */
   class Note {
@@ -3260,6 +3311,11 @@ export function createSound(options = {}) {
     mapMidi(...args) { return midiCall('mapMidi', [this, ...args], this) }
     learn(...args) { return midiCall('learn', [this, ...args], this) }
     unmapMidi(...args) { return midiCall('unmapMidi', [this, ...args], this) }
+    /** lead.midiInput(): the device and the channel this synth plays from, for a select on the screen (see midiInput). lead.midiOutput(): where its notes go. */
+    midiInput() { return midiPort('input', this) }
+    midiOutput() { return midiPort('output', this) }
+    midi_input() { return this.midiInput() }
+    midi_output() { return this.midiOutput() }
     play_from_midi(...args) { return this.playFromMidi(...args) }
     send_to_midi(...args) { return this.sendToMidi(...args) }
     map_midi(...args) { return this.mapMidi(...args) }
@@ -3838,6 +3894,10 @@ export function createSound(options = {}) {
     },
   }
   for (const name of MIDI_FUNCTIONS) api[name] = (...args) => midiCall(name, args, name === 'midiDevices' ? { inputs: [], outputs: [], available: null } : undefined)
+  /** The MIDI input this program hears, as something a control can be tied to: select("midi in", midiInput(), "device"), and "channel"; level() for an activity light. */
+  api.midiInput = () => midiPort('input')
+  /** The MIDI output this program sends to, the same way: select("midi out", midiOutput(), "device"), and "channel". */
+  api.midiOutput = () => midiPort('output')
   // The Python spellings.
   for (const name of Object.keys(api)) {
     const snake = name.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase())
@@ -3931,6 +3991,8 @@ export const sendMidiClock = (on) => mine().sendMidiClock(on)
 export const midiDevices = () => mine().midiDevices()
 export const useMidiInput = (name) => mine().useMidiInput(name)
 export const useMidiOutput = (name) => mine().useMidiOutput(name)
+export const midiInput = () => mine().midiInput()
+export const midiOutput = () => mine().midiOutput()
 export const receiveMidi = (events) => mine().receiveMidi(events)
 export const stopMidi = () => { if (page) page.stopMidi() }
 // The microphone, recording and saving (see createSound's useMicrophone, recordSound and saveSound).
@@ -3955,7 +4017,7 @@ export {
   onMidiDevices as on_midi_devices, useMidiHooks as use_midi_hooks, sendMidi as send_midi, sendMidiNote as send_midi_note,
   sendMidiNoteOff as send_midi_note_off, sendMidiControl as send_midi_control, sendMidiBend as send_midi_bend,
   sendMidiProgram as send_midi_program, sendMidiClock as send_midi_clock, midiDevices as midi_devices,
-  useMidiInput as use_midi_input, useMidiOutput as use_midi_output, receiveMidi as receive_midi, stopMidi as stop_midi,
+  useMidiInput as use_midi_input, useMidiOutput as use_midi_output, midiInput as midi_input, midiOutput as midi_output, receiveMidi as receive_midi, stopMidi as stop_midi,
   useMicrophone as use_microphone, stopMicrophone as stop_microphone, recordSound as record_sound, startRecording as start_recording,
   stopRecording as stop_recording, recordOutput as record_output, saveSound as save_sound, receiveSoundEvents as receive_sound_events,
   voiceNames as voice_names,

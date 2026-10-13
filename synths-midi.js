@@ -12,6 +12,7 @@
  *   lead.sendToMidi()                          what this synth plays also goes out as MIDI
  *   lead.learn("cutoff"), lead.mapMidi(74, "cutoff")    a knob turns a setting, through the setting's own range
  *   midiDevices(), useMidiInput(name), useMidiOutput(name)
+ *   midiInput(), lead.midiInput(), midiOutput()    the device and the channel, as something a control on the screen can be tied to
  *
  * HOW IT IS BUILT. Like the sound, in layers, so that the program may be in a worker, another frame or Python:
  *
@@ -222,8 +223,6 @@ export function makeMidiDesk(h) {
   let transport = null
   let state = 'closed'          // 'opening', 'open', or 'none' when there is no MIDI here
   let opening = null
-  let wanted = null             // the inputs listened to: null is all of them
-  let out = null                // the output sent to: null is the first
   let queue = []
   let timer = null
   let closed = false
@@ -236,7 +235,7 @@ export function makeMidiDesk(h) {
 
   const scopeOf = (name) => {
     let s = scopes.get(name)
-    if (!s) scopes.set(name, s = { name, listen: false, told: false, offset: h.offset || 0, routes: new Map(), maps: [], learning: [], through: new Map(), tunes: new Map(), sounding: new Map(), beat: null, last: 0 })
+    if (!s) scopes.set(name, s = { name, listen: false, told: false, offset: h.offset || 0, routes: new Map(), maps: [], learning: [], in: { name: null, channel: null }, out: { name: null, channel: null }, ins: new Map(), outs: new Map(), through: new Map(), tunes: new Map(), sounding: new Map(), beat: null, last: 0 })
     return s
   }
   const names = (list) => { try { return Array.from(list || [], (d) => String(d && typeof d === 'object' ? d.name : d)) } catch (e) { return [] } }
@@ -285,8 +284,8 @@ export function makeMidiDesk(h) {
 
   // --- sending: a queue, handed to the transport a moment before each message is due, with its exact time
 
-  // A message goes to the output it names, or to the one chosen when it was asked for, or to the first there is.
-  const enqueue = (s, bytes, t, output, from) => queue.push({ s, bytes, t, output: output ?? out ?? undefined, from })
+  // A message goes to the output it names, or to the one its sender had chosen when it was asked for, or to the first there is.
+  const enqueue = (s, bytes, t, output, from) => queue.push({ s, bytes, t, output: output ?? s.out.name ?? undefined, from })
   function deliver(q, at) {
     const [status, note, velocity] = q.bytes
     const kind = status & 0xf0
@@ -351,12 +350,14 @@ export function makeMidiDesk(h) {
   // --- a synth whose notes go out as MIDI: the desk reads the sender's own sound commands
 
   const noteOf = (n) => { try { return Math.round(h.noteNumber(n)) } catch (e) { return -1 } }
+  // Where a synth's notes go: the channel and the output chosen for it, or else the sender's, or else channel 1 of the first output.
+  const outOf = (s, id) => { const p = s.outs.get(id); return { status: (p?.channel ?? s.out.channel ?? 1) - 1, output: p?.name ?? undefined } }
   function noteOut(s, th, from, notes, velocity, t, length) {
-    const status = th.channel - 1
+    const { status, output } = outOf(s, from)
     const list = (notes == null ? [th.note] : [].concat(notes)).map(noteOf).filter((n) => n >= 0 && n <= 127)
     for (const n of list) {
-      enqueue(s, [0x90 | status, n, clamp(Math.round((velocity ?? 0.8) * 127), 1, 127)], t, th.output, from)
-      if (length != null) enqueue(s, [0x80 | status, n, 0], t + length * 1000, th.output, from)
+      enqueue(s, [0x90 | status, n, clamp(Math.round((velocity ?? 0.8) * 127), 1, 127)], t, output, from)
+      if (length != null) enqueue(s, [0x80 | status, n, 0], t + length * 1000, output, from)
     }
     return list
   }
@@ -367,7 +368,8 @@ export function makeMidiDesk(h) {
     const id = c.op === 'tune' ? c.synth : c.id
     const th = s.through.get(id)
     if (!th) return
-    const off = (notes) => { for (const n of notes || []) enqueue(s, [0x80 | (th.channel - 1), n, 0], t, th.output, id) }
+    const { status, output } = outOf(s, id)
+    const off = (notes) => { for (const n of notes || []) enqueue(s, [0x80 | status, n, 0], t, output, id) }
     if (c.op === 'note') {
       const notes = noteOut(s, th, id, c.note, c.vel, t, c.len)
       if (c.h != null && c.len == null) th.held.set(c.h, notes)
@@ -401,7 +403,7 @@ export function makeMidiDesk(h) {
     return k.kind === 'int' || k.kind === 'choice' ? Math.round(x) : x
   }
   // What one message does for one sender, on the page, before the sender hears of it.
-  function route(s, m, events) {
+  function route(s, m, events, input) {
     let mapped = false
     if (m.type === 'control' && m.control < 120) {
       // LEARNING: the next knob that is moved, and is not already tied to something, is tied to the setting that is waiting.
@@ -421,7 +423,8 @@ export function makeMidiDesk(h) {
     if (m.channel === undefined) return
     // A KEYBOARD PLAYS A SYNTH from here, with the sender not asked: so it is as quick as the page can make it.
     for (const r of s.routes.values()) {
-      if (r.channel != null && r.channel !== m.channel) continue
+      const own = s.ins.get(r.id)
+      if (own && ((own.channel != null && own.channel !== m.channel) || (own.name && !own.name.includes(input)))) continue
       const off = (note) => {
         if (r.held.has(note)) h.play({ op: 'off', id: r.id, h: r.held.get(note) }, s.name)
         r.held.delete(note)
@@ -448,7 +451,6 @@ export function makeMidiDesk(h) {
   function heard(bytes, time, input) {
     if (closed || !bytes) return
     input = input == null ? '' : String(input)
-    if (wanted && !wanted.includes(input)) return
     let read = parsers.get(input)
     if (!read) parsers.set(input, read = midiParser())
     const messages = read(bytes)
@@ -465,10 +467,13 @@ export function makeMidiDesk(h) {
       if (bpm > 0 && Number.isFinite(bpm) && Math.abs(bpm - tempo) >= 0.5) extra.push({ type: 'tempo', bpm: tempo = bpm })
     }
     for (const s of [...scopes.values()]) {
+      // Each sender hears the input and the channel it has chosen: all of them, until it chooses.
+      if (s.in.name && !s.in.name.includes(input)) continue
       const events = []
       const stamp = { time: at / 1000 - s.offset, device: input }
       for (const m of messages) {
-        route(s, m, events)
+        if (s.in.channel != null && m.channel !== undefined && m.channel !== s.in.channel) continue
+        route(s, m, events, input)
         if (s.listen) events.push({ ...m, ...stamp })
       }
       if (s.listen) for (const m of extra) events.push({ ...m, ...stamp })
@@ -485,11 +490,29 @@ export function makeMidiDesk(h) {
     s.maps = s.maps.filter((k) => !same(k))
     s.learning = s.learning.filter((k) => !same(k))
   }
+  // THE CHOICE of a device and a channel: the sender's own, or with an `id` one synth's. A field that is left out stays as it was.
+  const choiceOf = (s, c, which) => {
+    if (c.id == null) return s[which === 'ins' ? 'in' : 'out']
+    if (!s[which].has(c.id)) s[which].set(c.id, { name: null, channel: null })
+    return s[which].get(c.id)
+  }
   const does = {
     devices() {},
     listen(s, c) { s.listen = c.on !== false },
-    input(s, c) { wanted = c.name == null ? null : [].concat(c.name).map(String) },
-    output(s, c) { out = c.name == null ? null : String(c.name) },
+    input(s, c) {
+      const p = choiceOf(s, c, 'ins')
+      if ('name' in c) p.name = c.name == null ? null : [].concat(c.name).map(String)
+      if ('channel' in c) p.channel = channelOf(c)
+      // A key that is down is let go: its coming up may never be heard now.
+      for (const r of s.routes.values()) if (c.id == null || r.id === c.id) release(s, r)
+    },
+    output(s, c) {
+      const p = choiceOf(s, c, 'outs')
+      if ('name' in c) p.name = c.name == null ? null : String(c.name)
+      if ('channel' in c) p.channel = channelOf(c)
+      // The notes a synth has sounding where it was sending are let go there.
+      for (const [id, th] of s.through) if (c.id == null || id === c.id) { th.held.clear(); hush(s, id) }
+    },
     send(s, c, t) {
       const bytes = Array.isArray(c.bytes) || ArrayBuffer.isView(c.bytes) ? Array.from(c.bytes, (b) => b & 255) : []
       if (bytes.length && bytes[0] >= 0x80) enqueue(s, bytes, t, c.output == null ? undefined : String(c.output))
@@ -498,11 +521,13 @@ export function makeMidiDesk(h) {
       const had = s.routes.get(c.id)
       if (c.on === false) { if (had) release(s, had); s.routes.delete(c.id); return }
       const vibrato = Array.isArray(c.vibrato) ? [+c.vibrato[0] || 0, +c.vibrato[1] || 0] : [0, 0.5]
-      s.routes.set(c.id, { id: c.id, channel: channelOf(c), vibrato, held: had ? had.held : new Map(), kept: had ? had.kept : new Set(), pedal: had ? had.pedal : false })
+      choiceOf(s, c, 'ins').channel = channelOf(c)
+      s.routes.set(c.id, { id: c.id, vibrato, held: had ? had.held : new Map(), kept: had ? had.kept : new Set(), pedal: had ? had.pedal : false })
     },
     through(s, c) {
       if (c.on === false) { hush(s, c.id); s.through.delete(c.id); return }
-      s.through.set(c.id, { channel: channelOf(c) || 1, note: c.note ?? 60, output: c.output == null ? undefined : String(c.output), held: s.through.get(c.id)?.held || new Map() })
+      Object.assign(choiceOf(s, c, 'outs'), { channel: channelOf(c), name: c.output == null ? null : String(c.output) })
+      s.through.set(c.id, { note: c.note ?? 60, held: s.through.get(c.id)?.held || new Map() })
     },
     map(s, c) {
       if (!Number.isInteger(c.control) || c.setting == null) return
@@ -587,8 +612,11 @@ export function makeMidiDesk(h) {
 // --- the functions: the sender's side ----------------------------------------------------------
 
 /** The functions synths.js gives a program, and the ones every synth has. */
-export const MIDI_FUNCTIONS = ['onMidi', 'onMidiNote', 'onMidiNoteOff', 'onMidiControl', 'onMidiDevices', 'useMidiHooks', 'sendMidi', 'sendMidiNote', 'sendMidiNoteOff', 'sendMidiControl', 'sendMidiBend', 'sendMidiProgram', 'sendMidiClock', 'midiDevices', 'useMidiInput', 'useMidiOutput', 'receiveMidi', 'stopMidi']
-export const MIDI_SYNTH_FUNCTIONS = ['playFromMidi', 'sendToMidi', 'mapMidi', 'learn', 'unmapMidi']
+export const MIDI_FUNCTIONS = ['onMidi', 'onMidiNote', 'onMidiNoteOff', 'onMidiControl', 'onMidiDevices', 'useMidiHooks', 'sendMidi', 'sendMidiNote', 'sendMidiNoteOff', 'sendMidiControl', 'sendMidiBend', 'sendMidiProgram', 'sendMidiClock', 'midiDevices', 'useMidiInput', 'useMidiOutput', 'midiInput', 'midiOutput', 'receiveMidi', 'stopMidi']
+export const MIDI_SYNTH_FUNCTIONS = ['playFromMidi', 'sendToMidi', 'mapMidi', 'learn', 'unmapMidi', 'midiInput', 'midiOutput']
+/** What midiInput() and midiOutput() can be asked for by name, and the words among their choices that are not a device or a channel. */
+export const MIDI_CHOICES = { settings: ['device', 'channel'], all: 'all', none: 'no devices', unavailable: 'no MIDI here' }
+const tick = () => (typeof performance !== 'undefined' ? performance.now() : Date.now())
 
 /**
  * THE FUNCTIONS. They write `midi` commands and call the program's own functions with what is received.
@@ -600,6 +628,7 @@ export const MIDI_SYNTH_FUNCTIONS = ['playFromMidi', 'sendToMidi', 'mapMidi', 'l
  *   tempo()               beats a minute
  *   api                   createSound's own functions (setTempo is wrapped so that a clock being sent follows it)
  *   choices, notesOf, shown, amount, length(value, said), meant, tell, remember(synth, setting, value)
+ *   storage               where the device chosen on the screen is kept for next time, shaped like localStorage (the page's own if there is none; `false` for nowhere)
  */
 export function makeMidiApi(h) {
   const on = { all: new Set(), note: new Set(), noteOff: new Set(), control: new Set(), devices: new Set() }
@@ -610,6 +639,8 @@ export function makeMidiApi(h) {
   let asked = false
   /** Synths with a setting tied to a knob: id -> setting -> { synth, changed }. */
   const bound = new Map()
+  /** The device and the channel chosen, for 'input' and for 'output': id -> { device, channel, … }. The id '' is the program's own choice, the others a synth's. */
+  const chosen = { input: new Map(), output: new Map() }
 
   // Every MIDI call sends a command (which is what makes the desk ask for permission) and makes sure this sender is handed what the desk says.
   function midi(c) {
@@ -626,6 +657,7 @@ export function makeMidiApi(h) {
       if (!m || typeof m !== 'object') continue
       if (m.type === 'devices') {
         devices = { inputs: [...(m.inputs || [])], outputs: [...(m.outputs || [])], available: !!m.available }
+        arrived()
         call(on.devices, api.midiDevices())
       } else if (m.type === 'set') {
         // A knob turned a setting on the page: the synth here is told, so that reading it back gives what it is.
@@ -634,6 +666,7 @@ export function makeMidiApi(h) {
       } else if (m.type === 'noteOn') call(on.note, m.note, m.velocity, m.channel)
       else if (m.type === 'noteOff') { if (on.noteOff.size) call(on.noteOff, m.note, m.channel); else call(on.note, m.note, 0, m.channel) }
       else if (m.type === 'control') call(on.control, m.control, m.value, m.channel)
+      if (m.channel !== undefined) light(m)
       call(on.all, m)
     }
   }
@@ -643,7 +676,7 @@ export function makeMidiApi(h) {
     return fn
   }
   const channelOf = (o, said) => {
-    const channel = o.channel ?? 1
+    const channel = o.channel ?? choice('output').channel ?? 1
     if (!Number.isInteger(channel) || channel < 1 || channel > 16) throw new Error(`${said}: channel needs a whole number from 1 to 16, not ${h.shown(channel)}`)
     return channel - 1
   }
@@ -774,9 +807,19 @@ export function makeMidiApi(h) {
       return { inputs: [...devices.inputs], outputs: [...devices.outputs], available: devices.available }
     },
     /** Listen to one input by its name (or a list of names), instead of all of them: useMidiInput("Keystation"). No name: all again. */
-    useMidiInput(name) { choose('input', name, 'useMidiInput') },
+    useMidiInput(name) { setDevice('input', '', name, 'useMidiInput') },
     /** Send to one output by its name, instead of the first: useMidiOutput("Minilogue"). No name: the first again. */
-    useMidiOutput(name) { choose('output', name, 'useMidiOutput') },
+    useMidiOutput(name) { setDevice('output', '', name, 'useMidiOutput') },
+    /**
+     * The input a program hears, or with a synth the one that synth plays from, as something a control can be tied to:
+     * get("device"), set("device", name), describe("device").choices (and the same for "channel"), level() and notes().
+     */
+    midiInput(synth) { return port('input', synth) },
+    /** The output a program sends to, or with a synth the one that synth's notes go to: "device" and "channel", the same way. */
+    midiOutput(synth) { return port('output', synth) },
+    // What a midiInput() or midiOutput() that was asked for before this file arrived passes on.
+    setMidiChoice(which, synth, name, value) { port(which, synth).set(name, value) },
+    watchMidiChoice(which, synth, fn) { return port(which, synth).onChange(fn) },
 
     /** For an app whose player is elsewhere: hand this what the player's onMidi gave, and the program's functions are called. */
     receiveMidi: receive,
@@ -784,6 +827,7 @@ export function makeMidiApi(h) {
     stopMidi() {
       for (const fns of Object.values(on)) fns.clear()
       bound.clear()
+      for (const p of chosen.input.values()) if (p.lit) Object.assign(p.lit, { level: 0, held: new Set() })
       listening = clockOn = false
       midi({ do: 'stop', t: h.clock() })
     },
@@ -795,7 +839,10 @@ export function makeMidiApi(h) {
       if (o === false) { midi({ do: 'play', id: synth._id, on: false }); return synth }
       o = optionsOf(o, 'playFromMidi')
       const c = { do: 'play', id: synth._id, vibrato: [synth.get('vibrato') || 0, o.vibrato === undefined ? 0.5 : h.amount(o.vibrato, 'playFromMidi: vibrato', 0, 12)] }
-      if (o.channel !== undefined) c.channel = channelOf(o, 'playFromMidi') + 1
+      // The channel is the synth's own choice, which midiInput() shows: one that is not said stays as it was.
+      const p = choice('input', synth._id)
+      if (o.channel !== undefined) { p.channel = channelFrom(o.channel, 'playFromMidi', true); changed(p, 'channel') }
+      if (p.channel != null) c.channel = p.channel
       midi(c)
       return synth
     },
@@ -803,9 +850,16 @@ export function makeMidiApi(h) {
     sendToMidi(synth, o) {
       if (o === false) { midi({ do: 'through', id: synth._id, on: false }); return synth }
       o = optionsOf(o, 'sendToMidi')
-      const c = { do: 'through', id: synth._id, channel: channelOf(o, 'sendToMidi') + 1, note: synth._note }
-      if (o.output != null) c.output = String(o.output)
+      const p = choice('output', synth._id)
+      if (o.channel !== undefined) p.channel = channelFrom(o.channel, 'sendToMidi', false)
+      if (o.output !== undefined) setDevice('output', synth._id, o.output, 'sendToMidi', true)
+      const c = { do: 'through', id: synth._id, note: synth._note }
+      if (p.channel != null) c.channel = p.channel
+      const output = there('output', p)
+      if (output) c.output = output[0]
+      p.sent = JSON.stringify(output ? output[0] : null)
       midi(c)
+      if (o.channel !== undefined) changed(p, 'channel')
       return synth
     },
     /** lead.mapMidi(74, "cutoff"): knob 74 turns the cutoff, through the setting's own range. A function is called with each new value; { min, max, channel } narrow it. */
@@ -830,13 +884,177 @@ export function makeMidiApi(h) {
     close() { if (typeof joined === 'function') joined() },
   }
 
-  function choose(which, name, said) {
-    if (name !== undefined && name !== null && typeof name !== 'string' && !(which === 'input' && Array.isArray(name))) throw new Error(`${said} needs the name of a MIDI device, as in ${said}(midiDevices().${which}s[0]), not ${h.shown(name)}`)
+  // --- THE CHOICE of a device and a channel: the program's own, and each synth's. useMidiInput and a select on the
+  // screen set the same thing. The desk is told a device only while it is there: one that is not, or that is
+  // pulled out, leaves every input listened to (or the first output sent to) until it appears, which is said once.
+
+  const W = MIDI_CHOICES
+  function choice(which, id = '') {
+    let p = chosen[which].get(id)
+    if (!p) chosen[which].set(id, p = { which, id, device: null, channel: null, sent: 'null', seen: false, gone: false, watchers: new Set(), lit: null, target: null })
+    return p
+  }
+  // The devices chosen that are there now, or null. Until the devices are known a choice is taken at its word.
+  function there(which, p) {
+    if (p.device == null) return null
     const known = devices[which + 's']
-    for (const n of name == null ? [] : [].concat(name)) {
-      if (devices.available && !known.includes(n)) h.tell(`${said}(${h.shown(n)}): there is no MIDI ${which} called ${h.shown(n)} at the moment. ${known.length ? `The ${which}s are: ${known.map(h.shown).join(', ')}` : `No MIDI ${which} is plugged in`}. It will be used if it appears.`)
+    const list = [].concat(p.device).filter((n) => devices.available === null || known.includes(n))
+    return list.length ? list : null
+  }
+  const changed = (p, name) => call(p.watchers, name)
+  const withId = (p, c) => (p.id === '' ? c : { ...c, id: p.id })
+  // Tell the desk the device, if what it was last told is no longer so.
+  function sync(p) {
+    const list = there(p.which, p)
+    const name = !list ? null : list.length === 1 || p.which === 'output' ? list[0] : list
+    if (p.sent === (p.sent = JSON.stringify(name))) return
+    midi(withId(p, { do: p.which, name }))
+  }
+  const listed = (which) => (devices[which + 's'].length ? `The ${which}s are: ${devices[which + 's'].map(h.shown).join(', ')}` : `No MIDI ${which} is plugged in`)
+  const meanwhile = (which) => (which === 'input' ? 'every input is listened to' : 'what is sent goes to the first output there is')
+  // The devices are known, or one has come or gone.
+  function arrived() {
+    for (const which of ['input', 'output']) {
+      for (const p of chosen[which].values()) {
+        if (p.device != null && devices.available) {
+          const here = !!there(which, p)
+          if (here) { p.seen = true; p.gone = false } else if (!p.gone) {
+            p.gone = true
+            const name = h.shown([].concat(p.device)[0])
+            h.tell(p.seen ? `the MIDI ${which} ${name} is not there any more, so ${meanwhile(which)}. It is chosen again if it comes back.` : `there is no MIDI ${which} called ${name} at the moment. ${listed(which)}. Until it appears ${meanwhile(which)}.`)
+          }
+          sync(p)
+        }
+        changed(p, 'device')
+      }
     }
-    midi({ do: which, name: name ?? null })
+  }
+  function setDevice(which, id, name, said, quiet) {
+    if (name !== undefined && name !== null && typeof name !== 'string' && !(which === 'input' && Array.isArray(name) && name.every((n) => typeof n === 'string'))) throw new Error(`${said} needs the name of a MIDI device, as in ${said}(midiDevices().${which}s[0]), not ${h.shown(name)}`)
+    const p = choice(which, id)
+    const none = name == null || name === '' || name === W.none || name === W.unavailable || (which === 'input' && name === W.all) || (Array.isArray(name) && !name.length)
+    Object.assign(p, { device: none ? null : name, seen: false, gone: false })
+    if (!none && devices.available) {
+      if (there(which, p)) p.seen = true
+      else {
+        p.gone = true
+        h.tell(`${said}(${h.shown(name)}): there is no MIDI ${which} called ${h.shown([].concat(name)[0])} at the moment. ${listed(which)}. Until it appears ${meanwhile(which)}.`)
+      }
+    }
+    if (!quiet) sync(p)
+    changed(p, 'device')
+    // A synth with no output of its own follows the program's.
+    if (which === 'output' && id === '') for (const other of chosen.output.values()) if (other !== p) changed(other, 'device')
+    return p
+  }
+  // A channel as it may be said: 3, "3", and for an input "all" (or nothing) for every channel.
+  function channelFrom(value, said, all) {
+    if (all && (value === null || value === W.all || value === 0 || value === '0' || value === '')) return null
+    const n = typeof value === 'string' && /^\d+$/.test(value) ? +value : value
+    if (!Number.isInteger(n) || n < 1 || n > 16) throw new Error(`${said}: channel needs ${all ? '"all" or ' : ''}a whole number from 1 to 16, not ${h.shown(value)}`)
+    return n
+  }
+  // Where the device chosen on the screen is kept for next time. No storage, or one that refuses, is no trouble.
+  function kept(which, name) {
+    try {
+      const store = h.storage === false ? null : h.storage || (typeof document !== 'undefined' ? globalThis.localStorage : null)
+      if (!store) return null
+      const key = 'synths.midi.' + which
+      if (name === undefined) return store.getItem(key)
+      if (name === null) store.removeItem(key)
+      else store.setItem(key, name)
+    } catch (e) { /* a page that may keep nothing */ }
+    return null
+  }
+  // AN ACTIVITY LIGHT: a note lights an input as hard as it was hit and anything else a little, and the light fades.
+  function light(m) {
+    for (const p of chosen.input.values()) {
+      if (!p.lit) continue
+      if (p.id !== '') {
+        const own = there('input', p)
+        if ((p.channel != null && p.channel !== m.channel) || (own && devices.available && !own.includes(m.device))) continue
+      }
+      if (m.type === 'noteOff') { p.lit.held.delete(m.note); continue }
+      if (m.type === 'noteOn') p.lit.held.add(m.note)
+      else if (m.type === 'control' && (m.control === 120 || m.control === 123)) p.lit.held.clear()
+      const level = m.type === 'noteOn' ? m.velocity : 0.25
+      if (level >= levelOf(p)) Object.assign(p.lit, { level, at: tick() })
+    }
+  }
+  const levelOf = (p) => { const v = p.lit ? p.lit.level * Math.pow(0.5, (tick() - p.lit.at) / 90) : 0; return v < 0.02 ? 0 : v }
+
+  /** What midiInput() and midiOutput() give: a target for a control (set, get, describe), and plain properties for code. */
+  function port(which, synth) {
+    const input = which === 'input'
+    const id = synth ? synth._id : ''
+    const p = choice(which, id)
+    if (p.target) return p.target
+    const said = input ? 'midiInput' : 'midiOutput'
+    const mine = () => (id === '' ? null : choice(which))
+    const deviceNow = () => {
+      if (devices.available === false) return W.unavailable
+      const known = devices[which + 's']
+      if (!known.length) return W.none
+      const own = there(which, p)
+      if (input) return own ? own[0] : W.all
+      return own?.[0] ?? (mine() && there(which, mine())?.[0]) ?? known[0]
+    }
+    const channelNow = () => (input ? p.channel ?? W.all : p.channel ?? mine()?.channel ?? 1)
+    const watch = () => { if (!p.lit) p.lit = { level: 0, at: 0, held: new Set() }; listen() }
+    const t = {
+      names: [...W.settings],
+      get(name) { return name === 'device' ? deviceNow() : name === 'channel' ? String(channelNow()) : undefined },
+      set(name, value) {
+        if (name === 'device') {
+          if (devices.available === false && value !== W.unavailable && value != null) return t
+          setDevice(which, id, value, `${said}().device`)
+          if (id === '') kept(which, typeof p.device === 'string' ? p.device : null)
+        } else if (name === 'channel') {
+          const channel = channelFrom(value, `${said}()`, input)
+          if (channel !== p.channel) {
+            p.channel = channel
+            midi(withId(p, { do: which, channel }))
+            changed(p, 'channel')
+            if (!input && id === '') for (const other of chosen.output.values()) if (other !== p) changed(other, 'channel')
+          }
+        } else throw new Error(`${said}() has "device" and "channel", and no ${h.shown(name)}`)
+        return t
+      },
+      /** What a control needs to know: the choices there are NOW. They change as devices come and go: onChange says when. */
+      describe(name) {
+        if (name === 'device') {
+          const known = devices[which + 's']
+          const choices = devices.available === false ? [W.unavailable] : !known.length ? [W.none] : input ? [W.all, ...known] : [...known]
+          return { name, kind: 'text', choices, default: choices[0] }
+        }
+        if (name === 'channel') {
+          const numbers = Array.from({ length: 16 }, (_, i) => String(i + 1))
+          return { name, kind: 'text', choices: input ? [W.all, ...numbers] : numbers, default: input ? W.all : '1' }
+        }
+        return undefined
+      },
+      /** midiIn.onChange((name) => { ... }): called with "device" or "channel" when its value or its choices change. It gives back a function that stops it. */
+      onChange(fn) { p.watchers.add(callback(`${said}().onChange`, fn, '(name)')); return () => p.watchers.delete(fn) },
+      get device() { return deviceNow() },
+      set device(name) { t.set('device', name) },
+      get channel() { return channelNow() },
+      set channel(channel) { t.set('channel', channel) },
+    }
+    t.on_change = t.onChange
+    if (input) {
+      /** How hard the last note was hit, fading: from 0 to 1, for a meter that is an activity light. */
+      t.level = () => { watch(); return levelOf(p) }
+      /** The keys held down on this input now, as numbers. */
+      t.notes = () => { watch(); return [...p.lit.held] }
+    }
+    p.target = t
+    // The device chosen on the screen last time, unless the program has said one itself.
+    if (id === '' && p.device == null) {
+      const last = kept(which)
+      if (typeof last === 'string' && last) { Object.assign(p, { device: last, gone: true }); sync(p) }
+    }
+    ask()
+    return t
   }
 
   // A clock that is being sent keeps up with setTempo.

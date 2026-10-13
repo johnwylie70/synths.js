@@ -100,7 +100,7 @@ async function midiSound(options = {}, transport = pretend()) {
   say(same(encodeMidi({ type: 'noteOn', note: 60, velocity: 0.001 }), [0x90, 60, 1]) && /no kind of MIDI message called "nope"/.test(thrown(() => encodeMidi({ type: 'nope' }))), 'a note that is only just played is still a note-on, and a kind that does not exist is said so', null)
 
   const names = describe().midi
-  say(same(names.functions, midi.MIDI_FUNCTIONS) && same(names.synthFunctions, midi.MIDI_SYNTH_FUNCTIONS) && same(names.types, midi.MIDI_TYPES), 'the names synths.js lists for other languages are the ones synths-midi.js has', names)
+  say(same(names.functions, midi.MIDI_FUNCTIONS) && same(names.synthFunctions, midi.MIDI_SYNTH_FUNCTIONS) && same(names.types, midi.MIDI_TYPES) && same(names.choices, midi.MIDI_CHOICES), 'the names synths.js lists for other languages are the ones synths-midi.js has', names)
   say(names.functions.every((n) => typeof synths[n] === 'function' && typeof synths[n.replace(/[A-Z]/g, (c) => '_' + c.toLowerCase())] === 'function'), 'every MIDI function is exported, in its Python spelling too', null)
 }
 
@@ -409,6 +409,236 @@ async function midiSound(options = {}, transport = pretend()) {
   say(same(tempos, [125]), 'a clock arriving 24 ticks a beat is told as a tempo, once it is known', tempos)
 }
 
+// --- the device and the channel as a target, for a select on the screen
+{
+  // Asked for in a program's first line, before MIDI's file has arrived: it answers at once, and what is set waits.
+  const early = pretend(['Keys'], ['Box'])
+  const earlyPlayer = await createOfflinePlayer({ midi: early })
+  const first = createSound({ sound: earlyPlayer, clock: () => 0, midiStorage: false })
+  const soon = first.midiInput()
+  const names = []
+  const stop = soon.onChange((name) => names.push(name))
+  const before = [soon.get('device'), soon.get('channel'), soon.describe('device').choices, soon.describe('channel').choices.length, soon.level(), soon.notes()]
+  soon.set('channel', 2)
+  await first.settled()
+  for (let i = 0; i < 200 && first.midiDevices().available === null; i++) await wait(5)
+  say(same(before, ['no devices', 'all', ['no devices'], 17, 0, []]) && soon.get('channel') === '2' && soon.channel === 2 && soon.get('device') === 'all' && same(soon.describe('device').choices, ['all', 'Keys']) && names.includes('channel') && names.includes('device') && first.midiInput() === soon,
+    'midiInput() answers in a program\'s first line, before MIDI is loaded; what was set then is set, and onChange says when the devices are known', [before, soon.get('channel'), soon.describe('device'), names])
+  stop()
+  names.length = 0
+  soon.set('channel', 'all')
+  say(names.length === 0 && soon.channel === 'all', 'what onChange gives back stops it', names)
+
+  // The choices follow the devices.
+  const transport = pretend([], [])
+  const { sound, render } = await midiSound({}, transport)
+  const midiIn = sound.midiInput()
+  const lead = sound.makeSynth(CLICK).playFromMidi()
+  const heard = []
+  sound.onMidiNote((note, velocity, channel) => { if (velocity > 0) heard.push([note, channel]) })
+  const changes = []
+  midiIn.onChange((name) => changes.push(name))
+  say(same(midiIn.describe('device'), { name: 'device', kind: 'text', choices: ['no devices'], default: 'no devices' }) && midiIn.get('device') === 'no devices' && same(midiIn.names, ['device', 'channel']),
+    'with nothing plugged in the one choice of device is "no devices"', midiIn.describe('device'))
+  transport.change(['Keys'], [])
+  const one = [midiIn.describe('device').choices, midiIn.get('device'), [...changes]]
+  transport.change(['Keys', 'Pads'], [])
+  say(same(one, [['all', 'Keys'], 'all', ['device']]) && same(midiIn.describe('device').choices, ['all', 'Keys', 'Pads']) && changes.length === 2, 'a device that is plugged in later is among the choices, after "all", and onChange("device") says so', [one, midiIn.describe('device')])
+  say(same(midiIn.describe('channel').choices, ['all', '1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16']) && midiIn.get('channel') === 'all', 'the channels are "all" and 1 to 16', midiIn.describe('channel'))
+
+  // Choosing a device: what plays the synth, and what the program's functions hear.
+  const play = async (bytes, input) => {
+    transport.play(bytes, input)
+    const loud = peak(await render(0.1))
+    transport.play([0x80 | (bytes[0] & 15), bytes[1], 0], input)
+    await render(0.1)
+    return loud
+  }
+  midiIn.set('device', 'Pads')
+  sound.flush()
+  const fromKeys = await play([0x90, 60, 127], 'Keys')
+  const fromPads = await play([0x90, 62, 127], 'Pads')
+  say(midiIn.get('device') === 'Pads' && midiIn.device === 'Pads' && fromKeys === 0 && fromPads > 0.2 && same(heard, [[62, 1]]), 'set("device", "Pads"): only that device plays the synth and reaches onMidiNote', [fromKeys, fromPads, heard])
+  // A key held when the choice changes is let go.
+  transport.play([0x90, 64, 127], 'Pads')
+  await render(0.1)
+  midiIn.device = 'all'
+  const held = peak((await render(0.2)).slice(2400))
+  say(held === 0 && midiIn.get('device') === 'all', 'a key that is down when the device is changed is let go, since its coming up might never be heard', held)
+
+  // Choosing a channel.
+  heard.length = 0
+  midiIn.set('channel', '3')
+  sound.flush()
+  const onOne = await play([0x90, 60, 127], 'Keys')
+  const onThree = await play([0x92, 65, 127], 'Keys')
+  say(onOne === 0 && onThree > 0.2 && same(heard, [[65, 3]]) && midiIn.get('channel') === '3' && midiIn.channel === 3, 'set("channel", "3"): only channel 3 plays the synth and reaches onMidiNote', [onOne, onThree, heard])
+  // A knob on another channel is not learnt.
+  const learnt = []
+  sound.onMidi((m) => { if (m.type === 'learned') learnt.push([m.control, m.channel]) })
+  lead.learn('volume')
+  sound.flush()
+  transport.play([0xb0, 20, 64], 'Keys')
+  transport.play([0xb2, 21, 64], 'Keys')
+  say(same(learnt, [[21, 3]]), 'learn waits for a knob on the channel that was chosen', learnt)
+  midiIn.channel = 'all'
+  const wrong = [() => midiIn.set('channel', 17), () => midiIn.set('channel', 'loud'), () => midiIn.set('colour', 1), () => midiIn.set('device', 5), () => midiIn.onChange('x')].map(thrown)
+  say(/channel needs "all" or a whole number from 1 to 16, not 17/.test(wrong[0]) && /not "loud"/.test(wrong[1]) && /midiInput\(\) has "device" and "channel", and no "colour"/.test(wrong[2]) && /needs the name of a MIDI device/.test(wrong[3]) && /onChange needs a function/.test(wrong[4]) && midiIn.describe('colour') === undefined,
+    'a channel, a setting or a device that cannot be is said in plain words', wrong)
+
+  // The chosen device is pulled out, and plugged in again.
+  midiIn.set('device', 'Pads')
+  sound.flush()
+  heard.length = 0
+  changes.length = 0
+  const said = await saying(async () => {
+    transport.change(['Keys'], [])
+    transport.change(['Keys'], [])
+    sound.flush()
+  })
+  const gone = [midiIn.get('device'), midiIn.describe('device').choices, await play([0x90, 67, 127], 'Keys')]
+  say(same(gone.slice(0, 2), ['all', ['all', 'Keys']]) && gone[2] > 0.2 && said.length === 1 && /the MIDI input "Pads" is not there any more, so every input is listened to\. It is chosen again if it comes back\./.test(said[0]) && changes.includes('device'),
+    'when the chosen device is pulled out the choice falls back to "all", which is said once, and the other devices are heard', [gone, said])
+  transport.change(['Keys', 'Pads'], [])
+  sound.flush()
+  const back = [midiIn.get('device'), await play([0x90, 60, 127], 'Keys'), await play([0x90, 60, 127], 'Pads')]
+  say(back[0] === 'Pads' && back[1] === 0 && back[2] > 0.2, 'and when it is plugged in again it is chosen again', back)
+  const absent = await saying(() => { sound.useMidiInput('Organ'); sound.flush() })
+  say(absent.length === 1 && /useMidiInput\("Organ"\): there is no MIDI input called "Organ" at the moment\. The inputs are: "Keys", "Pads"\. Until it appears every input is listened to\./.test(absent[0]) && midiIn.get('device') === 'all',
+    'useMidiInput is the same choice made in code: the select shows it, and a device that is not there is said', [absent, midiIn.get('device')])
+  sound.useMidiInput('Keys')
+  say(midiIn.get('device') === 'Keys' && changes[changes.length - 1] === 'device', 'and one that is there moves the select', midiIn.get('device'))
+}
+
+// --- two synths on two channels split a keyboard, and an activity light
+{
+  const transport = pretend(['Keys', 'Pads'], ['Box'])
+  const { sound, render } = await midiSound({}, transport)
+  const lead = sound.makeSynth(CLICK).playFromMidi()
+  const bass = sound.makeSynth(CLICK).playFromMidi({ channel: 2 })
+  const leadIn = lead.midiInput()
+  const bassIn = bass.midiInput()
+  say(bassIn.get('channel') === '2' && leadIn.get('channel') === 'all' && lead.midi_input() === leadIn && bassIn !== leadIn && sound.midiInput() !== leadIn, 'every synth has a midiInput() of its own, which shows the channel playFromMidi was given', [bassIn.get('channel'), leadIn.get('channel')])
+  leadIn.set('channel', 1)
+  sound.flush()
+  transport.play([0x90, 69, 127])
+  let a = await render(1)
+  const high = [peak(a), crossings(a, 0, 1)]
+  transport.play([0x80, 69, 0, 0x91, 45, 127])
+  await render(0.1)
+  a = await render(1)
+  const low = [peak(a), crossings(a, 0, 1)]
+  transport.play([0x81, 45, 0])
+  await render(0.1)
+  say(Math.abs(high[1] - 440) <= 2 && Math.abs(low[1] - 110) <= 2 && low[0] < high[0] * 1.3 && high[0] > 0.2, 'channel 1 plays the lead and channel 2 the bass, each alone: a split keyboard', [high, low])
+  // The bass moves to another device: the lead still hears every one.
+  bassIn.device = 'Pads'
+  sound.flush()
+  transport.play([0x91, 45, 127], 'Keys')
+  const keys = peak(await render(0.1))
+  transport.play([0x91, 45, 127], 'Pads')
+  const pads = peak(await render(0.1))
+  transport.play([0x81, 45, 0], 'Pads')
+  await render(0.1)
+  say(keys === 0 && pads > 0.2 && bassIn.get('device') === 'Pads' && leadIn.get('device') === 'all', 'and a synth can have a device of its own', [keys, pads])
+
+  // The activity light.
+  const midiIn = sound.midiInput()
+  const dark = [midiIn.level(), bassIn.level() + leadIn.level(), midiIn.notes()]
+  sound.flush()
+  transport.play([0x90, 60, 100], 'Keys')
+  const lit = [midiIn.level(), leadIn.level(), bassIn.level(), midiIn.notes(), leadIn.notes(), bassIn.notes()]
+  await wait(60)
+  const fading = midiIn.level()
+  transport.play([0x80, 60, 0], 'Keys')
+  await wait(700)
+  const out = [midiIn.level(), midiIn.notes()]
+  say(same(dark, [0, 0, []]) && near(lit[0], 100 / 127, 0.02) && near(lit[1], 100 / 127, 0.02) && lit[2] === 0 && same(lit.slice(3), [[60], [60], []]) && fading > 0.2 && fading < lit[0] && same(out, [0, []]),
+    'level() rises with a note as hard as it was hit and fades to nothing, notes() is the keys held, and a synth\'s own input lights only for what plays it', [dark, lit, fading, out])
+  transport.play([0xb1, 7, 100], 'Pads')
+  say(near(bassIn.level(), 0.25, 0.02) && leadIn.level() === 0, 'a knob lights it a little', [bassIn.level(), leadIn.level()])
+  await render(0.1)
+}
+
+// --- the output chosen the same way
+{
+  const transport = pretend(['Keys'], ['Box', 'Rack'])
+  const { sound } = await midiSound({}, transport)
+  const sent = () => { sound.flush(); return transport.sent.splice(0).map((m) => [m[0][0], m[0][1], m[2]]) }
+  const midiOut = sound.midiOutput()
+  say(same(midiOut.describe('device').choices, ['Box', 'Rack']) && midiOut.get('device') === 'Box' && same(midiOut.describe('channel').choices.length, 16) && midiOut.get('channel') === '1' && midiOut.level === undefined,
+    'midiOutput(): the choices are the outputs, and the first is where things go until one is chosen', midiOut.describe('device'))
+  midiOut.set('device', 'Rack')
+  midiOut.set('channel', '5')
+  sound.sendMidiNote('C4', { length: null })
+  sound.sendMidiNote('D4', { length: null, channel: 2, output: 'Box' })
+  say(same(sent(), [[0x94, 60, 'Rack'], [0x91, 62, 'Box']]) && midiOut.channel === 5, 'what is sent goes to the output and the channel chosen, unless it says its own', null)
+  const lead = sound.makeSynth('lead').sendToMidi()
+  const kick = sound.makeSynth('kick').sendToMidi({ channel: 10 })
+  const kickOut = kick.midiOutput()
+  lead.noteOn('E4')
+  kick.play()
+  const through = sent()
+  say(same(through.filter((m) => (m[0] & 0xf0) === 0x90), [[0x94, 64, 'Rack'], [0x99, 36, 'Rack']]) && kickOut.get('channel') === '10' && kickOut.get('device') === 'Rack' && lead.midiOutput().get('channel') === '5',
+    'a synth that sends to MIDI follows it, and one with a channel of its own keeps that', through)
+  // A note that is held is let go where it was sent, when the synth is sent somewhere else.
+  lead.midiOutput().set('device', 'Box')
+  lead.midiOutput().channel = 3
+  const moved = sent()
+  lead.noteOff('E4')
+  lead.noteOn('G4')
+  const after = sent()
+  say(moved.some((m) => same(m, [0x84, 64, 'Rack'])) && after.some((m) => same(m, [0x92, 67, 'Box'])), 'a note that is sounding is let go where it was sent when its synth is given another output', [moved, after])
+  const said = await saying(() => { transport.change(['Keys'], ['Box']); sound.flush() })
+  sound.sendMidiNote('C4', { length: null })
+  say(midiOut.get('device') === 'Box' && same(midiOut.describe('device').choices, ['Box']) && said.length === 1 && /the MIDI output "Rack" is not there any more, so what is sent goes to the first output there is/.test(said[0]) && same(sent().filter((m) => m[0] === 0x94), [[0x94, 60, undefined]]),
+    'when the chosen output is pulled out the first there is takes its place, which is said once', said)
+}
+
+// --- the device chosen on the screen is kept for next time, where the page may keep things
+{
+  const shelf = new Map()
+  const storage = { getItem: (k) => (shelf.has(k) ? shelf.get(k) : null), setItem: (k, v) => shelf.set(k, String(v)), removeItem: (k) => shelf.delete(k) }
+  const open = async (midiStorage) => {
+    const transport = pretend(['Keys', 'Pads'], ['Box'])
+    const player = await createOfflinePlayer({ midi: transport })
+    const sound = createSound({ sound: player, clock: () => 0, batch: 'manual', midiStorage })
+    return { sound, transport, player }
+  }
+  const ready = async (sound) => { for (let i = 0; i < 200 && sound.midiDevices().available === null; i++) { sound.flush(); await wait(5) } }
+  const one = await open(storage)
+  one.sound.midiDevices()
+  await ready(one.sound)
+  one.sound.midiInput().set('device', 'Pads')
+  one.sound.midiInput().set('channel', 4)
+  say(same([...shelf], [['synths.midi.input', 'Pads']]), 'a device chosen with set is kept by its name', [...shelf])
+  const two = await open(storage)
+  const midiIn = two.sound.midiInput()
+  await ready(two.sound)
+  const heard = []
+  two.sound.onMidiNote((note) => heard.push(note))
+  two.sound.flush()
+  two.transport.play([0x90, 60, 100], 'Keys')
+  two.transport.play([0x90, 61, 100], 'Pads')
+  say(midiIn.get('device') === 'Pads' && midiIn.get('channel') === 'all' && same(heard, [61]), 'and is the choice the next time, as soon as midiInput() is asked for', [midiIn.get('device'), heard])
+  midiIn.set('device', 'all')
+  say(shelf.size === 0, 'choosing "all" forgets it', [...shelf])
+  shelf.set('synths.midi.input', 'Harp')
+  const three = await open(storage)
+  const quiet = await saying(async () => { three.sound.midiInput(); await ready(three.sound) })
+  say(three.sound.midiInput().get('device') === 'all' && quiet.length === 0, 'a kept device that is not plugged in is "all", with nothing said', quiet)
+  const four = await open(storage)
+  four.sound.useMidiInput('Keys')
+  await ready(four.sound)
+  say(four.sound.midiInput().get('device') === 'Keys' && shelf.get('synths.midi.input') === 'Harp', 'a device the program chooses in code is not kept, and comes before the kept one', [...shelf])
+  const refuses = { getItem() { throw new Error('no') }, setItem() { throw new Error('no') }, removeItem() { throw new Error('no') } }
+  const five = await open(refuses)
+  const none = await open(false)
+  await ready(five.sound)
+  const threw = thrown(() => { five.sound.midiInput().set('device', 'Pads'); five.sound.midiInput().set('device', 'all'); none.sound.midiInput().set('device', 'Pads') })
+  say(threw === null && five.sound.midiInput().get('device') === 'all', 'storage that refuses, or none at all, throws nothing', threw)
+}
+
 // --- where there is no MIDI
 {
   const run = async (options) => {
@@ -416,6 +646,7 @@ async function midiSound(options = {}, transport = pretend()) {
     const sound = createSound({ sound: player, clock: () => 0 })
     let devices = null
     let threw = null
+    let target = null
     const said = await saying(async () => {
       try {
         sound.onMidiDevices((d) => { devices = d })
@@ -428,18 +659,24 @@ async function midiSound(options = {}, transport = pretend()) {
         await wait(60)
         sound.sendMidiControl(1, 1)
         sound.midiDevices()
+        const midiIn = sound.midiInput()
+        const midiOut = sound.midi_output()
+        midiIn.set('device', 'Keys').set('channel', 2)
+        midiOut.device = 'Box'
+        target = [midiIn.get('device'), midiIn.describe('device').choices, midiIn.get('channel'), midiIn.level(), midiIn.notes(), midiOut.get('device'), midiOut.describe('device').choices]
         sound.stopMidi()
         await wait(30)
       } catch (e) { threw = e.message }
     })
     const heard = peak((await player.render(0.3)).left)
-    return { said, devices, threw, heard, now: sound.midiDevices() }
+    return { said, devices, threw, heard, target, now: sound.midiDevices() }
   }
   // An offline player in node with no transport given: what a browser with no Web MIDI is.
   const none = await run({})
   say(none.threw === null && none.said.length === 1 && /MIDI is not available in this browser\. Use Chrome, Edge or Firefox on a computer \(Safari, iPhones and iPads have no MIDI for web pages\), or the Circuitry app once it supports MIDI\. The rest of your program carries on without it\./.test(none.said[0]),
     'with no MIDI in the browser every MIDI function still works, and one plain message says so and what to use', none)
   say(same(none.devices, { inputs: [], outputs: [], available: false }) && same(none.now, none.devices) && none.heard > 0.05, 'midiDevices() is empty, and the sound plays as ever', [none.devices, none.heard])
+  say(same(none.target, ['no MIDI here', ['no MIDI here'], '2', 0, [], 'no MIDI here', ['no MIDI here']]), 'midiInput() and midiOutput() are still there: their one choice of device is "no MIDI here", and setting them does nothing wrong', none.target)
   const off = await run({ midi: false })
   say(off.threw === null && off.said.length === 1 && /MIDI is switched off for this page/.test(off.said[0]) && off.devices.available === false, 'midi: false switches it off, with one message', off.said)
   const broken = await run({ midi: { open() { throw new Error('no CoreMIDI') }, inputs: () => [], outputs: () => [], send() {}, receive() {} } })
@@ -474,6 +711,32 @@ async function midiSound(options = {}, transport = pretend()) {
   transport.play([0xb0, 9, 127])
   const a = (await player.render(0.5)).left
   say(peak(a) > 0.05 && same(got, [[60, 1], 20000]) && Math.round(lead.cutoff) === 20000 && same(transport.sent.map((m) => m[1]), [1000, 2000]), 'a player elsewhere plays the keyboard itself and hands back what the program asked to hear, through receiveMidi', [peak(a), got, transport.sent])
+  // The choice of a device and a channel is commands too, and the choices are the devices the player said it has.
+  batches.length = 0
+  const midiIn = sound.midiInput()
+  const choices = [midiIn.describe('device').choices, sound.midiOutput().describe('device').choices]
+  midiIn.set('device', 'Keys')
+  midiIn.set('channel', 2)
+  midiIn.set('channel', 'all')
+  lead.midiInput().set('device', 'Keys').set('channel', 5)
+  sound.midiOutput().set('device', 'Box').set('channel', 9)
+  lead.midiOutput().set('channel', 4)
+  lead.sendToMidi()
+  sound.sendMidiControl(7, 1)
+  sound.flush()
+  say(same(choices, [['all', 'Keys'], ['Box']]) && same(batches.flatMap((b) => b.cmds), [
+    { op: 'midi', do: 'devices' },
+    { op: 'midi', do: 'input', name: 'Keys' },
+    { op: 'midi', do: 'input', channel: 2 },
+    { op: 'midi', do: 'input', channel: null },
+    { op: 'midi', do: 'input', name: 'Keys', id: 'a:s1' },
+    { op: 'midi', do: 'input', channel: 5, id: 'a:s1' },
+    { op: 'midi', do: 'output', name: 'Box' },
+    { op: 'midi', do: 'output', channel: 9 },
+    { op: 'midi', do: 'output', channel: 4, id: 'a:s1' },
+    { op: 'midi', do: 'through', id: 'a:s1', note: 60, channel: 4 },
+    { op: 'midi', do: 'send', bytes: [0xb8, 7, 127], t: 5 },
+  ]), 'choosing a device or a channel writes an input or an output command, with the synth\'s id for a synth\'s own', [choices, batches.flatMap((b) => b.cmds)])
 }
 
 console.log(`${count - failed} of ${count} passed`)
