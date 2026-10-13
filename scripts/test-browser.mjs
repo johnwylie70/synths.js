@@ -19,8 +19,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const PICTURES = resolve(ROOT, '../pictures.js')
-const CONTROLS = resolve(ROOT, '../controls.js')
-const DIALS = resolve(ROOT, '../dials.js')
+const CONTROLS = resolve(ROOT, '../dials.js')
 const from = process.env.PLAYWRIGHT || 'playwright'
 const playwright = await import(from.startsWith('/') ? pathToFileURL(join(from, 'index.mjs')).href : from)
 
@@ -29,7 +28,7 @@ const server = createServer(async (req, res) => {
   const path = decodeURIComponent(new URL(req.url, 'http://x').pathname)
   if (path === '/test.html') return res.writeHead(200, { 'content-type': 'text/html' }).end('<!doctype html><body><button id="b" style="width:200px;height:100px">tap</button>')
   // pictures.js, for the example that draws: from the repository beside this one.
-  const file = path.startsWith('/pictures.js/') ? join(PICTURES, path.slice(13)) : path.startsWith('/controls.js/') ? join(CONTROLS, path.slice(13)) : path.startsWith('/dials.js/') ? join(DIALS, path.slice(10)) : join(ROOT, path)
+  const file = path.startsWith('/pictures.js/') ? join(PICTURES, path.slice(13)) : path.startsWith('/dials.js/') ? join(CONTROLS, path.slice(10)) : join(ROOT, path)
   let body
   try { body = await readFile(file) } catch { return res.writeHead(404).end() }
   res.writeHead(200, { 'content-type': TYPES[extname(path)] || 'application/octet-stream', 'access-control-allow-origin': '*' }).end(body)
@@ -239,6 +238,32 @@ async function withSound(name, browser) {
   say(got.one && JSON.stringify([got.notes, got.after]) === '[[[57],[81]],[[],[81]]]' && got.rested === 'suspended' && JSON.stringify(got.woke) === '["running",true]' && got.still === 'on' && got.end === 'closed', name,
     'three createSound() on a page share one player and one sound card: each stops alone, the sound card rests when all are paused, and the player closes when the last one does', got)
 
+  // --- a song, fetched and played by the engine in the worklet, and where it is read back
+  await fresh(page)
+  got = await page.evaluate(async () => {
+    const { createSound } = await import('/synths.js')
+    const s = createSound()
+    const song = s.playSong('/examples/songs/night_drive.json', { patches: { tune: 'bell' } })
+    await T.on(() => s.player)
+    song.position                        // the first read asks; the answer comes a moment later
+    const heard = await T.listen(s.player, 1200)
+    const first = song.position
+    await T.wait(500)
+    const later = song.position
+    song.pause()
+    await T.wait(600)
+    const paused = [song.position.state, (await T.listen(s.player, 200)).peak]
+    song.resume()
+    song.seek(3)
+    await T.wait(300)
+    const sought = song.position
+    s.stopSong()
+    await T.wait(600)
+    return { heard, first, later, paused, sought, end: [song.position.state, (await T.listen(s.player, 200)).peak] }
+  })
+  say(got.heard.peak > 0.1 && got.first.state === 'playing' && got.first.tempo === 125 && (got.later.row > got.first.row || got.later.order > got.first.order) && got.paused[0] === 'paused' && got.paused[1] < 0.05 && got.sought.order === 3 && got.sought.state === 'playing' && got.end[0] === 'stopped' && got.end[1] < 0.02, name,
+    `playSong fetches a song and the engine plays it in the worklet: it is heard, its position moves (row ${got.first?.row} then ${got.later?.row}), and it pauses, seeks and stops`, got)
+
   // --- an arpeggio in the worklet
   await fresh(page)
   got = await page.evaluate(async () => {
@@ -447,7 +472,7 @@ async function examples(name, browser) {
   for (const file of files) {
     const source = await readFile(join(ROOT, 'examples', file), 'utf8')
     const scene = source.includes('await use(')
-    if (scene && !(existsSync(join(PICTURES, 'pictures.js')) && (!source.includes('controls.js') || existsSync(join(CONTROLS, 'controls.js'))) && (!source.includes('dials.js') || existsSync(join(DIALS, 'dials.js'))))) { console.log(`     ${name}: ${file} needs pictures.js (and controls.js) beside this repository, skipped`); continue }
+    if (scene && !(existsSync(join(PICTURES, 'pictures.js')) && (!source.includes('dials.js') || existsSync(join(CONTROLS, 'dials.js'))))) { console.log(`     ${name}: ${file} needs pictures.js (and dials.js) beside this repository, skipped`); continue }
     await page.goto(`${at}/examples/index.html?run=${file}${scene ? '&pictures=/pictures.js/pictures.js' : ''}`)
     await page.evaluate(HELPERS)
     // A press that is held and moved, as a person would: the theremin sounds only while something is pressed.
@@ -468,7 +493,7 @@ async function examples(name, browser) {
     if (got.peak > 0.01) heard++
     else silent.push([file, got])
   }
-  say(silent.length === 0 && errors.length === 0 && heard >= 7, name, `all ${heard} examples are heard, with no error`, { silent, errors })
+  say(silent.length === 0 && errors.length === 0 && heard >= 8, name, `all ${heard} examples are heard, with no error`, { silent, errors })
   await context.close()
 }
 

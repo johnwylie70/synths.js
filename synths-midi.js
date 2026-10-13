@@ -599,7 +599,7 @@ export const MIDI_SYNTH_FUNCTIONS = ['playFromMidi', 'sendToMidi', 'mapMidi', 'l
  *   listen(fn)            ask the transport to hand fn what the desk emits; gives back a function that stops it
  *   tempo()               beats a minute
  *   api                   createSound's own functions (setTempo is wrapped so that a clock being sent follows it)
- *   choices, notesOf, shown, amount, meant, tell, remember(synth, setting, value)
+ *   choices, notesOf, shown, amount, length(value, said), meant, tell, remember(synth, setting, value)
  */
 export function makeMidiApi(h) {
   const on = { all: new Set(), note: new Set(), noteOff: new Set(), control: new Set(), devices: new Set() }
@@ -723,15 +723,14 @@ export function makeMidiApi(h) {
       if (!list || !list.length || list.some((b) => !Number.isInteger(b) || b < 0 || b > 255) || list[0] < 0x80) throw new Error(`sendMidi needs the bytes of a MIDI message, beginning with its status byte, as in sendMidi([0x90, 60, 100]), not ${h.shown(bytes)}`)
       out(list, h.when(o, 'sendMidi'), o)
     },
-    /** A note out: sendMidiNote("C4", 0.8, { length: 0.5, channel: 1 }). It is let go after `length` seconds; `length: null` holds it until sendMidiNoteOff. */
+    /** A note out: sendMidiNote("C4", 0.8, { length: 0.5, channel: 1 }). It is let go after `length` (seconds, or a note length such as "eighth"); `length: null` holds it until sendMidiNoteOff. */
     sendMidiNote(...args) {
       const o = h.choices(args, ['note', 'velocity', 'length'])
       const said = 'sendMidiNote'
       if (o.note === undefined || o.note === null) throw new Error('sendMidiNote needs a note, as in sendMidiNote("C4")')
       const notes = notesOut(o.note, said)
       const velocity = o.velocity === undefined ? 0.8 : h.amount(o.velocity, `${said}: velocity`)
-      const length = o.length === undefined ? 0.5 : o.length
-      if (length !== null && (typeof length !== 'number' || !(length > 0))) throw new Error(`${said}: the length needs a number of seconds, more than 0 (or null for a note that is held), not ${h.shown(length)}`)
+      const length = o.length === undefined ? 0.5 : o.length === null ? null : h.length(o.length, `${said}: the length`)
       const channel = channelOf(o, said)
       const t = h.when(o, said)
       for (const note of notes) {

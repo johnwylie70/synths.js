@@ -6,6 +6,8 @@
  *   playNote("C4")                         a note on a pleasant synth: a name or a number (60 is middle C), then how
  *   playNote("C4", 0.5, 0.8)               long in seconds and how loud (0 to 1). A list of notes is a chord
  *   playNotes("C4 E4 G4 - C5", 0.25)       a tune, a step every quarter of a second; "-" is a rest; { repeat: true } loops it
+ *   note("C4", "quarter"), rest("eighth")   a tune a line at a time: each note begins where the last ended. chord("Cm", "half")
+ *   setTempo(120)                          a length by name ("quarter", "eighth.", "1/16") follows the tempo; a number is seconds
  *   const lead = makeSynth("lead")         a synth of your own, from a ready-made one (bass, lead, pad, pluck, organ, chip, …)
  *   const mine = makeSynth({ wave: "saw", cutoff: 1200, attack: 0.01, release: 0.3 })
  *   lead.play("E4", 0.5)                   play a note; lead.play(["C4", "E4", "G4"]) is a chord
@@ -15,9 +17,9 @@
  *   lead.arp("Cm7"), playArp("C4", "minor")   a chord from one voice, as a fast arpeggio (a C64 chord); startArp stays, and changes chord
  *   lead.play("Cm7")                       a chord by name plays all its notes
  *   lead.macro = [{ wave: "noise" }, …]    a step macro: chip drums and moving pulse widths
- *   lead.samples(), .level(), .notes()     what it is doing now, for a scope, a meter and lit keys (controls.js uses these)
+ *   lead.samples(), .level(), .notes()     what it is doing now, for a scope, a meter and lit keys (dials.js uses these)
  *   const drum = loadSample("kick.wav")    a recorded sound from a file; drum.play(), drum.play("E4") at another pitch
- *   playSong("tune.mod")                   a tracker song (not ready yet in this version)
+ *   const song = playSong("tune.mod")      a whole song from a file (.mod, .xm, or our own .json): song.pause(), .seek(2), .volume, .position
  *   setVolume(0.5), muteSound(), unmuteSound(), stopSound()
  *   setEffects({ echoTime: 0.3, reverbSize: 0.8 })
  *   setTempo(120), beats(2)                beats(2) is how many seconds two beats last
@@ -55,6 +57,8 @@ const BASE = (() => {
 })()
 /** The engine's parts that synths are given. The rest (32 to 63) are a tracker song's, one for each channel. */
 const SYNTH_PARTS = 32
+/** The sample slots loadSample is given. A song's samples go in the slots from here on. */
+const SAMPLE_SLOTS = 512
 /** The version of the command format: `synths` in every batch. */
 const COMMANDS = 1
 
@@ -75,6 +79,7 @@ const PARAMS = [
   [9,"unison.detune","f",0,100,20,"cents"],
   [10,"unison.spread","f",0,1,0.5,""],
   [11,"velocity","f",0,1,1,""],
+  [12,"pan.law","c",0,1,0,"",["equal_power","square_root"]],
   [16,"osc1.wave","c",0,4,1,"",["sine","triangle","saw","pulse","sample"]],
   [17,"osc1.level","f",0,1,1,"gain"],
   [18,"osc1.coarse","f",-48,48,0,"semitones"],
@@ -260,6 +265,12 @@ const CHORDS = {
   6: [0, 4, 7, 9], m6: [0, 3, 7, 9], 7: [0, 4, 7, 10], dom7: [0, 4, 7, 10], maj7: [0, 4, 7, 11], m7: [0, 3, 7, 10], min7: [0, 3, 7, 10],
   dim7: [0, 3, 6, 9], m7b5: [0, 3, 6, 10], mmaj7: [0, 3, 7, 11], add9: [0, 4, 7, 14], 9: [0, 4, 7, 10, 14], maj9: [0, 4, 7, 11, 14], m9: [0, 3, 7, 10, 14],
 }
+/**
+ * NOTE LENGTHS by name, in beats (a quarter note is one beat). Also written "1/4", or by letter: w h q e s t.
+ * A dot after one makes it half as long again ("quarter.", "q."); "triplet" or a 3 makes three fit where two did ("eighth triplet", "e3").
+ */
+const LENGTHS = { whole: 4, half: 2, quarter: 1, eighth: 0.5, sixteenth: 0.25, thirtysecond: 0.125 }
+const LENGTH_LETTERS = { w: 4, h: 2, q: 1, e: 0.5, s: 0.25, t: 0.125 }
 /** The orders an arpeggio can go in, as the engine numbers them. */
 const ORDERS = { up: 0, down: 1, updown: 2, written: 3, aswritten: 3, given: 3, random: 4 }
 /** The waves a step of a macro can switch to. */
@@ -388,6 +399,23 @@ function patchOf(given, said, strict, into = new Map(), sampleSlot = null) {
   }
   return into
 }
+
+/** A note length by name as a number of beats: "quarter" is 1, "eighth." is 0.75, "1/16" is 0.25, "q3" is two thirds. Not a length: null. */
+export function lengthBeats(name) {
+  if (typeof name !== 'string') return null
+  let text = name.toLowerCase().replace(/[\s_-]/g, '')
+  let times = 1
+  if (text.startsWith('dotted')) { times *= 1.5; text = text.slice(6) }
+  if (text.endsWith('triplet')) { times *= 2 / 3; text = text.slice(0, -7) }
+  if (text.endsWith('.')) { times *= 1.5; text = text.slice(0, -1) }
+  if (text.endsWith('note')) text = text.slice(0, -4)
+  if (text.length > 1 && /[a-z]3$/.test(text)) { times *= 2 / 3; text = text.slice(0, -1) }
+  const fraction = /^(\d+)\/(\d+)$/.exec(text)
+  if (fraction && +fraction[2] > 0) return 4 * fraction[1] / fraction[2] * times
+  const beats = Object.prototype.hasOwnProperty.call(LENGTHS, text) ? LENGTHS[text] : Object.prototype.hasOwnProperty.call(LENGTH_LETTERS, text) ? LENGTH_LETTERS[text] : null
+  return beats === null ? null : beats * times
+}
+const NOT_A_LENGTH = 'a number, or a note length by name: "whole", "half", "quarter", "eighth", "sixteenth" (also "1/4", "q", and "quarter." for a dotted one)'
 
 const SEMITONES = { c: 0, d: 2, e: 4, f: 5, g: 7, a: 9, b: 11 }
 /** A note as a number: "C4" is 60, "A4" is 69, "F#3" and "Bb5" work, and a number is itself. */
@@ -588,7 +616,7 @@ function makeCore(wasm, sampleRate, post) {
   const eventsAt = x.synths_event_buffer(engine)
   const eventRoom = x.synths_event_capacity()
   const outRoom = x.synths_output_capacity()
-  const NOTE_ON = 1, NOTE_OFF = 2, ALL_OFF = 3, EVERY = 0xffff
+  const NOTE_ON = 1, NOTE_OFF = 2, ALL_OFF = 3, SONG = 15, EVERY = 0xffff
 
   /** Events not yet handed to the engine: [frame, type, part, a, x, y, z, b], soonest first. */
   const queue = []
@@ -609,6 +637,8 @@ function makeCore(wasm, sampleRate, post) {
     exec,
     render,
     taps,
+    songPosition,
+    packSong,
     close() { x.synths_destroy(engine) },
   }
 
@@ -638,9 +668,16 @@ function makeCore(wasm, sampleRate, post) {
       else if (kind === 'sample') loadSample(op)
       else if (kind === 'unsample') x.synths_sample_free(engine, op[1])
       else if (kind === 'tune') {
-        const [, id, at, part, steps, length, repeat] = op
-        const frames = Math.round(length * sampleRate)
-        if (steps.length && frames >= 1) tunes.set(id, { part, steps, length: frames, start: frameOf(at), cycle: 0, i: 0, repeat: repeat || Infinity })
+        // A tune's times are in units: seconds, or beats when it has a `beat` (the seconds in a beat, which a
+        // change of tempo for its group alters as it plays).
+        const [, id, at, part, steps, length, repeat, beat, group] = op
+        const unit = (beat || 1) * sampleRate
+        if (steps.length && length * unit >= 1) tunes.set(id, { part, steps, length, unit, start: frameOf(at), cycle: 0, i: 0, repeat: repeat || Infinity, beats: !!beat, group })
+      } else if (kind === 'tempo') {
+        // From this frame on a beat lasts so long: every tune in beats of the group carries on from the beat it had reached.
+        // It waits for its frame, so the notes before it keep the old tempo.
+        tempos.push([frameOf(op[3]), op[1], op[2]])
+        tempos.sort((a, b) => a[0] - b[0])
       } else if (kind === 'stopTune') tunes.delete(op[1])
       else if (kind === 'stopPart') {
         // Let go of what the part is playing, and take back what it has not started.
@@ -651,7 +688,9 @@ function makeCore(wasm, sampleRate, post) {
         for (let i = queue.length - 1; i >= 0; i--) if (queue[i][1] === NOTE_ON) queue.splice(i, 1)
         tunes.clear()
         add(core.time, ALL_OFF, EVERY, 1, 0, 0)
-      } else if (kind === 'song') post({ type: 'unsupported', what: 'song' })
+        if (songLoaded) add(core.time, SONG, 0, 0, 0, 0)
+      } else if (kind === 'songLoad') loadSong(op)
+      else if (kind === 'songUnload') { if (x.synths_song_unload) x.synths_song_unload(engine); songLoaded = false }
     }
   }
 
@@ -664,6 +703,68 @@ function makeCore(wasm, sampleRate, post) {
     const ok = x.synths_sample_load(engine, slot, at, frames, channels, rate)
     x.synths_free(at)
     if (ok === 0) x.synths_sample_config(engine, slot, base, loopMode, loopStart, loopEnd || frames)
+  }
+
+  // A SONG. [, token, the song file's bytes, [[a sample file's name as bytes, its bytes], …], first part, first slot].
+  // The engine reads the file (a MOD, an XM or one of its own JSON songs) and from then on plays it by itself,
+  // steered by `song` events. The page is told how it went, with what it needs to set up the song's synth patches:
+  // text is sent as bytes, because this thread may have nothing to turn bytes into text with.
+  let songLoaded = false
+  function put(bytes) {
+    const at = x.synths_alloc(Math.max(1, bytes.length))
+    if (at) new Uint8Array(memory.buffer, at, bytes.length).set(bytes)
+    return at
+  }
+  function loadSong([, token, bytes, files, firstPart, firstSlot]) {
+    if (!x.synths_song_load) return post({ type: 'song', token, result: -100 })
+    for (const [name, data] of files || []) {
+      const nameAt = put(name), dataAt = put(data)
+      if (nameAt && dataAt) x.synths_song_file(nameAt, name.length, dataAt, data.length)
+      x.synths_free(nameAt)
+      x.synths_free(dataAt)
+    }
+    const at = put(bytes)
+    // An engine from before songs were given parts 32 up for good took the first part as well.
+    const result = !at ? -1 : x.synths_song_load.length >= 5 ? x.synths_song_load(engine, at, bytes.length, firstPart, firstSlot) : x.synths_song_load(engine, at, bytes.length, firstSlot)
+    x.synths_free(at)
+    songLoaded = result === 0
+    const said = { type: 'song', token, result, error: null, info: [], patches: [] }
+    if (result !== 0) said.error = songError()
+    else {
+      const room = x.synths_alloc(256)
+      x.synths_song_info(engine, room)
+      said.info = Array.from(new Uint32Array(memory.buffer, room, 8))
+      for (let i = 1; i <= said.info[3]; i++) {
+        const n = Math.min(256, x.synths_song_patch_name(engine, i, room, 256))
+        if (n) said.patches.push([i, new Uint8Array(memory.buffer, room, n).slice()])
+      }
+      x.synths_free(room)
+    }
+    post(said)
+  }
+  function songError() {
+    const from = x.synths_song_error()
+    const all = new Uint8Array(memory.buffer)
+    let end = from
+    while (from && all[end]) end++
+    return all.slice(from, end)
+  }
+  /** A song file of any kind as the engine's packed form: { bytes } or { error: why not, as bytes of text }. */
+  function packSong(bytes) {
+    if (!x.synths_song_pack) return { error: null }
+    const at = put(bytes)
+    const length = at ? x.synths_song_pack(at, bytes.length) : -1
+    x.synths_free(at)
+    return length > 0 ? { bytes: new Uint8Array(memory.buffer, x.synths_song_packed(), length).slice() } : { error: songError() }
+  }
+  /** Where the song is, ten numbers (see the engine's document), or null with an engine that plays no songs. */
+  let positionAt = 0
+  function songPosition() {
+    if (!x.synths_song_position) return null
+    if (!positionAt) positionAt = x.synths_alloc(40)
+    if (!positionAt) return null
+    x.synths_song_position(engine, positionAt)
+    return Array.from(new Uint32Array(memory.buffer, positionAt, 10))
   }
 
   // A part's step macro: [, part, the steps' numbers (five a step), count, loop start, loop end, release, flags].
@@ -700,16 +801,27 @@ function makeCore(wasm, sampleRate, post) {
     return out
   }
 
+  /** Changes of tempo that are still to come: [frame, group, seconds in a beat]. */
+  const tempos = []
+  function changeTempo([from, group, beat]) {
+    for (const tune of tunes.values()) {
+      if (!tune.beats || tune.group !== group) continue
+      const reached = (from - tune.start) / tune.unit
+      tune.unit = beat * sampleRate
+      tune.start = from - reached * tune.unit
+    }
+  }
+
   // Put the notes of every tune that fall before `end` into the queue.
   function playTunes(end) {
     for (const [id, tune] of tunes) {
       for (let guard = 0; guard < 512; guard++) {
         const step = tune.steps[tune.i]
-        const frame = tune.start + tune.cycle * tune.length + Math.round(step[0] * sampleRate)
+        const frame = Math.round(tune.start + (tune.cycle * tune.length + step[0]) * tune.unit)
         if (frame >= end) break
         handle = handle >= 0xfffffff0 ? 0xc0000000 : handle + 1
         for (const note of step[1]) add(frame, NOTE_ON, tune.part, handle, note, step[3])
-        add(frame + Math.max(1, Math.round(step[2] * sampleRate)), NOTE_OFF, tune.part, handle, 0, 0)
+        add(frame + Math.max(1, Math.round(step[2] * tune.unit)), NOTE_OFF, tune.part, handle, 0, 0)
         if (++tune.i >= tune.steps.length) {
           tune.i = 0
           if (++tune.cycle >= tune.repeat) { tunes.delete(id); break }
@@ -748,6 +860,10 @@ function makeCore(wasm, sampleRate, post) {
     for (let done = 0; done < frames;) {
       const n = Math.min(outRoom, frames - done)
       const end = core.time + n
+      while (tempos.length && tempos[0][0] < end) {
+        if (tunes.size) playTunes(tempos[0][0])
+        changeTempo(tempos.shift())
+      }
       if (tunes.size) playTunes(end)
       if (queue.length) feed(end)
       const made = x.synths_render(engine, n)
@@ -793,6 +909,7 @@ function registerSynths(makeCore) {
           core.exec(m.data.ops)
         }
         if (m.data.watch) {
+          this.watchSong = !!m.data.song
           this.watch = m.data.watch
           this.watchFor = Math.ceil(sampleRate * 1.5 / 128)
         }
@@ -815,7 +932,7 @@ function registerSynths(makeCore) {
       core.render(out[0], out[1], out[0].length)
       if (this.watch && (++this.blocks & 7) === 0) {
         if ((this.watchFor -= 8) <= 0) this.watch = null
-        else this.port.postMessage({ type: 'taps', taps: core.taps(this.watch, 1024) })
+        else this.port.postMessage({ type: 'taps', taps: core.taps(this.watch, 1024), song: this.watchSong ? core.songPosition() : null })
       }
       return true
     }
@@ -834,9 +951,10 @@ export const workletSource = `// synths.js: the audio worklet. Made from synths.
  * player and the offline one, which is why they sound the same.
  *
  * @param post   given the ops for the core: post(ops, transfer)
- * @param load   reads and decodes a sample: load({ url, bytes }) -> Promise<{ pcm, channels, rate }>
+ * @param load     reads and decodes a sample: load({ url, bytes }) -> Promise<{ pcm, channels, rate }>
+ * @param bytesOf  reads a file as it is: bytesOf({ url, bytes }) -> Promise<bytes>
  */
-function makeConductor(post, load) {
+function makeConductor(post, load, bytesOf) {
   const params = allSettings()
   const partParams = PARAMS.filter((p) => p[0] < 200)
   const id = (name) => params.get(key(name)).id
@@ -875,7 +993,7 @@ function makeConductor(post, load) {
     name = name || ''
     prefix = name ? name + '\u0001' : ''
     scope = scopes.get(name)
-    if (!scope) scopes.set(name, scope = { name, gain: 1, muted: false, paused: false, synths: new Set(), samples: new Set(), tunes: new Set() })
+    if (!scope) scopes.set(name, scope = { name, tempo: 120, gain: 1, muted: false, paused: false, synths: new Set(), samples: new Set(), tunes: new Set() })
   }
   const heard = (sc) => (sc.name === '' ? 1 : sc.muted || sc.paused ? 0 : sc.gain)
   // What a part is really set to for a synth's setting: its volume is turned by its scope's.
@@ -913,10 +1031,10 @@ function makeConductor(post, load) {
   function slotOf(sample) {
     let slot = slots.get(sample)
     if (slot === undefined) {
-      slot = freeSlots.length ? freeSlots.pop() : nextSlot < ENGINE.samples ? nextSlot++ : -1
+      slot = freeSlots.length ? freeSlots.pop() : nextSlot < SAMPLE_SLOTS ? nextSlot++ : -1
       if (slot < 0) {
-        tell(`more than ${ENGINE.samples} samples are loaded at once, which is all there is room for. The newest one will be silent.`)
-        return ENGINE.samples - 1
+        tell(`more than ${SAMPLE_SLOTS} samples are loaded at once, which is all there is room for. The newest one will be silent.`)
+        return SAMPLE_SLOTS - 1
       }
       slots.set(sample, slot)
     }
@@ -1043,9 +1161,16 @@ function makeConductor(post, load) {
       const sid = prefix + 'sound:' + c.name
       if (!synths.has(sid)) record(sid, patchOf(sound.patch, '', false, plain()), 60, macroOf(sound.patch.macro, false))
       const rec = synthFor(sid, at)
-      for (const [after, n, len, vel, slideTo, slideTime] of sound.notes) {
+      // With a length of its own the sound is cut short there, or its last note is held until then.
+      const cut = c.len > 0 ? c.len : null
+      const last = sound.notes[sound.notes.length - 1]
+      for (const each of sound.notes) {
+        const [after, n, , vel, slideTo, slideTime] = each
+        if (cut !== null && after >= cut) continue
+        const len = cut === null ? each[2] : each === last ? cut - after : Math.min(each[2], cut - after)
         const h = autoHandle()
         const when = at + after
+        if (cut !== null && after + len >= cut - 1e-9) event(at + cut + 0.03, VOICE_KILL, rec.part, h, 0)
         event(when, NOTE_ON, rec.part, h, n + (c.pitch || 0), vel)
         if (c.vol != null && c.vol !== 1) event(when, VOICE_VOLUME, rec.part, h, clamp(c.vol, 0, 4))
         if (c.pan) event(when, VOICE_PAN, rec.part, h, clamp(c.pan, -1, 1))
@@ -1082,7 +1207,13 @@ function makeConductor(post, load) {
       const length = c.length > 0 ? c.length : steps.length ? steps[steps.length - 1][0] + steps[steps.length - 1][2] : 0
       // The last number is how many times round; 0 is for ever.
       scope.tunes.add(c.id)
-      ops.push(['tune', c.id, at, rec.part, steps, length, c.repeat === true ? 0 : c.repeat > 1 ? Math.floor(c.repeat) : 1])
+      ops.push(['tune', c.id, at, rec.part, steps, length, c.repeat === true ? 0 : c.repeat > 1 ? Math.floor(c.repeat) : 1, c.beats ? 60 / scope.tempo : 0, scope.name])
+    },
+    // How fast the beat is for this sender: tunes written in beats change speed from here on.
+    tempo(c, at) {
+      if (!(c.bpm > 0)) return
+      scope.tempo = clamp(+c.bpm, 20, 400)
+      ops.push(['tempo', scope.name, 60 / scope.tempo, at])
     },
     stop(c) {
       if (c.id != null) ops.push(['stopTune', c.id])
@@ -1092,6 +1223,7 @@ function makeConductor(post, load) {
         for (const sid of scope.synths) if (synths.get(sid)?.part >= 0) ops.push(['stopPart', synths.get(sid).part, 1])
         for (const tune of scope.tunes) ops.push(['stopTune', tune])
         scope.tunes.clear()
+        if (song && song.scope === scope) { if (song.ready) steer({ do: 'stop' }, null); else song = null }
       }
     },
     master(c, at) {
@@ -1117,20 +1249,120 @@ function makeConductor(post, load) {
       }
       for (const tune of scope.tunes) ops.push(['stopTune', tune])
       for (const sample of scope.samples) does.unsample({ id: sample })
+      if (song && song.scope === scope) { dropSongSynths(); ops.push(['songUnload']); song = null }
       scopes.delete(scope.name)
     },
-    song() {
-      tell('tracker songs are not ready yet in this version, so playSong plays nothing. The rest of your sound is not affected.')
-      ops.push(['song'])
+    // A SONG is read and played by the engine itself. Loading takes a moment (the file is fetched, and the engine
+    // answers with the synth patches the song asks for by name); what is asked of the song meanwhile waits for it.
+    song(c, at) {
+      const what = c.do || 'play'
+      if (what === 'play' && (c.url || c.bytes)) {
+        if (!ENGINE.events.includes('song')) return tell('tracker songs are not ready yet in this version, so playSong plays nothing. The rest of your sound is not affected.')
+        const mine = song = { id: c.id, scope, token: ++songs, ready: false, waiting: [], raw: c.raw, patches: c.patches || {}, name: c.name || c.url || 'given as bytes', at, vol: c.vol, repeat: c.repeat ?? c.loop }
+        const job = (async () => {
+          const bytes = new Uint8Array(await bytesOf(c))
+          const files = []
+          // One of our own songs is JSON, and may name WAV files beside it for its samples.
+          if (bytes[bytes.findIndex((b) => b > 32)] === 123) {
+            let named = []
+            try { named = (JSON.parse(new TextDecoder().decode(bytes)).samples || []).map((sample) => sample && sample.file).filter((f) => typeof f === 'string') } catch (e) { /* the engine will say what is wrong with it */ }
+            for (const file of new Set(named)) {
+              const given = c.files && c.files[file]
+              files.push([new TextEncoder().encode(file), new Uint8Array(await bytesOf(given ? { bytes: given } : { url: c.url ? new URL(file, new URL(c.url, typeof document !== 'undefined' ? document.baseURI : 'file:///')).href : file }))])
+            }
+          }
+          if (song !== mine) return
+          ops.push(['songLoad', mine.token, bytes, files, parts.length, SAMPLE_SLOTS])
+          flush()
+        })().catch((e) => { tell(`the song ${shown(mine.name)} could not be loaded (${(e && e.message) || e}), so it will not play.`); if (song === mine) song = null })
+        loading.add(job)
+        job.finally(() => loading.delete(job))
+        return
+      }
+      if (!song || (c.id != null && c.id !== song.id)) return
+      if (song.ready) steer(c, at)
+      else song.waiting.push([c, at])
     },
   }
 
+  let song = null
+  let songs = 0
+  const SONG = 15
+  // One thing asked of the song, as the event that does it on its exact frame.
+  function steer(c, at) {
+    const what = c.do || 'play'
+    if (what === 'play' || what === 'resume') event(at, SONG, 0, 1, 0, 0)
+    else if (what === 'stop') event(at, SONG, 0, 0, 0, 0)
+    else if (what === 'pause') event(at, SONG, 0, 2, 0, 0)
+    else if (what === 'seek') event(at, SONG, 0, 3, Math.max(0, c.order | 0), Math.max(0, c.row | 0))
+    else if (what === 'repeat') event(at, SONG, 0, 4, c.repeat === false ? 0 : 1, 0)
+    else if (what === 'volume' && Number.isFinite(+c.vol)) {
+      // The engine turns the song's own channels; its synth patches are parts of ours, and are turned here.
+      song.vol = clamp(+c.vol, 0, 2)
+      event(at, SONG, 0, 5, song.vol, 0)
+      for (const rec of synths.values()) {
+        if (!rec.ofSong) continue
+        rec.patch.set(VOLUME, clamp(rec.songVolume * song.vol, 0, 2))
+        if (rec.part >= 0) { parts[rec.part].values.set(VOLUME, real(rec, VOLUME, rec.patch.get(VOLUME))); event(at, PARAM, rec.part, VOLUME, parts[rec.part].values.get(VOLUME), 0.02) }
+      }
+    }
+  }
+  // The synths a song's instruments were given, which go when the song does.
+  function dropSongSynths() {
+    for (const [sid, rec] of synths) {
+      if (!rec.ofSong) continue
+      if (rec.part >= 0) { ops.push(['stopPart', rec.part, 1]); parts[rec.part].owner = null }
+      rec.scope.synths.delete(sid)
+      synths.delete(sid)
+    }
+  }
+  // The engine has read the song (or could not). Set up a synth for each instrument that names a patch, tell the
+  // song which part each is, and start it.
+  function songLoaded(m, now) {
+    if (!song || m.token !== song.token) return
+    const text = (bytes) => new TextDecoder().decode(bytes)
+    if (m.result !== 0) {
+      tell(`the song ${shown(song.name)} could not be played: ${m.result === -100 ? 'this version of the engine does not play songs' : (m.error && text(m.error)) || 'it is not a song file this can read (a .mod, an .xm or a song of its own)'}.`)
+      song = null
+      return
+    }
+    dropSongSynths()
+    enter(song.scope.name)
+    for (const [instrument, nameBytes] of m.patches) {
+      const name = text(nameBytes)
+      let bound = song.patches[name]
+      if (bound === undefined && PRESETS[name]) bound = name
+      if (bound === undefined) tell(`the song ${shown(song.name)} has an instrument that is a synth called ${shown(name)}, and was not told what that is, so it plays as "keys". Say what it is: playSong(file, { patches: { ${shown(name)}: "bass" } }).`)
+      const settings = bound && typeof bound === 'object' ? bound : {}
+      const preset = PRESETS[typeof bound === 'string' ? bound : settings.preset] || (settings.preset === undefined && typeof bound === 'object' ? null : PRESETS.keys)
+      const rec = record(prefix + 'song:' + name, patchOf(settings, '', false, patchOf(preset, '', false, plain()), slotFor), 60, macroOf(settings.macro !== undefined ? settings.macro : preset && preset.macro, false))
+      rec.ofSong = true
+      // A song's channels play at half volume, to leave room for one another; its synths do the same.
+      rec.songVolume = (rec.patch.has(VOLUME) ? rec.patch.get(VOLUME) : 1) * 0.5
+      rec.patch.set(VOLUME, clamp(rec.songVolume * (song.vol ?? 1), 0, 2))
+      rec.used = ++uses
+      seat(rec, now)
+      event(now, SONG, 0, 6, instrument, rec.part)
+    }
+    song.ready = true
+    song.info = m.info
+    // The song's channels are the engine's parts from 32. Raw: a sample played fast is left harsh, as old trackers
+    // left it; not raw: it is smoothed. With nothing said the engine chooses (raw for a .mod or .xm as it is).
+    if (song.raw != null) for (let ch = 0; ch < Math.min(32, m.info[0]); ch++) event(now, PARAM, parts.length + ch, id('sample.antialias'), song.raw ? 0 : 1, 0)
+    if (song.repeat === false) event(now, SONG, 0, 4, 0, 0)
+    if (song.vol != null) steer({ do: 'volume', vol: song.vol }, now)
+    event(Math.max(now, song.at ?? now), SONG, 0, 1, 0, 0)
+    for (const [c, at] of song.waiting) steer(c, Math.max(now, at ?? now))
+    song.waiting = []
+  }
+
   function flush() {
-    if (!ops.length) return
-    const sending = ops, moving = transfer
-    ops = []
-    transfer = []
-    post(sending, moving)
+    while (ops.length) {
+      const sending = ops, moving = transfer
+      ops = []
+      transfer = []
+      post(sending, moving)
+    }
   }
 
   return {
@@ -1146,6 +1378,7 @@ function makeConductor(post, load) {
     flush,
     /** Set the engine to how a new conductor expects to find it. */
     begin() { enter(''); master(null); flush() },
+    songLoaded,
     loading,
     /** The engine's part a synth has now: 65535 for no id (everything), -1 for a synth with no part. */
     partOf(sid, scopeName) { return sid == null ? 0xffff : synths.get((scopeName ? scopeName + '\u0001' : '') + sid)?.part ?? -1 },
@@ -1323,6 +1556,9 @@ function midiSide(options, hooks) {
     close() { closed = true; desk?.close() },
   }
 }
+/** Where a song is, from the engine's ten numbers: for drawing a cursor. */
+const NO_SONG = { state: 'none', order: 0, pattern: 0, row: 0, tick: 0, speed: 0, tempo: 0, rounds: 0, rows: 0, orders: 0 }
+const songPlace = (n) => (n ? { state: ['none', 'stopped', 'playing', 'paused'][n[0]] || 'none', order: n[1], pattern: n[2], row: n[3], tick: n[4], speed: n[5], tempo: n[6], rounds: n[7], rows: n[8], orders: n[9] } : NO_SONG)
 
 // --- the real-time player --------------------------------------------------------------------
 
@@ -1380,7 +1616,7 @@ export function createPlayer(options = {}) {
   const player = {
     state: 'loading', kind: null, context: null, node: null,
     ready: new Promise((yes) => { ready = yes }),
-    send, unlock, close, read,
+    send, unlock, close, read, songPosition,
     /** What MIDI devices send, and what the desk has to say, for one sender: onMidi((events) => { ... }, scope). It gives back a function that stops it. */
     onMidi: (listener, scope) => midi.onMidi(listener, scope),
     /** A synth that exists by its id, as something controls can be tied to: set, get, describe, noteOn, noteOff, samples, level, notes. */
@@ -1518,19 +1754,36 @@ export function createPlayer(options = {}) {
   const tapped = new Map()
   const watched = new Map()
   let watchSaid = 0
+  let songWatched = -10
+  let songNow = NO_SONG
+  // Say what is being watched, when something new is, and again every half second while reading goes on.
+  function watch(at, fresh) {
+    if (!fresh && at - watchSaid <= 0.5) return
+    for (const [p, last] of watched) if (at - last > 2) { watched.delete(p); tapped.delete(p) }
+    watchSaid = at
+    port.postMessage({ watch: [...watched.keys()], song: at - songWatched < 2 })
+  }
   function read(id, scope) {
     const part = conductor ? conductor.partOf(id, scope) : -1
     if (part < 0 || closed) return NOTHING
     if (core) { const now = core.taps([part], 1024)[0]; return now ? reading(now, conductor.gain()) : NOTHING }
     if (!port) return NOTHING
     const at = local()
-    if (!watched.has(part) || at - watchSaid > 0.5) {
-      watched.set(part, at)
-      for (const [p, last] of watched) if (at - last > 2) { watched.delete(p); tapped.delete(p) }
-      watchSaid = at
-      port.postMessage({ watch: [...watched.keys()] })
-    } else watched.set(part, at)
+    const fresh = !watched.has(part)
+    watched.set(part, at)
+    watch(at, fresh)
     return tapped.get(part) || NOTHING
+  }
+  /** Where the song is now: { state: 'none'|'stopped'|'playing'|'paused', order, pattern, row, tick, speed, tempo, rounds, rows, orders }. It never waits. */
+  function songPosition() {
+    if (closed) return NO_SONG
+    if (core) return songPlace(core.songPosition())
+    if (!port) return NO_SONG
+    const at = local()
+    const fresh = at - songWatched > 2
+    songWatched = at
+    watch(at, fresh)
+    return songNow
   }
 
   function close() {
@@ -1553,8 +1806,13 @@ export function createPlayer(options = {}) {
   }
 
   function onMessage(m) {
-    if (m.type === 'taps') for (const tap of m.taps) tapped.set(tap[0], reading(tap, conductor.gain()))
-    else if (m.type === 'state') { waiting.get(m.ask)?.(m); waiting.delete(m.ask) }
+    if (m.type === 'taps') {
+      for (const tap of m.taps) tapped.set(tap[0], reading(tap, conductor.gain()))
+      if (m.song) songNow = songPlace(m.song)
+    } else if (m.type === 'song') {
+      conductor.songLoaded(m, context.currentTime + latency)
+      conductor.flush()
+    } else if (m.type === 'state') { waiting.get(m.ask)?.(m); waiting.delete(m.ask) }
     else if (m.type === 'problem') tell('there was not enough memory for a sample, so it will be silent.')
   }
 
@@ -1565,7 +1823,7 @@ export function createPlayer(options = {}) {
       if (port) port.postMessage({ ops }, transfer)
       else core.exec(ops)
     }
-    conductor = makeConductor(post, async (c) => decode(await sampleBytes(c), context))
+    conductor = makeConductor(post, async (c) => decode(await sampleBytes(c), context), sampleBytes)
     const destination = options.destination || context.destination
     const how = options.fallback !== 'always' && context.audioWorklet && typeof AudioWorkletNode !== 'undefined' ? await loadWorklet() : 'none'
     if (closed) return
@@ -1614,7 +1872,8 @@ export function createPlayer(options = {}) {
       let made = null
       try {
         const url = way === 'blob' ? (made = URL.createObjectURL(new Blob([workletSource], { type: 'text/javascript' }))) : way === 'file' ? new URL('synths-worklet.js', BASE).href : new URL(way, document.baseURI).href
-        await context.audioWorklet.addModule(url)
+        // A worklet that never answers (it happens under some test drivers) is given five seconds, then the next way is tried.
+        await Promise.race([context.audioWorklet.addModule(url), new Promise((yes, no) => setTimeout(() => no(new Error('the audio worklet did not answer')), 5000))])
         player.worklet = way
         return 'worklet'
       } catch (e) {
@@ -1646,8 +1905,8 @@ export async function createOfflinePlayer(options = {}) {
   const sampleRate = options.sampleRate || 48000
   const start = options.start || 0
   const wasm = await engineBytes(options.wasm)
-  const core = makeCore(wasm instanceof WebAssembly.Module ? wasm : await WebAssembly.compile(wasm), sampleRate, () => {})
-  const conductor = makeConductor((ops) => core.exec(ops), async (c) => decode(await sampleBytes(c)))
+  const core = makeCore(wasm instanceof WebAssembly.Module ? wasm : await WebAssembly.compile(wasm), sampleRate, (m) => { if (m.type === 'song') conductor.songLoaded(m, core.time / sampleRate) })
+  const conductor = makeConductor((ops) => core.exec(ops), async (c) => decode(await sampleBytes(c)), sampleBytes)
   conductor.begin()
   // MIDI for an offline player is the `midi` transport it is given: its clock is the point rendering has reached.
   const midi = midiSide(options, {
@@ -1674,6 +1933,8 @@ export async function createOfflinePlayer(options = {}) {
     },
     get time() { return core.time / sampleRate },
     voices: () => core.voices(),
+    /** Where the song is at the point rendering has reached (see createPlayer). */
+    songPosition: () => songPlace(core.songPosition()),
     /** A synth that exists by its id, as something controls can be tied to (see createPlayer). What it plays starts where rendering has reached. */
     target(id, scope) { return makeTarget(id, (c) => { conductor.run(c, core.time / sampleRate, scope); conductor.flush() }, () => conductor, (i, sc) => this.read(i, sc), scope) },
     /** What a synth (or, with no id, everything) is doing at the point rendering has reached: { samples, level, notes }. */
@@ -1684,6 +1945,22 @@ export async function createOfflinePlayer(options = {}) {
     },
     close() { midi.close(); core.close() },
   }
+}
+
+/**
+ * A song file of any kind (.mod, .xm, or our own JSON) as the engine's packed form: small, quick to load, and what
+ * a tracker editor keeps after "import a module". `await packSong(bytes)` gives a Uint8Array that playSong plays.
+ * A JSON song that names WAV files gives them in `files`: { "the path as the song writes it": bytes }.
+ * It throws, in the engine's words, for a file that is not a song.
+ */
+export async function packSong(bytes, options = {}) {
+  const wasm = await engineBytes(options.wasm)
+  const core = makeCore(wasm instanceof WebAssembly.Module ? wasm : await WebAssembly.compile(wasm), 8000, () => {})
+  try {
+    const packed = core.packSong(new Uint8Array(bytes.buffer || bytes, bytes.byteOffset || 0, bytes.byteLength))
+    if (packed.bytes) return packed.bytes
+    throw new Error(packed.error ? `That could not be packed: ${new TextDecoder().decode(packed.error)}` : 'This version of the engine cannot pack songs')
+  } finally { core.close() }
 }
 
 /**
@@ -1752,6 +2029,7 @@ export function createSound(options = {}) {
 
   function flush() {
     waiting = false
+    turn = null
     if (!cmds.length || closed || midiLoading) return
     if (!transport) {
       // ONE PLAYER FOR THE PAGE. Every createSound() on a page that is not given a transport, or an AudioContext
@@ -1781,7 +2059,7 @@ export function createSound(options = {}) {
     const number = (name) => { if (typeof o[name] !== 'number' || !Number.isFinite(o[name])) throw new Error(`${said}: ${name} needs a number, not ${shown(o[name])}`); return o[name] }
     if (o.at !== undefined) return number('at')
     if (o.beat !== undefined) return beatZero + number('beat') * 60 / tempo
-    if (o.after !== undefined) return clock() + number('after')
+    if (o.after !== undefined) return clock() + (typeof o.after === 'string' ? length(o.after, `${said}: after`) : number('after'))
     return clock()
   }
   const amount = (value, said, least = 0, most = 1) => {
@@ -1791,6 +2069,62 @@ export function createSound(options = {}) {
   const seconds = (value, said) => {
     if (typeof value !== 'number' || !(value > 0)) throw new Error(`${said} needs a number of seconds, more than 0, not ${shown(value)}`)
     return value
+  }
+  // A LENGTH is seconds as a number, or a note length by name, which is so many beats at the tempo now.
+  const length = (value, said) => {
+    if (typeof value === 'string') {
+      const beats = lengthBeats(value)
+      if (beats === null) throw new Error(`${said} needs ${NOT_A_LENGTH}, not ${shown(value)}.${meant(value, Object.keys(LENGTHS))}`)
+      return beats * 60 / tempo
+    }
+    if (typeof value !== 'number' || !(value > 0)) throw new Error(`${said} needs a number of seconds, more than 0, or a note length such as "quarter", not ${shown(value)}`)
+    return value
+  }
+  // In a line of notes a length is beats as a number, or a note length by name. It gives beats.
+  const beatsLong = (value, said) => {
+    if (value === undefined) return 1
+    if (typeof value === 'string') {
+      const beats = lengthBeats(value)
+      if (beats === null) throw new Error(`${said} needs ${NOT_A_LENGTH}, not ${shown(value)}.${meant(value, Object.keys(LENGTHS))}`)
+      return beats
+    }
+    if (typeof value !== 'number' || !(value > 0)) throw new Error(`${said} needs a number of beats, more than 0, or a note length such as "quarter", not ${shown(value)}`)
+    return value
+  }
+
+  /**
+   * LINES OF NOTES. note(), chord() and rest() write a tune as ordinary calls: each begins where the one before it
+   * ended. Every synth has a line of its own, and lines begun in the same turn of the program begin on the same
+   * sample, so a bass and a melody written one after the other play together. Nothing is timed here: each call
+   * is a note command stamped with the time its place in the line comes to.
+   */
+  const lines = new Map()
+  let turn = null            // when the lines begun in this turn begin
+  let writing = null         // inside loopNotes: Map of synth id -> { steps, at (beats) }
+  const HELD = 0.95          // how much of its length a note in a line sounds for
+  function lineAt(key) {
+    if (turn === null) turn = clock()
+    const at = lines.get(key)
+    return at === undefined || at < turn ? turn : at
+  }
+  function write(synth, what, long, o, said) {
+    const beats = beatsLong(long, said)
+    const vel = o.volume === undefined ? undefined : amount(o.volume, `${said}: volume`)
+    if (writing) {
+      let line = writing.get(synth._id)
+      if (!line) writing.set(synth._id, line = { steps: [], at: 0 })
+      if (what) line.steps.push([line.at, what, beats * HELD, vel ?? 0.8])
+      line.at += beats
+      return
+    }
+    const at = lineAt(synth._id)
+    if (what) {
+      const c = { op: 'note', id: synth._id, note: what, len: beats * 60 / tempo * HELD, t: at }
+      if (vel !== undefined) c.vel = vel
+      if (o.pan !== undefined) c.pan = amount(o.pan, `${said}: pan`, -1, 1)
+      command(c)
+    }
+    lines.set(synth._id, at + beats * 60 / tempo)
   }
 
   // MIDI. Its functions are in synths-midi.js, fetched the first time one is used. Until it has arrived (a moment),
@@ -1811,7 +2145,7 @@ export function createSound(options = {}) {
       midiLoading = true
       midiComing = loadMidi(options.midiModule).then((m) => {
         const made = m.makeMidiApi({
-          command, choices, notesOf, shown, amount, tell, api,
+          command, choices, notesOf, shown, amount, length, tell, api,
           clock: () => midiNow ?? clock(),
           // When a kept call should happen: counted from when it was asked, not from now.
           when: (o, said) => when(o, said) - (midiNow === null || o.at !== undefined || o.beat !== undefined ? 0 : clock() - midiNow),
@@ -1877,7 +2211,8 @@ export function createSound(options = {}) {
     const o = {}
     let kind, length
     for (const arg of args.slice(1)) {
-      if (typeof arg === 'string') kind = arg
+      if (typeof arg === 'string' && lengthBeats(arg) !== null) length = arg
+      else if (typeof arg === 'string') kind = arg
       else if (typeof arg === 'number') length = arg
       else if (arg && typeof arg === 'object') Object.assign(o, arg)
     }
@@ -1908,8 +2243,9 @@ export function createSound(options = {}) {
     stop() { command({ op: 'stop', id: this.id, t: clock() }); return this }
   }
 
-  // "C4 E4 G4 - C5:2", or a list of notes, chords (lists) and rests (null) -> the steps of a tune.
-  function stepsOf(tune, step, o, said) {
+  // "C4 E4:q G4 - C5:2", or a list of notes, chords (lists) and rests (null) -> the steps of a tune, in steps' own
+  // units. `step` is how long a step is in those units, and `beat` how many of the units a beat is.
+  function stepsOf(tune, step, beat, o, said) {
     const items = typeof tune === 'string' ? tune.trim().split(/[\s,|]+/).filter(Boolean) : tune
     if (!Array.isArray(items) || !items.length) throw new Error(`${said} needs notes to play, as in playNotes("C4 E4 G4 - C5"), not ${shown(tune)}`)
     const hold = o.hold === undefined ? 0.9 : amount(o.hold, `${said}: hold`, 0.01, 4)
@@ -1917,18 +2253,24 @@ export function createSound(options = {}) {
     const steps = []
     let at = 0
     for (const item of items) {
-      let what = item, long = 1
+      let what = item, long = step
       if (typeof item === 'string') {
-        const m = /^(.*?)(?::(\d*\.?\d+))?$/.exec(item)
+        const m = /^(.*?)(?::([^:]+))?$/.exec(item)
         what = m[1]
-        if (m[2]) long = +m[2]
+        // After a colon: a number is so many steps, and a note length ("q", "eighth", "1/4") is itself.
+        if (m[2] && /^\d*\.?\d+$/.test(m[2])) long = +m[2] * step
+        else if (m[2]) {
+          const beats = lengthBeats(m[2])
+          if (beats === null) throw new Error(`${said}: in ${shown(item)}, ${shown(m[2])} is not a length. After the colon write how many steps (":2") or a note length (":q", ":h", ":eighth", ":1/4")`)
+          long = beats * beat
+        }
         if (/^[-._~]*$/.test(what)) what = null
         else if (what.includes('+')) what = what.split('+')
       }
-      if (what !== null && what !== undefined) steps.push([at * step, notesOf(what), long * step * hold, vel])
+      if (what !== null && what !== undefined) steps.push([at, notesOf(what), long * hold, vel])
       at += long
     }
-    return { steps, length: at * step }
+    return { steps, length: at }
   }
 
   /** A synth: its settings are plain properties, read and written through the Proxy below. */
@@ -1944,7 +2286,7 @@ export function createSound(options = {}) {
     /** play(note, length, volume) or play(note, { length, volume, pan, after, at, beat }). No note: the synth's own. */
     play(...args) {
       const o = choices(args, ['note', 'length', 'volume'])
-      const c = { op: 'note', id: this._id, note: o.note === undefined || o.note === null ? null : notesOf(o.note), len: o.length === null ? null : o.length === undefined ? this._length : seconds(o.length, 'play: the length'), t: when(o, 'play') }
+      const c = { op: 'note', id: this._id, note: o.note === undefined || o.note === null ? null : notesOf(o.note), len: o.length === null ? null : o.length === undefined ? this._length : length(o.length, 'play: the length'), t: when(o, 'play') }
       if (o.volume !== undefined) c.vel = amount(o.volume, 'play: volume')
       if (o.pan !== undefined) c.pan = amount(o.pan, 'play: pan', -1, 1)
       command(c)
@@ -1974,11 +2316,19 @@ export function createSound(options = {}) {
     playNotes(...args) {
       const o = choices(args, ['notes', 'step'])
       const said = 'playNotes'
-      const step = o.step === undefined ? 60 / tempo / 2 : seconds(o.step, `${said}: the time of a step`)
-      const { steps, length } = stepsOf(o.notes, step, o, said)
+      // A step given in seconds makes a tune in seconds. A step by name ("eighth"), or none (an eighth), makes
+      // a tune in beats, which keeps to the tempo and changes speed when setTempo is called as it plays.
+      const inBeats = typeof o.step !== 'number'
+      let step = 0.5
+      if (o.step !== undefined) {
+        if (inBeats) { step = lengthBeats(o.step); if (step === null) throw new Error(`${said}: the time of a step needs ${NOT_A_LENGTH}, not ${shown(o.step)}`) } else step = seconds(o.step, `${said}: the time of a step`)
+      }
+      const { steps, length: whole } = stepsOf(o.notes, step, inBeats ? 1 : 60 / tempo, o, said)
       const id = prefix + 't' + ++ids
       const repeat = o.repeat === true ? true : o.repeat === undefined || o.repeat === false ? 1 : amount(o.repeat, `${said}: repeat`, 1, 1e9)
-      command({ op: 'tune', id, synth: this._id, steps, length, repeat, t: when(o, said) })
+      const c = { op: 'tune', id, synth: this._id, steps, length: whole, repeat, t: when(o, said) }
+      if (inBeats) c.beats = true
+      command(c)
       return new Tune(id)
     }
     play_notes(...args) { return this.playNotes(...args) }
@@ -1993,10 +2343,10 @@ export function createSound(options = {}) {
     startArp(...args) { return this._arp(args, 'startArp', null) }
     start_arp(...args) { return this.startArp(...args) }
     _arp(args, said, usual) {
-      const { chord, kind, length, o } = arpArgs(args)
+      const { chord, kind, length: long, o } = arpArgs(args)
       const notes = chordOf(chord, kind, said)
       const h = (handles = handles >= 0x7ffffff0 ? 1 : handles + 1)
-      const c = { op: 'note', id: this._id, note: [notes[0]], len: length === undefined ? usual : length === null ? null : seconds(length, `${said}: the length`), h, arp: arpOf(notes, notes[0], o, said), t: when(o, said) }
+      const c = { op: 'note', id: this._id, note: [notes[0]], len: long === undefined ? usual : long === null ? null : length(long, `${said}: the length`), h, arp: arpOf(notes, notes[0], o, said), t: when(o, said) }
       if (o.volume !== undefined) c.vel = amount(o.volume, `${said}: volume`)
       if (o.pan !== undefined) c.pan = amount(o.pan, `${said}: pan`, -1, 1)
       command(c)
@@ -2018,7 +2368,7 @@ export function createSound(options = {}) {
     }
     set_macro(macro) { return this.setMacro(macro) }
 
-    // --- what a dial, a keyboard, a scope and a meter look for (controls.js binds to anything that has these)
+    // --- what a dial, a keyboard, a scope and a meter look for (dials.js binds to anything that has these)
 
     /** The value of a setting: lead.get("cutoff"). */
     get(name) {
@@ -2052,6 +2402,31 @@ export function createSound(options = {}) {
     level() { return (transport?.read?.(this._id, scope) || NOTHING).level }
     /** The notes this synth is sounding now, as numbers: a keyboard lights them. */
     notes() { return (transport?.read?.(this._id, scope) || NOTHING).notes }
+
+    /**
+     * The next note of this synth's line: it begins where the last one ended. lead.note("C4", "quarter"), then
+     * lead.note("E4", "eighth"). The length is a note length by name or a number of beats (a quarter with nothing said).
+     * A chord's name or a list of notes plays them together. { volume, pan }.
+     */
+    note(what, long, o = {}) {
+      if (long && typeof long === 'object') { o = long; long = undefined }
+      if (what === undefined || what === null) throw new Error('note needs a note, as in note("C4", "quarter"). For a silence, use rest("quarter")')
+      write(this, notesOf(what), long, o, 'note')
+      return this
+    }
+    /** The next thing in the line is a chord: lead.chord("Cm", "whole"), lead.chord("C4", "minor", "half"), lead.chord(["C4", "E4", "G4"]). */
+    chord(name, kind, long, o = {}) {
+      if (kind !== undefined && (typeof kind !== 'string' || lengthBeats(kind) !== null)) { o = long && typeof long === 'object' ? long : o; long = kind; kind = undefined }
+      if (long && typeof long === 'object') { o = long; long = undefined }
+      if (name === undefined || name === null) throw new Error('chord needs a chord, as in chord("Cm", "whole")')
+      write(this, chordNotes(name, kind), long, o, 'chord')
+      return this
+    }
+    /** A silence in the line: lead.rest("quarter"). */
+    rest(long) { write(this, null, long, {}, 'rest'); return this }
+    /** Begin this synth's line again from now (or { after }, { at }, { beat }): what is written next starts there. */
+    startLine(o = {}) { lines.set(this._id, Math.max(when(o, 'startLine'), turn ?? -Infinity)); return this }
+    start_line(o) { return this.startLine(o) }
 
     /** Change several settings at once: lead.set({ cutoff: 800, resonance: 0.4 }), and { glide: seconds } to slide there. Or one: lead.set("cutoff", 800). */
     set(given, o = {}) {
@@ -2182,6 +2557,34 @@ export function createSound(options = {}) {
   }
   const effects = new Map()
 
+  /**
+   * Write a section once and have it go round: loopNotes(() => { note("C4", "quarter"); bass.note("C2", "half") }).
+   * Everything written inside, on any synth, is kept in time by the engine and follows the tempo. It goes round for
+   * ever, or as many times as the number given first or last. What it gives back has stop().
+   */
+  function loopNotes(a, b) {
+    const section = typeof a === 'function' ? a : b
+    const times = typeof a === 'function' ? b : a
+    if (typeof section !== 'function') throw new Error('loopNotes needs the notes to go round, as a function: loopNotes(() => { note("C4", "quarter"); note("E4", "quarter") })')
+    if (writing) throw new Error('loopNotes cannot be used inside another loopNotes')
+    const repeat = times === undefined || times === true ? true : amount(times, 'loopNotes: how many times', 1, 1e9)
+    writing = new Map()
+    let written
+    try { section() } finally { written = writing; writing = null }
+    const whole = Math.max(0, ...[...written.values()].map((line) => line.at))
+    if (!(whole > 0)) throw new Error('loopNotes: nothing was written to go round. Use note(), chord() and rest() inside it')
+    // Every line of the section starts together, where the latest of those lines has reached.
+    const start = Math.max(...[...written.keys()].map(lineAt))
+    const made = []
+    for (const [synth, line] of written) {
+      const id = prefix + 't' + ++ids
+      made.push(id)
+      if (line.steps.length) command({ op: 'tune', id, synth, steps: line.steps, length: whole, repeat, beats: true, t: start })
+      lines.set(synth, repeat === true ? start : start + repeat * whole * 60 / tempo)
+    }
+    return { stop() { for (const id of made) command({ op: 'stop', id, t: clock() }); return this } }
+  }
+
   function playSound(...args) {
     const o = choices(args, ['name', 'volume'])
     const name = o.name
@@ -2190,20 +2593,60 @@ export function createSound(options = {}) {
     if (o.volume !== undefined) c.vol = amount(o.volume, 'playSound: volume', 0, 4)
     if (o.pitch !== undefined) c.pitch = amount(o.pitch, 'playSound: pitch', -48, 48)
     if (o.pan !== undefined) c.pan = amount(o.pan, 'playSound: pan', -1, 1)
+    if (o.length !== undefined) c.len = length(o.length, 'playSound: length')
     command(c)
   }
 
-  function playSong(path, o = {}) {
-    if (typeof path !== 'string' || !path.trim()) throw new Error(`playSong(${path === undefined ? '' : shown(path)}) needs the name of a song file, as in playSong("tune.mod")`)
-    tell('tracker songs are not ready yet in this version, so playSong plays nothing. The rest of your sound is not affected.')
+  /**
+   * Play a tracker song: a .mod or .xm file, or one of our own songs (.json). playSong("tune.mod"), or its bytes.
+   * { repeat: false } plays it once, { volume: 0.5 }, { after: 2 }. A song whose instruments are synths by name is
+   * told what they are with { patches: { "wobble": "bass", "pling": { preset: "pluck", echo: 0.4 } } }; a name that
+   * is a ready-made synth's needs no telling. One song plays at a time.
+   */
+  function playSong(file, o = {}) {
+    const bytes = file instanceof ArrayBuffer || ArrayBuffer.isView(file)
+    if (!bytes && (typeof file !== 'string' || !file.trim())) throw new Error(`playSong(${file === undefined ? '' : shown(file)}) needs the name of a song file, as in playSong("tune.mod")`)
     const id = prefix + 'g' + ++ids
-    const c = { op: 'song', id, do: 'play', name: path, url: options.resolve ? options.resolve(path) : path, loop: o.loop !== false, t: when(o, 'playSong') }
-    if (o.volume !== undefined) c.vol = amount(o.volume, 'playSong: volume', 0, 4)
-    command(c)
+    const c = { op: 'song', id, do: 'play', repeat: (o.repeat ?? o.loop) !== false, t: when(o, 'playSong') }
+    if (o.volume !== undefined) c.vol = amount(o.volume, 'playSong: volume', 0, 2)
+    if (o.raw !== undefined) c.raw = !!o.raw
+    if (o.patches !== undefined) {
+      if (!o.patches || typeof o.patches !== 'object') throw new Error(`playSong: patches needs names and what each is, as in { patches: { "wobble": "bass" } }, not ${shown(o.patches)}`)
+      const names = Object.keys(PRESETS).filter((n) => n !== 'sample')
+      for (const [name, what] of Object.entries(o.patches)) {
+        const preset = typeof what === 'string' ? what : what && what.preset
+        if (preset !== undefined && !PRESETS[preset]) throw new Error(`playSong: the patch ${shown(name)} names a synth called ${shown(preset)}, and there is none.${meant(String(preset), names)} The synths are: ${names.join(', ')}`)
+        if (what && typeof what === 'object') { patchOf(what, `playSong: the patch ${shown(name)}`, true, new Map(), () => 0); macroOf(what.macro, true, `playSong: the patch ${shown(name)}`) } else if (typeof what !== 'string') throw new Error(`playSong: the patch ${shown(name)} needs the name of a synth or settings in braces, not ${shown(what)}`)
+      }
+      c.patches = o.patches
+    }
+    if (bytes) command({ ...c, bytes: file })
+    else if (options.read) {
+      // A host whose player cannot fetch reads the song here, and the WAV files one of our own songs names.
+      const from = file.includes('/') ? file.slice(0, file.lastIndexOf('/') + 1) : ''
+      Promise.resolve().then(() => options.read(file)).then(async (data) => {
+        if (!data) throw new Error('it is not there')
+        const all = new Uint8Array(data.buffer || data, data.byteOffset || 0, data.byteLength)
+        const files = {}
+        if (all[all.findIndex((b) => b > 32)] === 123) {
+          let named = []
+          try { named = (JSON.parse(new TextDecoder().decode(all)).samples || []).map((sample) => sample && sample.file).filter((f) => typeof f === 'string') } catch (e) { /* the engine says what is wrong */ }
+          for (const name of new Set(named)) files[name] = await options.read(from + name)
+        }
+        command({ ...c, name: file, bytes: all, files })
+      }).catch((e) => tell(`playSong(${shown(file)}): the file could not be read (${(e && e.message) || e}), so it will not play.`))
+    } else command({ ...c, name: file, url: options.resolve ? options.resolve(file) : typeof document !== 'undefined' ? new URL(file, document.baseURI).href : file })
+    const say = (what, more) => { command({ op: 'song', id, do: what, ...more, t: clock() }); return song }
     const song = {
-      stop() { command({ op: 'song', id, do: 'stop', t: clock() }); return song },
-      pause() { command({ op: 'song', id, do: 'pause', t: clock() }); return song },
-      resume() { command({ op: 'song', id, do: 'resume', t: clock() }); return song },
+      stop: () => say('stop'),
+      pause: () => say('pause'),
+      resume: () => say('resume'),
+      /** Go to a place in the song: its order list, then a row of the pattern there. */
+      seek: (order, row = 0) => say('seek', { order: amount(order, 'seek: the order', 0, 65535), row: amount(row, 'seek: the row', 0, 255) }),
+      set volume(v) { say('volume', { vol: amount(v, 'volume', 0, 2) }) },
+      set repeat(on) { say('repeat', { repeat: !!on }) },
+      /** Where the song is: { state, order, pattern, row, tick, speed, tempo, rounds, rows, orders }, for drawing it. */
+      get position() { return transport?.songPosition?.() || NO_SONG },
     }
     return song
   }
@@ -2214,6 +2657,13 @@ export function createSound(options = {}) {
     playArp(...args) { return arpSynth().arp(...args) },
     /** The same, staying until it is stopped, and able to change chord: `const chord = startArp("Am")`, `chord.change("F")`. */
     startArp(...args) { return arpSynth().startArp(...args) },
+    /** A tune as ordinary calls, each note beginning where the last ended (on the synth playNote uses): note("C4", "quarter"), chord("Cm", "half"), rest("eighth"). */
+    note(...args) { mainSynth().note(...args) },
+    chord(...args) { mainSynth().chord(...args) },
+    rest(long) { mainSynth().rest(long) },
+    /** Begin every line again together, from now (or { after }, { at }, { beat }). */
+    startLines(o = {}) { lines.clear(); turn = when(o, 'startLines') },
+    loopNotes,
     /** The synth that playNote and playNotes use: change it (`mainSynth().cutoff = 900`), or tie a keyboard to it. */
     mainSynth,
     /** All the sound together: soundOutput().samples() for a scope, .level() for a meter, .notes() for lit keys. */
@@ -2234,9 +2684,9 @@ export function createSound(options = {}) {
       command({ op: 'master', set: given, t: clock() })
     },
     /** How fast the beat is, in beats a minute. Beat 0 is now. */
-    setTempo(bpm) { tempo = amount(bpm, 'setTempo', 20, 400); beatZero = clock() },
+    setTempo(bpm) { tempo = amount(bpm, 'setTempo', 20, 400); beatZero = clock(); command({ op: 'tempo', bpm: tempo, t: clock() }) },
     /** How many seconds that many beats last. */
-    beats(n = 1) { return n * 60 / tempo },
+    beats(n = 1) { return (typeof n === 'string' ? beatsLong(n, 'beats') : n) * 60 / tempo },
     /** Which beat it is now (a fraction between beats). */
     beat() { return (clock() - beatZero) * tempo / 60 },
     /** The sound clock now, in seconds: the time that { at } is read against. */
@@ -2292,7 +2742,7 @@ export function describe() {
     version, commands: COMMANDS, engine: ENGINE,
     settings: PARAMS.map(([id, name, kind, min, max, def, unit, choices]) => ({ id, name, kind: KINDS[kind], min, max, default: def, unit, ...(choices ? { choices } : {}), scope: id < 200 ? 'synth' : 'all' })),
     names: Object.fromEntries(Object.entries(ALIASES).map(([alias, to]) => [alias, Array.isArray(to) ? { setting: to[0], scale: to[1] } : { setting: to, scale: 1 }])),
-    choiceWords: CHOICE_WORDS, plain: PLAIN, synths: PRESETS, sounds: SOUNDS, chords: CHORDS, orders: ORDERS, macroWaves: MACRO_WAVES, midi: MIDI,
+    choiceWords: CHOICE_WORDS, plain: PLAIN, synths: PRESETS, sounds: SOUNDS, chords: CHORDS, orders: ORDERS, macroWaves: MACRO_WAVES, lengths: LENGTHS, lengthLetters: LENGTH_LETTERS, midi: MIDI,
   }
 }
 
@@ -2306,6 +2756,11 @@ export const playNote = (...a) => mine().playNote(...a)
 export const playNotes = (...a) => mine().playNotes(...a)
 export const playArp = (...a) => mine().playArp(...a)
 export const startArp = (...a) => mine().startArp(...a)
+export const note = (...a) => mine().note(...a)
+export const chord = (...a) => mine().chord(...a)
+export const rest = (long) => mine().rest(long)
+export const startLines = (o) => mine().startLines(o)
+export const loopNotes = (a, b) => mine().loopNotes(a, b)
 export const mainSynth = () => mine().mainSynth()
 export const soundOutput = () => mine().soundOutput()
 export const makeSynth = (...a) => mine().makeSynth(...a)
@@ -2347,8 +2802,8 @@ export {
   playSong as play_song, stopSong as stop_song, stopSound as stop_sound, setVolume as set_volume, muteSound as mute_sound,
   unmuteSound as unmute_sound, setEffects as set_effects, setTempo as set_tempo, soundTime as sound_time,
   soundNames as sound_names, synthNames as synth_names, settingNames as setting_names, noteNumber as note_number,
-  createSound as create_sound, renderSound as render_sound, playArp as play_arp, startArp as start_arp, mainSynth as main_synth,
-  soundOutput as sound_output, chordNotes as chord_notes,
+  createSound as create_sound, renderSound as render_sound, packSong as pack_song, playArp as play_arp, startArp as start_arp, mainSynth as main_synth,
+  soundOutput as sound_output, chordNotes as chord_notes, startLines as start_lines, loopNotes as loop_notes, lengthBeats as length_beats,
   onMidi as on_midi, onMidiNote as on_midi_note, onMidiNoteOff as on_midi_note_off, onMidiControl as on_midi_control,
   onMidiDevices as on_midi_devices, useMidiHooks as use_midi_hooks, sendMidi as send_midi, sendMidiNote as send_midi_note,
   sendMidiNoteOff as send_midi_note_off, sendMidiControl as send_midi_control, sendMidiBend as send_midi_bend,

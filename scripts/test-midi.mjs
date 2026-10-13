@@ -220,6 +220,8 @@ async function midiSound(options = {}, transport = pretend()) {
   sound.sendMidiNote('A4', { beat: 4, length: sound.beats(1) })
   sound.sendMidiNote(69, { at: 7, length: null })
   say(same(sent(), [[[0x90, 69, 102], 2000, undefined], [[0x80, 69, 0], 2500, undefined], [[0x90, 69, 102], 7000, undefined]]), '{ beat } and { at } place a note as they place a sound, and length: null holds it', null)
+  sound.sendMidiNote('C4', 0.8, { length: 'eighth', after: 'quarter' })
+  say(same(sent(), [[[0x90, 60, 102], 500, undefined], [[0x80, 60, 0], 750, undefined]]), 'a length and { after } may be note lengths by name, at the tempo', null)
   sound.sendMidiNoteOff('A4', { at: 8 })
   sound.sendMidiControl(74, 0.5)
   sound.sendMidiControl(1, 1, { channel: 16, after: 0.1 })

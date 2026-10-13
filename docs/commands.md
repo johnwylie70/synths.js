@@ -243,6 +243,8 @@ Play a ready-made game sound.
 { op: "sound", name: "laser", vol: 0.8, pitch: 3, pan: 0.2 }
 ```
 
+`len`, optional, is a length in seconds for the sound: it is cut off there, or its last note is held until then.
+
 `name` is one of `coin`, `jump`, `laser`, `shoot`, `explosion`, `hit`, `powerup`, `blip`, `click`, `zap`, `bounce`, `pop`,
 `win`, `lose`. `vol` is a multiplier (1), `pitch` is semitones up or down (0). A sound is a patch and a few timed
 notes that the player knows; it uses a part of its own, made the first time it is played.
@@ -294,8 +296,28 @@ exact to the sample and does not depend on the sender staying awake.
 | `steps` | a list of `[seconds after the tune starts, notes, seconds the note lasts, loudness]`. `notes` is a note, a list, or `null` for the synth's own note |
 | `length` | seconds in one time round (so a tune may end with a rest). Missing: the end of the last note |
 | `repeat` | `true` for ever, or a number of times. Missing: once |
+| `beats` | `true`: every time in `steps` and `length` is in beats, not seconds. The tune goes at the sender's tempo (see [`tempo`](#tempo)) and changes speed when that changes, as it plays |
 
 A tune with the id of one that is playing replaces it.
+
+### `tempo`
+
+```js
+{ op: "tempo", bpm: 140 }
+```
+
+How fast a beat is for this sender (its scope), in beats a minute: 120 until it says. It matters to the player
+only for tunes with `beats: true`, which change speed on the sample of this command's `t` and carry on from the
+beat they had reached. Everything else a sender writes in beats (a note's length by name, "the next note of the
+line") it turns into seconds itself before sending: `synths-names.json` has the note lengths in beats (`lengths`,
+`lengthLetters`; a dot is times 1.5, a triplet times two thirds).
+
+A line of notes (`note("C4", "quarter")`, each beginning where the last ended) is not a command of its own: the
+sender keeps, for each synth, the time its line has reached, and writes an ordinary `note` with that `t` and a
+`len` of 0.95 of the length. A line that has not been written to, or whose time has passed, begins at the time
+of the first such call in the present turn of the program, so that lines written one after another begin
+together. `loopNotes` writes one `tune` with `beats: true` for each synth in the section, all with the same `t`
+and `length`.
 
 ### `stop`
 
@@ -339,15 +361,51 @@ it takes a part again.
 
 ### `song`
 
-A tracker song. **Not ready**: a player says once in the console that songs are not ready, and plays nothing.
-The command is fixed now so that senders can be written:
+A tracker song: a MOD or XM file, or a song in the engine's own JSON format (`synths-core/docs/song-format.md`).
+A file of any of these kinds is given as it is. The engine plays it by itself, on parts 32 to 63 (one for each channel, so at most 32) and sample slots 512 and up, so it never
+meets the synths and samples of the other commands. There is one song at a time for the whole player: playing
+another replaces it.
 
 ```js
-{ op: "song", id: "g1", do: "play", url: "https://example.org/tune.mod", loop: true, vol: 1 }
-{ op: "song", id: "g1", do: "stop" }      // also "pause" and "resume"; with no id, every song
+{ op: "song", id: "g1", do: "play", url: "https://example.org/tune.mod", repeat: true, vol: 1,
+  patches: { "wobble": "bass", "pling": { preset: "pluck", echo: 0.4 } } }
 ```
 
-`bytes` may be given in place of `url`, as for a sample.
+| field | |
+|---|---|
+| `id` | the song, for steering it |
+| `do` | `"play"` with a `url` or `bytes`: load this song and start it. Without either: one of the actions below |
+| `url`, `bytes` | the song file: an address the player fetches, or its bytes (a typed array, or base64 text) |
+| `files` | optional, for a JSON song that names WAV files: `{ "the path as the song writes it": bytes }`. Without it the player fetches each one beside `url` |
+| `repeat` | `false` to play it once (`true`) |
+| `vol` | 0 to 2 (1) |
+| `raw` | `true`: a sample played faster than it was recorded is left harsh, as old trackers left it; `false`: it is smoothed. Missing: the engine chooses (raw for a MOD or XM as it is, smooth for the engine's own songs) |
+| `patches` | what the song's instruments that are synths by name are: for each name a ready-made synth's name, or settings (with `preset` and `macro` if wanted). A name that is a ready-made synth's needs none; one that nothing says plays as `keys`, and the console says so |
+| `name` | optional: what to call it in a message |
+
+Steering, each on the exact sample of its `t`:
+
+```js
+{ op: "song", id: "g1", do: "pause" }               // hold it where it is; "resume" (or "play") carries on
+{ op: "song", id: "g1", do: "stop" }                // stop, and go back to the start
+{ op: "song", id: "g1", do: "seek", order: 2, row: 16 }
+{ op: "song", id: "g1", do: "volume", vol: 0.5 }
+{ op: "song", id: "g1", do: "repeat", repeat: false }
+```
+
+With no `id` an action is for whatever song is playing; with the `id` of a song that has been replaced it does
+nothing. Loading takes a moment (the file is fetched and read): the song starts when it is ready, and what was
+asked of it meanwhile is done then, in order. A file that cannot be fetched or read is said once in the console,
+in the engine's own words for a JSON song (it names the key that is wrong), and nothing plays. `stop` with no id
+(stop everything) stops the song too.
+
+A song's synths are synths of the sender's scope with the ids `song:<name>`, so `player.target("song:bass")`
+is a dial's target. They are freed when another song is loaded.
+
+Where the song is comes from the player, like the rest of [reading back](#reading-back):
+`player.songPosition()` gives `{ state: "none" | "stopped" | "playing" | "paused", order, pattern, row, tick,
+speed, tempo, rounds, rows, orders }`, never waiting (the first read asks; the answer follows in a moment). A
+transport may offer `songPosition()` beside `send`.
 
 ## What a player promises
 
@@ -474,4 +532,5 @@ browser that has no MIDI. All of it is in [midi.md](midi.md).
 
 ## What is not here yet
 
-- **Songs** (`song`): the replayer is being added to the engine.
+- A song that does not repeat leaves the notes it ends on sounding, as the engine has it: a held synth note
+  stays until `stop`.

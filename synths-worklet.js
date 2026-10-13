@@ -27,7 +27,7 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
   const eventsAt = x.synths_event_buffer(engine)
   const eventRoom = x.synths_event_capacity()
   const outRoom = x.synths_output_capacity()
-  const NOTE_ON = 1, NOTE_OFF = 2, ALL_OFF = 3, EVERY = 0xffff
+  const NOTE_ON = 1, NOTE_OFF = 2, ALL_OFF = 3, SONG = 15, EVERY = 0xffff
 
   /** Events not yet handed to the engine: [frame, type, part, a, x, y, z, b], soonest first. */
   const queue = []
@@ -48,6 +48,8 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
     exec,
     render,
     taps,
+    songPosition,
+    packSong,
     close() { x.synths_destroy(engine) },
   }
 
@@ -77,9 +79,16 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
       else if (kind === 'sample') loadSample(op)
       else if (kind === 'unsample') x.synths_sample_free(engine, op[1])
       else if (kind === 'tune') {
-        const [, id, at, part, steps, length, repeat] = op
-        const frames = Math.round(length * sampleRate)
-        if (steps.length && frames >= 1) tunes.set(id, { part, steps, length: frames, start: frameOf(at), cycle: 0, i: 0, repeat: repeat || Infinity })
+        // A tune's times are in units: seconds, or beats when it has a `beat` (the seconds in a beat, which a
+        // change of tempo for its group alters as it plays).
+        const [, id, at, part, steps, length, repeat, beat, group] = op
+        const unit = (beat || 1) * sampleRate
+        if (steps.length && length * unit >= 1) tunes.set(id, { part, steps, length, unit, start: frameOf(at), cycle: 0, i: 0, repeat: repeat || Infinity, beats: !!beat, group })
+      } else if (kind === 'tempo') {
+        // From this frame on a beat lasts so long: every tune in beats of the group carries on from the beat it had reached.
+        // It waits for its frame, so the notes before it keep the old tempo.
+        tempos.push([frameOf(op[3]), op[1], op[2]])
+        tempos.sort((a, b) => a[0] - b[0])
       } else if (kind === 'stopTune') tunes.delete(op[1])
       else if (kind === 'stopPart') {
         // Let go of what the part is playing, and take back what it has not started.
@@ -90,7 +99,9 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
         for (let i = queue.length - 1; i >= 0; i--) if (queue[i][1] === NOTE_ON) queue.splice(i, 1)
         tunes.clear()
         add(core.time, ALL_OFF, EVERY, 1, 0, 0)
-      } else if (kind === 'song') post({ type: 'unsupported', what: 'song' })
+        if (songLoaded) add(core.time, SONG, 0, 0, 0, 0)
+      } else if (kind === 'songLoad') loadSong(op)
+      else if (kind === 'songUnload') { if (x.synths_song_unload) x.synths_song_unload(engine); songLoaded = false }
     }
   }
 
@@ -103,6 +114,68 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
     const ok = x.synths_sample_load(engine, slot, at, frames, channels, rate)
     x.synths_free(at)
     if (ok === 0) x.synths_sample_config(engine, slot, base, loopMode, loopStart, loopEnd || frames)
+  }
+
+  // A SONG. [, token, the song file's bytes, [[a sample file's name as bytes, its bytes], …], first part, first slot].
+  // The engine reads the file (a MOD, an XM or one of its own JSON songs) and from then on plays it by itself,
+  // steered by `song` events. The page is told how it went, with what it needs to set up the song's synth patches:
+  // text is sent as bytes, because this thread may have nothing to turn bytes into text with.
+  let songLoaded = false
+  function put(bytes) {
+    const at = x.synths_alloc(Math.max(1, bytes.length))
+    if (at) new Uint8Array(memory.buffer, at, bytes.length).set(bytes)
+    return at
+  }
+  function loadSong([, token, bytes, files, firstPart, firstSlot]) {
+    if (!x.synths_song_load) return post({ type: 'song', token, result: -100 })
+    for (const [name, data] of files || []) {
+      const nameAt = put(name), dataAt = put(data)
+      if (nameAt && dataAt) x.synths_song_file(nameAt, name.length, dataAt, data.length)
+      x.synths_free(nameAt)
+      x.synths_free(dataAt)
+    }
+    const at = put(bytes)
+    // An engine from before songs were given parts 32 up for good took the first part as well.
+    const result = !at ? -1 : x.synths_song_load.length >= 5 ? x.synths_song_load(engine, at, bytes.length, firstPart, firstSlot) : x.synths_song_load(engine, at, bytes.length, firstSlot)
+    x.synths_free(at)
+    songLoaded = result === 0
+    const said = { type: 'song', token, result, error: null, info: [], patches: [] }
+    if (result !== 0) said.error = songError()
+    else {
+      const room = x.synths_alloc(256)
+      x.synths_song_info(engine, room)
+      said.info = Array.from(new Uint32Array(memory.buffer, room, 8))
+      for (let i = 1; i <= said.info[3]; i++) {
+        const n = Math.min(256, x.synths_song_patch_name(engine, i, room, 256))
+        if (n) said.patches.push([i, new Uint8Array(memory.buffer, room, n).slice()])
+      }
+      x.synths_free(room)
+    }
+    post(said)
+  }
+  function songError() {
+    const from = x.synths_song_error()
+    const all = new Uint8Array(memory.buffer)
+    let end = from
+    while (from && all[end]) end++
+    return all.slice(from, end)
+  }
+  /** A song file of any kind as the engine's packed form: { bytes } or { error: why not, as bytes of text }. */
+  function packSong(bytes) {
+    if (!x.synths_song_pack) return { error: null }
+    const at = put(bytes)
+    const length = at ? x.synths_song_pack(at, bytes.length) : -1
+    x.synths_free(at)
+    return length > 0 ? { bytes: new Uint8Array(memory.buffer, x.synths_song_packed(), length).slice() } : { error: songError() }
+  }
+  /** Where the song is, ten numbers (see the engine's document), or null with an engine that plays no songs. */
+  let positionAt = 0
+  function songPosition() {
+    if (!x.synths_song_position) return null
+    if (!positionAt) positionAt = x.synths_alloc(40)
+    if (!positionAt) return null
+    x.synths_song_position(engine, positionAt)
+    return Array.from(new Uint32Array(memory.buffer, positionAt, 10))
   }
 
   // A part's step macro: [, part, the steps' numbers (five a step), count, loop start, loop end, release, flags].
@@ -139,16 +212,27 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
     return out
   }
 
+  /** Changes of tempo that are still to come: [frame, group, seconds in a beat]. */
+  const tempos = []
+  function changeTempo([from, group, beat]) {
+    for (const tune of tunes.values()) {
+      if (!tune.beats || tune.group !== group) continue
+      const reached = (from - tune.start) / tune.unit
+      tune.unit = beat * sampleRate
+      tune.start = from - reached * tune.unit
+    }
+  }
+
   // Put the notes of every tune that fall before `end` into the queue.
   function playTunes(end) {
     for (const [id, tune] of tunes) {
       for (let guard = 0; guard < 512; guard++) {
         const step = tune.steps[tune.i]
-        const frame = tune.start + tune.cycle * tune.length + Math.round(step[0] * sampleRate)
+        const frame = Math.round(tune.start + (tune.cycle * tune.length + step[0]) * tune.unit)
         if (frame >= end) break
         handle = handle >= 0xfffffff0 ? 0xc0000000 : handle + 1
         for (const note of step[1]) add(frame, NOTE_ON, tune.part, handle, note, step[3])
-        add(frame + Math.max(1, Math.round(step[2] * sampleRate)), NOTE_OFF, tune.part, handle, 0, 0)
+        add(frame + Math.max(1, Math.round(step[2] * tune.unit)), NOTE_OFF, tune.part, handle, 0, 0)
         if (++tune.i >= tune.steps.length) {
           tune.i = 0
           if (++tune.cycle >= tune.repeat) { tunes.delete(id); break }
@@ -187,6 +271,10 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
     for (let done = 0; done < frames;) {
       const n = Math.min(outRoom, frames - done)
       const end = core.time + n
+      while (tempos.length && tempos[0][0] < end) {
+        if (tunes.size) playTunes(tempos[0][0])
+        changeTempo(tempos.shift())
+      }
       if (tunes.size) playTunes(end)
       if (queue.length) feed(end)
       const made = x.synths_render(engine, n)
@@ -230,6 +318,7 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
           core.exec(m.data.ops)
         }
         if (m.data.watch) {
+          this.watchSong = !!m.data.song
           this.watch = m.data.watch
           this.watchFor = Math.ceil(sampleRate * 1.5 / 128)
         }
@@ -252,7 +341,7 @@ const makeCore = function makeCore(wasm, sampleRate, post) {
       core.render(out[0], out[1], out[0].length)
       if (this.watch && (++this.blocks & 7) === 0) {
         if ((this.watchFor -= 8) <= 0) this.watch = null
-        else this.port.postMessage({ type: 'taps', taps: core.taps(this.watch, 1024) })
+        else this.port.postMessage({ type: 'taps', taps: core.taps(this.watch, 1024), song: this.watchSong ? core.songPosition() : null })
       }
       return true
     }

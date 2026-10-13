@@ -76,7 +76,7 @@ Put `synths.js`, `synths_core.wasm`, `synths-worklet.js` and `synths-midi.js` in
 </script>
 ```
 
-The page has to come from a web server (`npx serve`, or any other), because browsers do not let a page opened straight from disk import a module. With npm: `npm install synths.js`, then `import { playSound } from "synths.js"`.
+The page has to come from a web server (`npx serve`, or any other), because browsers do not let a page opened straight from disk import a module. (synths.js is not published to npm yet; when it is, `npm install synths.js` and `import { playSound } from "synths.js"` will do the same.)
 
 ### The first tap
 
@@ -101,6 +101,67 @@ A chord is a note and a kind: `"C"`+`"m7"` is `"Cm7"`. The kinds are `major` (or
 
 A letter followed by a number is always a note, so `"C7"` is the note C in octave 7. For the seventh chord write `"Cdom7"`. For a chord in another octave put the octave after the letter: `"C3m7"`.
 
+## Lengths
+
+Wherever a length is wanted there are two ways to say it, and they are never mixed up:
+
+- **A number is seconds.** `playNote("C4", 0.5)` lasts half a second, whatever the tempo.
+- **A name is a note length**, measured against the tempo: `playNote("C4", "quarter")`. At `setTempo(120)` a quarter note is half a second; at 60 it is a whole one.
+
+| | | |
+|---|---|---|
+| `"whole"` | `"1/1"`, `"w"` | 4 beats |
+| `"half"` | `"1/2"`, `"h"` | 2 beats |
+| `"quarter"` | `"1/4"`, `"q"` | 1 beat |
+| `"eighth"` | `"1/8"`, `"e"` | half a beat |
+| `"sixteenth"` | `"1/16"`, `"s"` | a quarter of a beat |
+
+A dot makes one half as long again (`"quarter."`, `"q."`), and a triplet fits three where two were (`"eighth triplet"`, `"e3"`). Names work for the length of a note, a chord, an arpeggio or a sound (`playSound("win", { length: "half" })` cuts a sound short there, or holds its last note until then), for the step of a tune, and for `{ after: "half" }`. `setTempo(140)` sets the beats in a minute (120 until you say), and `beats(3)` is how many seconds three beats last.
+
+## A tune, one note a line
+
+`playNote` plays a note **now**. `note` plays the **next** note of a tune: each one begins where the one before it ended, so a tune is written as ordinary lines of code, with loops and ifs, and no arithmetic.
+
+```js
+setTempo(100)
+
+note("E4", "quarter")
+note("G4", "quarter")
+rest("quarter")
+note("C5", "half")
+chord("Cm", "whole")
+
+for (const name of ["C4", "D4", "E4"]) note(name, "eighth")
+```
+
+The same tune as text, for comparison: `playNotes("E4:q G4:q -:q C5:h Cm:w C4:e D4:e E4:e")`.
+
+In a line, a length is a name, or a number of **beats** (`note("C4", 2)` is a half note); with nothing said it is a quarter. `note`, `chord` and `rest` write on the synth `playNote` uses, and every synth has its own line: `lead.note("C4", "eighth")`.
+
+- **Two lines together.** Lines written in the same go begin together, however much code is between them: write the whole melody, then the whole bass, and they start on the same instant.
+
+  ```js
+  for (const n of ["E4", "G4", "C5", "G4"]) lead.note(n, "quarter")
+  bass.note("C2", "half")
+  bass.note("G2", "half")
+  ```
+
+- **A section that repeats.** A `for` loop writes a section several times. `loopNotes` has it go round for ever, kept in time by the sound engine, and it follows `setTempo` as it plays:
+
+  ```js
+  const beat = loopNotes(() => {
+    kick.note("C3", "quarter")
+    snare.note("A3", "quarter")
+  })
+  beat.stop()
+  ```
+
+  `loopNotes(4, () => { … })` goes round four times, and the lines carry on after it.
+
+- **Starting over.** A line carries on from where it ended; if it ended a while ago, the next note begins now. `startLines()` begins every line again from now, `startLines({ after: "whole" })` a bar from now, and `lead.startLine()` begins one.
+
+Everything a line plays is placed on its exact sample when it is written, so a tune written this way keeps time however busy the page is. [`examples/melody.js`](examples/melody.js) is a whole one.
+
 ## Tunes
 
 ```js
@@ -108,7 +169,7 @@ const tune = playNotes("C4 E4 G4 - C5:2 G4+B4+D5", 0.25, { repeat: true })
 tune.stop()
 ```
 
-The notes are text with spaces between, or a list: `["C4", null, ["C4", "E4"]]`, where `null` is a rest and a list inside is a chord. In text a chord is joined with `+`. The second thing is the seconds in a step; leave it out and a step is half a beat (see [When things start](#when-things-start)). Options: `repeat` (`true`, or how many times), `volume`, `hold` (how much of its step a note sounds for, 0.9 unless you say), and `after`, `at` or `beat`.
+The notes are text with spaces between, or a list: `["C4", null, ["C4", "E4"]]`, where `null` is a rest and a list inside is a chord. In text a chord is joined with `+`, or named (`Am`). The second thing is how long a step is: a number is seconds, a name is a note length (`playNotes("C4 E4 G4", "eighth")`), and with nothing said it is an eighth. After a colon a note says how long it is itself: `:2` is two steps, and `:q`, `:h`, `:e`, `:s`, `:w` (or `:quarter`, `:1/4`) are note lengths, as in `"C4:q E4:e G4:e C5:h"`. A tune whose step is a name or left out is in beats: it changes speed when `setTempo` is called, even while it repeats. A tune whose step is seconds does not. Options: `repeat` (`true`, or how many times), `volume`, `hold` (how much of its step a note sounds for, 0.9 unless you say), and `after`, `at` or `beat`.
 
 Every synth has `playNotes` too: `makeSynth("bass").playNotes("C2 C2 G2 C2", 0.25)`.
 
@@ -197,7 +258,7 @@ A step is `{ wave, pitch, width, cutoff, volume }` with any of them left out: `w
 
 ## Dials, keyboards and scopes
 
-Every synth can be tied to the controls of [controls.js](https://github.com/johnwylie70/controls.js), with nothing in between:
+Every synth can be tied to the controls of [dials.js](https://github.com/johnwylie70/dials.js), with nothing in between:
 
 ```js
 const lead = makeSynth("lead")
@@ -255,7 +316,7 @@ A program can play a synth on your desk, a drum machine, or music software on th
 
 ```js
 sendMidiNote("C4")                                      // a note, let go half a second later
-sendMidiNote("C4", 0.8, { length: 0.5, channel: 1 })    // how hard, how long, which channel (1 to 16)
+sendMidiNote("C4", 0.8, { length: 0.5, channel: 1 })    // how hard, how long (seconds, or "quarter"), which channel (1 to 16)
 sendMidiNote(["C4", "E4", "G4"], { beat: 4 })           // a chord, on beat 4
 sendMidiControl(74, 0.5)                                // turn knob 74 on the other device to half way
 sendMidi([0x90, 60, 100])                               // any message at all, as its bytes
@@ -335,11 +396,29 @@ stopSound()         // stop everything that is sounding or waiting to sound
 
 ## Songs
 
+A song is a whole piece of music in one file, played by the sound engine itself: a tracker's `.mod` or `.xm` file, or a song in synths' own format, which is text you can read and change.
+
 ```js
-playSong("tune.mod")
+const song = playSong("tune.mod")          // it goes round and round until it is stopped
+
+song.pause()
+song.resume()
+song.volume = 0.5
+song.seek(2)                               // jump to the third part of the song (and seek(2, 16): its row 16)
+song.stop()
 ```
 
-Tracker songs (`.mod`, `.xm`) are **not ready yet**. `playSong` is here so programs can be written for it: today it plays nothing and says so once in the console, and the rest of your sound is not affected.
+`playSong("tune.xm", { repeat: false })` plays it once, and `{ volume: 0.6 }` starts it quieter. One song plays at a time, and your own notes and game sounds play over it. `song.position` says where it is, for drawing: `{ state, order, pattern, row, tick, speed, tempo, rows, orders }`, where `state` is `"playing"`, `"paused"`, `"stopped"` or `"none"`.
+
+In a song of synths' own, an instrument can be a synth instead of a recording, called by a name. A name that is a ready-made synth's (`"bass"`, `"chipKick"`) plays as that; any other name is told what it is:
+
+```js
+playSong("songs/night_drive.json", { patches: { tune: "bell", wobble: { preset: "bass", cutoff: 300, wobble: 12 } } })
+```
+
+A `.mod` or `.xm` sounds as its tracker made it sound, rough edges included; `{ raw: false }` smooths the samples and `{ raw: true }` leaves any song rough. `await packSong(bytes)` turns a song file of any kind into the engine's small packed form, which `playSong` plays (an editor keeps that after importing a module).
+
+[`examples/songs/night_drive.json`](examples/songs/night_drive.json) is a short song written this way, and the format is described in [synths-core](https://github.com/johnwylie70/synths-core/blob/main/docs/song-format.md).
 
 ## With pictures.js
 
