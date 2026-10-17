@@ -80,7 +80,7 @@ Put `synths.js`, `synths_core.wasm`, `synths-worklet.js` and `synths-midi.js` in
 </script>
 ```
 
-The page has to come from a web server (`npx serve`, or any other), because browsers do not let a page opened straight from disk import a module. (synths.js is not published to npm yet; when it is, `npm install synths.js` and `import { playSound } from "synths.js"` will do the same.)
+The page has to come from a web server (`npx serve`, or any other), because browsers do not let a page opened straight from disk import a module. (synths.js is on npm as a beta: `npm install synths.js`, and `import { playSound } from "synths.js"` does the same.)
 
 ### The first tap
 
