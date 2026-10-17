@@ -307,6 +307,8 @@ What a synth does:
 
 Every setting is a plain property, and reads back what you set: `lead.cutoff = 800`, `console.log(lead.cutoff)`.
 
+[Every setting by name](docs/settings.md) is listed in one page, with the values it takes, where it starts, its Python spelling and the control that suits it: a dial, a select or a toggle from [dials.js](https://github.com/johnwylie70/dials.js). It is written from the library's own table of names.
+
 | Setting | What it is |
 |---|---|
 | `wave` | the raw sound: `"sine"` (pure), `"triangle"` (soft), `"saw"` (bright), `"square"` (hollow), `"pulse"` (with `width`, 0.02 to 0.98) |
@@ -502,6 +504,8 @@ select("bass channel", bass.midiInput(), "channel")     // it shows 2, and chang
 ```
 
 A synth's own choice is made from what the program's lets through. `midiOutput()` and `lead.midiOutput()` are the same for what is sent: `"device"` is one of the outputs (the first, until you choose) and `"channel"` is the channel that `sendMidiNote` and `lead.sendToMidi()` use when they are not given one.
+
+The keyboard of dials.js has a button for this: `keyboard(lead, { midi: true })` puts a MIDI button on its strip, and a tap opens the same device and channel choice, on the synth's own `lead.midiInput()` (see [The MIDI button](https://github.com/johnwylie70/dials.js#the-midi-button)).
 
 The four MIDI examples are [a keyboard](examples/midi_keyboard.js), [a scene](examples/midi_scene.js), [a sequencer](examples/midi_sequencer.js) and [dials](examples/midi_dials.js). Each still plays with nothing plugged in.
 
