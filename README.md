@@ -365,6 +365,10 @@ keyboard(lead)                       // piano keys that play it, and light up as
 With [notation.js](https://github.com/johnwylie70/notation.js) a tune is written out as notes on a staff, and the notes light as they play. It takes the same note text as `playNotes`, so the tune you hear is the tune you see:
 
 ```js
+// Not needed in Circuitry. Outside it, uncomment these two lines:
+// const { showNotes } = await use("notation.js")
+// const { keyboard } = await use("dials.js")
+
 const lead = makeSynth("keys")
 const page = showNotes("E4 D4 C4 D4 E4 E4 E4:2", "quarter", { title: "Mary had a little lamb" })
 page.playAlong({ mode: "wait", synth: lead })     // the line waits at each note until you play it
@@ -380,6 +384,9 @@ function draw() {
 A tracker song can be written out too, a staff for each channel you choose, and the page follows the song as it plays. Tap a bar and the song jumps there:
 
 ```js
+// Not needed in Circuitry. Outside it, uncomment this line:
+// const { showNotes } = await use("notation.js")
+
 const written = await loadJSON("night_drive.json")      // the song's own file: it is what gets written out
 const song = playSong("night_drive.json")
 showNotes(written, { channels: [3, 1], follow: song })  // the tune and the bass, a staff each
@@ -391,7 +398,7 @@ function draw() {
 
 ![A song playing with its tune and bass written out on two staves](docs/images/song.jpg)
 
-Both scenes are for pictures.js, where `showNotes`, `dial` and `keyboard` need nothing to import. With a copy of the libraries beside your scene, fetch them in the first lines (`const { showNotes } = await use("notation.js")`). [`examples/songs/night_drive.json`](examples/songs/night_drive.json) is the song above. The rest of what notation.js can do is in its [README](https://github.com/johnwylie70/notation.js).
+Both scenes are for pictures.js. In Circuitry, `showNotes`, `dial` and `keyboard` are there with nothing to import; outside it, the commented lines fetch them from a copy of each library beside your scene. [`examples/songs/night_drive.json`](examples/songs/night_drive.json) is the song above. The rest of what notation.js can do is in its [README](https://github.com/johnwylie70/notation.js).
 
 ## MIDI
 
@@ -753,7 +760,8 @@ A song of synths' own can carry its recordings inside itself (`"data"`, a WAV fi
 In a [pictures.js](https://github.com/johnwylie70/pictures.js) scene the sound functions are already there, beside the drawing ones, with nothing to import:
 
 ```js
-// outside Circuitry, with a copy of this repository, fetch the sound functions first (see below):
+// Not needed in Circuitry, where the sound functions are already here. Outside it, with a copy of this
+// repository beside the scene, uncomment this line (see below):
 // const { playSound } = await use("../synths.js")
 
 function update(dt) {
