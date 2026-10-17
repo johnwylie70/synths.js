@@ -356,7 +356,42 @@ meter(lead)                          // how loud it is
 keyboard(lead)                       // piano keys that play it, and light up as it plays
 ```
 
+![A synth panel made with dials.js: a select, two dials and two sliders in a row, a scope showing the wave, and a piano keyboard with three keys held](docs/images/synth-panel.png)
+
 [`examples/synth_panel.js`](examples/synth_panel.js) is a whole one. What the controls use is there for your own drawing too: `lead.samples()` is the wave the synth is making now (numbers from -1 to 1), `lead.level()` is how loud it is (`[left, right]`, 0 to 1) and `lead.notes()` is the notes it is sounding. `lead.noteOn("C4")` and `lead.noteOff("C4")` press and let go of a key; `lead.set("cutoff", 800)`, `lead.get("cutoff")` and `lead.describe("cutoff")` (its range, unit and kind) work by name. A setting that is a choice (`wave`, `reverbType`, and `voice`) may be set by its name or by its place in `describe(name).choices`, which is what a select or a rotary switch gives. The other words a choice answers to are in `describe(name).aliases` (`{ square: "pulse", sawtooth: "saw" }` for `wave`). Where a value means something other than its number, `describe` says so in `labels`, and a dial shows the word: `lead.describe("reverbDecay").labels` is `{ 0: "auto" }` (the reverb type's own decay), and the microphone's `gate` at -100 is `"off"`. `soundOutput()` has the same for all the sound together, and `mainSynth()` is the synth that `playNote` plays.
+
+## Sheet music
+
+With [notation.js](https://github.com/johnwylie70/notation.js) a tune is written out as notes on a staff, and the notes light as they play. It takes the same note text as `playNotes`, so the tune you hear is the tune you see:
+
+```js
+const lead = makeSynth("keys")
+const page = showNotes("E4 D4 C4 D4 E4 E4 E4:2", "quarter", { title: "Mary had a little lamb" })
+page.playAlong({ mode: "wait", synth: lead })     // the line waits at each note until you play it
+keyboard(page, { octave: 4, octaves: 1 })         // a dials.js keyboard plays the page
+
+function draw() {
+  background("#12261e")
+}
+```
+
+![The play-along scene: Mary had a little lamb written out, a line at the first note, and piano keys below with a key lit](docs/images/play-along.jpg)
+
+A tracker song can be written out too, a staff for each channel you choose, and the page follows the song as it plays. Tap a bar and the song jumps there:
+
+```js
+const written = await loadJSON("night_drive.json")      // the song's own file: it is what gets written out
+const song = playSong("night_drive.json")
+showNotes(written, { channels: [3, 1], follow: song })  // the tune and the bass, a staff each
+
+function draw() {
+  background("#0b1020")
+}
+```
+
+![A song playing with its tune and bass written out on two staves](docs/images/song.jpg)
+
+Both scenes are for pictures.js, where `showNotes`, `dial` and `keyboard` need nothing to import. With a copy of the libraries beside your scene, fetch them in the first lines (`const { showNotes } = await use("notation.js")`). [`examples/songs/night_drive.json`](examples/songs/night_drive.json) is the song above. The rest of what notation.js can do is in its [README](https://github.com/johnwylie70/notation.js).
 
 ## MIDI
 
@@ -718,6 +753,9 @@ A song of synths' own can carry its recordings inside itself (`"data"`, a WAV fi
 In a [pictures.js](https://github.com/johnwylie70/pictures.js) scene the sound functions are already there, beside the drawing ones, with nothing to import:
 
 ```js
+// outside Circuitry, with a copy of this repository, fetch the sound functions first (see below):
+// const { playSound } = await use("../synths.js")
+
 function update(dt) {
   if (star.touches(basket)) playSound("coin")
 }
