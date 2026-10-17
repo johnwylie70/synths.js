@@ -505,7 +505,7 @@ select("bass channel", bass.midiInput(), "channel")     // it shows 2, and chang
 
 A synth's own choice is made from what the program's lets through. `midiOutput()` and `lead.midiOutput()` are the same for what is sent: `"device"` is one of the outputs (the first, until you choose) and `"channel"` is the channel that `sendMidiNote` and `lead.sendToMidi()` use when they are not given one.
 
-The keyboard of dials.js has a button for this: `keyboard(lead, { midi: true })` puts a MIDI button on its strip, and a tap opens the same device and channel choice, on the synth's own `lead.midiInput()` (see [The MIDI button](https://github.com/johnwylie70/dials.js#the-midi-button)).
+The keyboard of dials.js has a button for this: `keyboard(lead, { midi: true })` puts a MIDI button on its strip, and a tap opens the same device and channel choice, on the synth's own `lead.midiInput()`; a keyboard with another target keeps its own choice (see [The MIDI button](https://github.com/johnwylie70/dials.js#the-midi-button)).
 
 The four MIDI examples are [a keyboard](examples/midi_keyboard.js), [a scene](examples/midi_scene.js), [a sequencer](examples/midi_sequencer.js) and [dials](examples/midi_dials.js). Each still plays with nothing plugged in.
 
