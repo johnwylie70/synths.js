@@ -825,6 +825,12 @@ The first needs only node: it renders commands with the real engine and measures
 
 The engine is built in [synths-core](https://github.com/johnwylie70/synths-core) and copied here by `node scripts/sync-engine.mjs`, which also writes the files made from it. The built engine is part of this repository, so nothing here needs Rust.
 
+## Megademo
+
+[![Megademo: an equaliser with a column of lights for every channel of the song](docs/images/megademo.jpg)](https://github.com/johnwylie70/megademo)
+
+[Megademo](https://github.com/johnwylie70/megademo) is a demo in the style of the ones made on the C64 and Amiga, made in Circuitry Studio. A whole demo cut to one tracker song, played by synths.js: every cut and flash is worked out from where the song is. It is one file, `main.js`, and it is worth reading for how it is done. [Watch it on YouTube](https://youtu.be/6fKMwrOik5k).
+
 ## Licence
 
 MIT. See [LICENSE](LICENSE). The engine, `synths_core.wasm`, is synths-core, by the same author under the same licence.
