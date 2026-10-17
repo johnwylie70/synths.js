@@ -13,7 +13,8 @@ Each one is a whole program. [How to run one](#run-it) is just below.
 **1. A sound.**
 
 ```js
-import { playSound } from "./synths.js"
+// Not needed in Circuitry. On a page of your own, uncomment:
+// import { playSound } from "./synths.js"
 
 playSound("coin")
 ```
@@ -27,7 +28,8 @@ if (star.touches(basket)) playSound("coin")
 **2. A note, and a tune.**
 
 ```js
-import { playNote, playNotes } from "./synths.js"
+// Not needed in Circuitry. On a page of your own, uncomment:
+// import { playNote, playNotes } from "./synths.js"
 
 playNote("C4")                              // middle C, for half a second
 playNotes("E4 G4 C5 - G4 C5:2", 0.25, { after: 1 })
@@ -38,7 +40,8 @@ A note is a letter and a number: `"C4"` is middle C, `"A4"` is the A above it, `
 **3. A synth of your own.**
 
 ```js
-import { makeSynth } from "./synths.js"
+// Not needed in Circuitry. On a page of your own, uncomment:
+// import { makeSynth } from "./synths.js"
 
 const lead = makeSynth({ wave: "saw", cutoff: 1200, attack: 0.01, release: 0.3 })
 
@@ -53,7 +56,8 @@ lead.echo = 0.4
 **4. A beat that keeps going.**
 
 ```js
-import { makeSynth } from "./synths.js"
+// Not needed in Circuitry. On a page of your own, uncomment:
+// import { makeSynth } from "./synths.js"
 
 makeSynth("kick").playNotes("C2 - - - C2 - - - ", 0.125, { repeat: true })
 makeSynth("hat").playNotes("C4 C4", 0.125, { repeat: true, volume: 0.4 })
@@ -348,6 +352,9 @@ A step is `{ wave, pitch, width, cutoff, volume }` with any of them left out: `w
 Every synth can be tied to the controls of [dials.js](https://github.com/johnwylie70/dials.js), with nothing in between:
 
 ```js
+// Not needed in Circuitry. Outside it, with a copy of dials.js beside the scene, uncomment:
+// const { dial, scope, meter, keyboard } = await use("dials.js")
+
 const lead = makeSynth("lead")
 
 dial("cutoff", lead, "cutoff")       // the dial takes its range from the synth, and turning it sets it
