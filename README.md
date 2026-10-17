@@ -361,13 +361,14 @@ const lead = makeSynth("lead")
 
 dial("cutoff", lead, "cutoff")       // the dial takes its range from the synth, and turning it sets it
 scope(lead)                          // the wave it is making
+spectrum(lead)                       // the frequencies in it, as bars, low notes at the left
 meter(lead)                          // how loud it is
 keyboard(lead)                       // piano keys that play it, and light up as it plays
 ```
 
 ![A synth panel made with dials.js: a select, two dials and two sliders in a row, a scope showing the wave, and a piano keyboard with three keys held](docs/images/synth-panel.png)
 
-[`examples/synth_panel.js`](examples/synth_panel.js) is a whole one. What the controls use is there for your own drawing too: `lead.samples()` is the wave the synth is making now (numbers from -1 to 1), `lead.level()` is how loud it is (`[left, right]`, 0 to 1) and `lead.notes()` is the notes it is sounding. `lead.noteOn("C4")` and `lead.noteOff("C4")` press and let go of a key; `lead.set("cutoff", 800)`, `lead.get("cutoff")` and `lead.describe("cutoff")` (its range, unit and kind) work by name. A setting that is a choice (`wave`, `reverbType`, and `voice`) may be set by its name or by its place in `describe(name).choices`, which is what a select or a rotary switch gives. The other words a choice answers to are in `describe(name).aliases` (`{ square: "pulse", sawtooth: "saw" }` for `wave`). Where a value means something other than its number, `describe` says so in `labels`, and a dial shows the word: `lead.describe("reverbDecay").labels` is `{ 0: "auto" }` (the reverb type's own decay), and the microphone's `gate` at -100 is `"off"`. `soundOutput()` has the same for all the sound together, and `mainSynth()` is the synth that `playNote` plays.
+[`examples/synth_panel.js`](examples/synth_panel.js) is a whole one. `lead.samples()` is also what `spectrum(lead)` works the bars out from, and [dials.js](https://github.com/johnwylie70/dials.js#spectrum) has a picture of it. What the controls use is there for your own drawing too: `lead.samples()` is the wave the synth is making now (numbers from -1 to 1), `lead.level()` is how loud it is (`[left, right]`, 0 to 1) and `lead.notes()` is the notes it is sounding. `lead.noteOn("C4")` and `lead.noteOff("C4")` press and let go of a key; `lead.set("cutoff", 800)`, `lead.get("cutoff")` and `lead.describe("cutoff")` (its range, unit and kind) work by name. A setting that is a choice (`wave`, `reverbType`, and `voice`) may be set by its name or by its place in `describe(name).choices`, which is what a select or a rotary switch gives. The other words a choice answers to are in `describe(name).aliases` (`{ square: "pulse", sawtooth: "saw" }` for `wave`). Where a value means something other than its number, `describe` says so in `labels`, and a dial shows the word: `lead.describe("reverbDecay").labels` is `{ 0: "auto" }` (the reverb type's own decay), and the microphone's `gate` at -100 is `"off"`. `soundOutput()` has the same for all the sound together, and `mainSynth()` is the synth that `playNote` plays.
 
 ## Sheet music
 
